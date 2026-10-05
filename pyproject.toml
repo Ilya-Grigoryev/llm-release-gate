@@ -1,0 +1,20 @@
+[project]
+name = "llm-release-gate"
+version = "0.1.0"
+description = "CI release gate for LLM pipelines"
+readme = "README.md"
+authors = [
+    { name = "Ilia Grigorev", email = "a12221388@unet.univie.ac.at" }
+]
+requires-python = ">=3.12"
+dependencies = []
+
+[build-system]
+requires = ["uv_build>=0.11.25,<0.12.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "ruff>=0.16.10",
+]
