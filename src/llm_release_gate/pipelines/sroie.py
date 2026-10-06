@@ -1,6 +1,7 @@
-"""SROIE pipeline: OCR text of a receipt -> LLM -> company, date, address, total."""
+"""SROIE pipeline: receipt OCR text or scan -> LLM -> company, date, address, total."""
 
 import argparse
+import base64
 import json
 import time
 from datetime import UTC, datetime
@@ -32,20 +33,30 @@ def field_hits(expected: dict, got: dict) -> dict[str, bool]:
     return {f: normalize(expected.get(f)) == normalize(got.get(f)) for f in FIELDS}
 
 
-def extract(client: OpenAI, prompt: str, ocr: str, model: str, seed: int) -> dict:
+def receipt(data: Path, case: str, kind: str) -> str | list:
+    if kind == "text":
+        box = data / "box" / f"{case}.txt"
+        return parse_box(box.read_text(encoding="utf-8", errors="replace"))
+    jpg = base64.b64encode((data / "img" / f"{case}.jpg").read_bytes()).decode()
+    url = f"data:image/jpeg;base64,{jpg}"
+    return [{"type": "image_url", "image_url": {"url": url, "detail": "high"}}]
+
+
+def extract(
+    client: OpenAI, prompt: str, content: str | list, model: str, seed: int, **params
+) -> dict:
     start = time.perf_counter()
     r = client.chat.completions.create(
         model=model,
-        temperature=0,
         seed=seed,
-        max_completion_tokens=300,
+        **params,
         response_format={
             "type": "json_schema",
             "json_schema": {"name": "receipt", "strict": True, "schema": SCHEMA},
         },
         messages=[
             {"role": "system", "content": prompt},
-            {"role": "user", "content": ocr},
+            {"role": "user", "content": content},
         ],
     )
     return {
@@ -53,8 +64,11 @@ def extract(client: OpenAI, prompt: str, ocr: str, model: str, seed: int) -> dic
         "model": r.model,
         "fingerprint": r.system_fingerprint,
         "seed": seed,
+        **params,
+        "finish_reason": r.choices[0].finish_reason,
         "input_tokens": r.usage.prompt_tokens,
         "output_tokens": r.usage.completion_tokens,
+        "reasoning_tokens": r.usage.completion_tokens_details.reasoning_tokens,
         "latency_s": round(time.perf_counter() - start, 3),
         "timestamp": datetime.now(UTC).isoformat(timespec="seconds"),
     }
@@ -66,9 +80,21 @@ def main() -> None:
     p.add_argument("--data", type=Path, default=Path("data/SROIE2019/train"))
     p.add_argument("--prompt", type=Path, default=Path("prompts/sroie.md"))
     p.add_argument("--model", default="gpt-4.1-mini-2025-04-14")
+    p.add_argument("--input", choices=("text", "image"), default="text")
     p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--temperature", type=float, default=0.0)
+    p.add_argument(
+        "--reasoning-effort",
+        help="reasoning models only accept the default temperature, so it is omitted",
+    )
+    p.add_argument("--max-tokens", type=int, default=300)
     p.add_argument("--out", type=Path, default=Path("data/runs/sroie.jsonl"))
     args = p.parse_args()
+    params = {"max_completion_tokens": args.max_tokens}
+    if args.reasoning_effort:
+        params["reasoning_effort"] = args.reasoning_effort
+    else:
+        params["temperature"] = args.temperature
 
     prompt = args.prompt.read_text()
     client = OpenAI()
@@ -76,11 +102,12 @@ def main() -> None:
     records = []
     print("| case | field | expected | got | ok |\n|---|---|---|---|---|")
     for path in sorted((args.data / "box").glob("*.txt"))[: args.n]:
-        ocr = parse_box(path.read_text(encoding="utf-8", errors="replace"))
+        content = receipt(args.data, path.stem, args.input)
         expected = json.loads((args.data / "entities" / path.name).read_text())
         record = {
             "case": path.stem,
-            **extract(client, prompt, ocr, args.model, args.seed),
+            "input": args.input,
+            **extract(client, prompt, content, args.model, args.seed, **params),
         }
         record["hits"] = field_hits(expected, record["output"])
         with args.out.open("a") as f:
