@@ -17,3 +17,13 @@ test:
   extends: .python
   script:
     - uv run pytest
+
+# Paid call, so it runs only when started by hand.
+model-call:
+  extends: .python
+  when: manual
+  script:
+    - uv run python -m llm_release_gate.pipelines.sroie --data tests/fixtures/sroie -n 1 --out model-call.jsonl
+  artifacts:
+    paths:
+      - model-call.jsonl
