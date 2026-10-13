@@ -7,10 +7,8 @@ from typing import Any
 
 
 def canonical_hash(obj: Any) -> str:
-    """sha256 of canonical JSON: sorted keys, no whitespace, UTF-8. Dates hash as str()."""
-    text = json.dumps(
-        obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str
-    )
+    """sha256 of canonical JSON: sorted keys, no whitespace, UTF-8."""
+    text = json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return hashlib.sha256(text.encode()).hexdigest()
 
 

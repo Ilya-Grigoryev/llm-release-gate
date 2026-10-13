@@ -34,12 +34,14 @@ To add a pipeline, write a module in `src/llm_release_gate/pipelines/` with a `b
 Each case is a YAML file with its inputs next to it; `src/llm_release_gate/case.schema.json` defines the format. The SROIE set lives in `data/golden/sroie/` and stays out of git. `golden/sroie.yaml` records the seed, the receipt ids and the set hash.
 
 ```sh
-# 30 random training receipts, seed 0, the first 10 left out
+# rebuild the set from the ids in golden/sroie.yaml
 uv run python -m llm_release_gate.pipelines.sroie_golden
-uv run python -m llm_release_gate.golden validate data/golden/sroie
+uv run python -m llm_release_gate.golden validate data/golden/sroie --manifest golden/sroie.yaml
 ```
 
-`validate` checks the schema, unique ids and that every input exists, then prints a sha256 over the parsed cases and the input bytes. Reformatting a case keeps the hash. Editing an expectation or an input changes it.
+Without a manifest the generator samples 30 training receipts with seed 0, leaving out the first 10, and writes a new one.
+
+`validate` checks the schema, unique ids and that every input exists inside the set, then prints a sha256 over the parsed cases and the input bytes. Reformatting a case keeps the hash. Editing an expectation or an input changes it. With `--manifest` it also fails unless the ids and the hash match.
 
 ## Context
 

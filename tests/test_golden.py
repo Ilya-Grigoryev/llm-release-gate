@@ -1,4 +1,5 @@
 import shutil
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -75,6 +76,24 @@ def duplicate(g):
     [
         (duplicate, "also in"),
         (lambda g: (g / "inputs" / "synth-001.jpg").unlink(), "missing input"),
+        (
+            lambda g: edit(
+                g / "synth-001.yaml",
+                lambda d: d["input"].update(image="../../outside.jpg"),
+            ),
+            "outside the set",
+        ),
+        (
+            lambda g: edit(
+                g / "synth-001.yaml",
+                lambda d: d["expected"].update(date=date(2026, 1, 1)),
+            ),
+            "non-JSON value",
+        ),
+        (
+            lambda g: (g / "synth-001.yaml").write_bytes(b"id: \xff\xfe"),
+            "synth-001.yaml",
+        ),
         (lambda g: edit(g / "synth-001.yaml", lambda d: d.pop("expected")), "expected"),
         (
             lambda g: edit(g / "synth-001.yaml", lambda d: d.update(version="1")),
@@ -107,11 +126,17 @@ def test_canonical_hash_ignores_key_order():
 @pytest.mark.parametrize(
     "company, chain",
     [
-        ("MR. D.I.Y. (M) SDN BHD", "MR DIY"),
-        ("GARDENIA BAKERIES (KL) SDN BHD", "GARDENIA BAKERIES"),
-        ("99 SPEED MART S/B", "99 SPEED MART"),
-        ("THE COFFEE BEAN & TEA LEAF (M) SDN. BHD.", "THE COFFEE BEAN & TEA LEAF"),
+        ("TEST MART (M) SDN BHD", "TEST MART"),
+        ("UJI BAKERIES (KL) SDN BHD", "UJI BAKERIES"),
+        ("42 DEMO MART S/B", "42 DEMO MART"),
+        ("A.B.C. TEA & CO (M) SDN. BHD.", "ABC TEA & CO"),
     ],
 )
 def test_store_chain(company, chain):
     assert store(company) == chain
+
+
+def test_yml_files_count_as_cases(golden):
+    shutil.copy(golden / "synth-001.yaml", golden / "copy.yml")
+    _, errors = validate(golden)
+    assert any("also in" in e for e in errors)

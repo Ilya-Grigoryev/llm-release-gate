@@ -1,4 +1,7 @@
-"""Build the SROIE golden set: random receipts from a split, both inputs copied next to the cases."""
+"""Build the SROIE golden set: random receipts from a split, both inputs copied next to the cases.
+
+An existing manifest is the source of truth: the set is rebuilt from its ids, not resampled.
+"""
 
 import argparse
 import random
@@ -35,7 +38,17 @@ def main() -> None:
         raise SystemExit(f"{args.out} is not empty; delete it first")
 
     pool = cases(args.src)[args.skip :]
-    picked = sorted(random.Random(args.seed).sample(pool, args.n), key=lambda c: c.id)
+    manifest = (
+        yaml.safe_load(args.manifest.read_text()) if args.manifest.exists() else None
+    )
+    if manifest:
+        ids = set(manifest["ids"])
+        picked = [c for c in pool if c.id in ids]
+        if len(picked) != len(ids):
+            raise SystemExit(f"{args.src} lacks receipts listed in {args.manifest}")
+    else:
+        picked = random.Random(args.seed).sample(pool, args.n)
+    picked.sort(key=lambda c: c.id)
     (args.out / "inputs").mkdir(parents=True)
     for case in picked:
         refs = {}
@@ -63,6 +76,13 @@ def main() -> None:
     set_hash, errors = validate(args.out)
     if errors:
         raise SystemExit("\n".join(errors))
+    if manifest:
+        if set_hash != manifest["sha256"]:
+            raise SystemExit(
+                f"rebuilt set hash {set_hash} differs from {args.manifest}"
+            )
+        print(f"{len(picked)} cases rebuilt from {args.manifest}, sha256 {set_hash}")
+        return
     args.manifest.parent.mkdir(parents=True, exist_ok=True)
     args.manifest.write_text(
         yaml.safe_dump(

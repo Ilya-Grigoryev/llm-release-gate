@@ -15,7 +15,7 @@ SCHEMA = json.loads((Path(__file__).parent / "case.schema.json").read_text())
 
 
 def case_files(directory: Path) -> list[Path]:
-    return sorted(Path(directory).glob("*.yaml"))
+    return sorted(p for p in Path(directory).iterdir() if p.suffix in (".yaml", ".yml"))
 
 
 def to_case(path: Path, raw: dict) -> Case:
@@ -41,24 +41,35 @@ def validate(directory: Path) -> tuple[str | None, list[str]]:
     files = case_files(directory)
     if not files:
         return None, [f"{directory}: no *.yaml cases"]
+    root = Path(directory).resolve()
     for path in files:
         try:
             raw = yaml.safe_load(path.read_text())
             jsonschema.validate(raw, SCHEMA)
-        except (yaml.YAMLError, jsonschema.ValidationError) as e:
+            case_hash = canonical_hash(raw)
+        except (yaml.YAMLError, UnicodeDecodeError, jsonschema.ValidationError) as e:
             errors.append(f"{path.name}: {getattr(e, 'message', e)}")
+            continue
+        except TypeError:
+            errors.append(f"{path.name}: non-JSON value, quote dates and times")
             continue
         if raw["id"] in seen:
             errors.append(f"{path.name}: id {raw['id']} also in {seen[raw['id']]}")
             continue
         seen[raw["id"]] = path.name
         case = to_case(path, raw)
+        outside = [
+            str(p) for p in case.inputs.values() if not p.resolve().is_relative_to(root)
+        ]
+        if outside:
+            errors.append(f"{path.name}: input outside the set {', '.join(outside)}")
+            continue
         missing = [str(p) for p in case.inputs.values() if not p.is_file()]
         if missing:
             errors.append(f"{path.name}: missing input {', '.join(missing)}")
             continue
         parts[case.id] = {
-            "case": canonical_hash(raw),
+            "case": case_hash,
             "inputs": {name: file_hash(p) for name, p in case.inputs.items()},
         }
     return (None if errors else canonical_hash(parts)), errors
@@ -68,8 +79,14 @@ def main() -> None:
     p = argparse.ArgumentParser(description="Validate a golden set and print its hash.")
     p.add_argument("command", choices=["validate"])
     p.add_argument("directory", type=Path)
+    p.add_argument("--manifest", type=Path, help="fail unless ids and hash match it")
     args = p.parse_args()
     set_hash, errors = validate(args.directory)
+    if args.manifest and not errors:
+        manifest = yaml.safe_load(args.manifest.read_text())
+        ids = sorted(c.id for c in load_cases(args.directory))
+        if ids != sorted(manifest["ids"]) or set_hash != manifest["sha256"]:
+            errors.append(f"{args.directory} does not match {args.manifest}")
     for error in errors:
         print(error, file=sys.stderr)
     if errors:
