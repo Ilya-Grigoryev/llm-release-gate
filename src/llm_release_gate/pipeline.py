@@ -16,6 +16,7 @@ class Case:
     id: str
     inputs: dict[str, Path]
     expected: dict[str, Any]
+    scoring: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

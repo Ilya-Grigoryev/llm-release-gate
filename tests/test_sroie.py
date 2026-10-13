@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from llm_release_gate.golden import load_cases
 from llm_release_gate.pipeline import PipelineConfig
 from llm_release_gate.pipelines.sroie import build, cases, field_hits, parse_box
 
@@ -117,3 +118,11 @@ def test_unparsable_answer_keeps_raw_text(tmp_path):
 def test_unknown_input_is_rejected(tmp_path):
     with pytest.raises(ValueError):
         build(config(tmp_path, "audio"), FakeClient())
+
+
+@pytest.mark.parametrize("input", ["text", "image"])
+def test_golden_cases_run_through_the_pipeline(tmp_path, input):
+    [case] = load_cases(Path(__file__).parent / "fixtures" / "golden")
+    client = FakeClient()
+    answer = build(config(tmp_path, input), client).run(case)
+    assert answer.output == OUTPUT

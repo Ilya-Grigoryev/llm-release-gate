@@ -18,6 +18,11 @@ test:
   script:
     - uv run pytest
 
+validate:
+  extends: .python
+  script:
+    - uv run python -m llm_release_gate.golden validate tests/fixtures/golden
+
 # Paid call, so it runs only when started by hand.
 model-call:
   extends: .python

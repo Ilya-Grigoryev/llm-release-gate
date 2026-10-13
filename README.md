@@ -29,6 +29,18 @@ The pipeline prints expected and extracted fields for the first ten training rec
 
 To add a pipeline, write a module in `src/llm_release_gate/pipelines/` with a `build(config)` function and put its name in `pipeline:` of the config. Gate code loads the module by that name and does not import pipeline modules.
 
+## Golden set
+
+Each case is a YAML file with its inputs next to it; `src/llm_release_gate/case.schema.json` defines the format. The SROIE set lives in `data/golden/sroie/` and stays out of git. `golden/sroie.yaml` records the seed, the receipt ids and the set hash.
+
+```sh
+# 30 random training receipts, seed 0, the first 10 left out
+uv run python -m llm_release_gate.pipelines.sroie_golden
+uv run python -m llm_release_gate.golden validate data/golden/sroie
+```
+
+`validate` checks the schema, unique ids and that every input exists, then prints a sha256 over the parsed cases and the input bytes. Reformatting a case keeps the hash. Editing an expectation or an input changes it.
+
 ## Context
 
 Bachelor thesis at the University of Vienna, Software Architecture group. Supervisor: Dr. Theodoros Theodoropoulos.

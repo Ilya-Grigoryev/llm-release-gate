@@ -1,0 +1,17 @@
+# Invented receipt: the CI fixture must not contain SROIE data.
+id: synth-001
+version: 1
+slices:
+  store: TEST MART
+source: synthetic
+input:
+  text: inputs/synth-001.txt
+  image: inputs/synth-001.jpg
+expected:
+  company: TEST MART SDN BHD
+  date: 01/01/2026
+  address: 1 JALAN UJI, 50000 KUALA LUMPUR
+  total: "12.50"
+scoring:
+  method: field_match
+  normalise: [whitespace, casefold]
