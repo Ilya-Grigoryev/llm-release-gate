@@ -99,6 +99,12 @@ class SroiePipeline:
             raise Retryable(str(e)) from e
         except (openai.APIConnectionError, openai.InternalServerError) as e:
             raise Retryable(str(e)) from e
+        except (
+            openai.AuthenticationError,
+            openai.PermissionDeniedError,
+            openai.NotFoundError,
+        ) as e:
+            raise Fatal(str(e)) from e  # wrong key or model: every other call fails too
         latency = time.perf_counter() - start
         raw = r.choices[0].message.content or ""
         try:

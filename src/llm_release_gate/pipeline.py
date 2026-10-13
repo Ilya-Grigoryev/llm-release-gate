@@ -55,7 +55,7 @@ class PipelineConfig:
     input: str
     params: dict[str, Any] = field(default_factory=dict)
     max_retries: int = 5
-    timeout_s: float = 60
+    timeout_s: float = 60.0
 
 
 def load_config(path: Path) -> PipelineConfig:
@@ -68,6 +68,11 @@ def load_config(path: Path) -> PipelineConfig:
     missing = keys - optional - raw.keys()
     if missing:
         raise ValueError(f"{path}: missing {sorted(missing)}")
+    retries, timeout = raw.get("max_retries", 5), raw.get("timeout_s", 60)
+    if type(retries) is not int or retries < 0:
+        raise ValueError(f"{path}: max_retries must be an integer >= 0")
+    if type(timeout) not in (int, float) or timeout <= 0:
+        raise ValueError(f"{path}: timeout_s must be a number > 0")
     if not SNAPSHOT.match(raw["model"]):
         raise ValueError(
             f"{path}: model must be a dated snapshot, got {raw['model']!r}"
@@ -78,7 +83,8 @@ def load_config(path: Path) -> PipelineConfig:
         prompt=Path(path).parent / raw["prompt"],
         input=raw["input"],
         params=raw.get("params") or {},
-        **{k: raw[k] for k in ("max_retries", "timeout_s") if k in raw},
+        max_retries=retries,
+        timeout_s=float(timeout),  # 60 and 60.0 must hash alike
     )
 
 

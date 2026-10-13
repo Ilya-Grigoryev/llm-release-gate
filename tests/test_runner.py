@@ -50,11 +50,12 @@ class Replay:
         with self.lock:
             n = sum(c == case.id for c in self.calls)
             self.calls.append(case.id)
+            number = len(self.calls)
             self.active += 1
             self.peak = max(self.peak, self.active)
         try:
             time.sleep(self.delay)
-            self.fail(case, len(self.calls))
+            self.fail(case, number)
             return self.answers[n % len(self.answers)]
         finally:
             with self.lock:
@@ -117,7 +118,9 @@ def test_fatal_stops_the_run_and_keeps_paid_answers(tmp_path):
     with pytest.raises(Fatal):
         go(pipeline, out, workers=2)
     records = read_records(out)
-    assert len(records) == len(pipeline.calls) - 1 and len(pipeline.calls) <= 4
+    # every paid answer is written; the queue is dropped, though each of the two
+    # workers may have taken one more call before the stop
+    assert len(records) == len(pipeline.calls) - 1 and len(pipeline.calls) <= 6
     assert all(r["error"] is None for r in records)
 
 
@@ -206,9 +209,12 @@ def test_a_failing_scorer_keeps_the_answer(tmp_path):
         return score(case, answer)
 
     assert go(Replay(), out, score=picky) == 12
-    bad = [r for r in read_records(out) if r["error"]]
+    bad = [r for r in read_records(out) if r["score_error"]]
     assert len(bad) == 4
-    assert bad[0]["error"] == "score: KeyError: 'company'" and bad[0]["raw"]
+    assert bad[0]["score_error"] == "KeyError: 'company'" and bad[0]["raw"]
+    assert bad[0]["error"] is None and bad[0]["hits"] is None
+    # the answer is paid for: a rerun does not call the model again
+    assert go(Replay(), out, score=picky) == 0
 
 
 def test_an_unparsed_answer_is_still_scored(tmp_path):
@@ -270,3 +276,36 @@ def test_sroie_maps_rate_limits(tmp_path, code, expected):
     config = PipelineConfig("sroie", "gpt-4.1-mini-2025-04-14", prompt, "text")
     with pytest.raises(expected):
         build(config, client).run(SYNTH)
+
+
+@pytest.mark.parametrize(
+    "extra",
+    ["max_retries: '5'\n", "max_retries: -1\n", "timeout_s: null\n", "timeout_s: 0\n"],
+)
+def test_load_config_rejects_a_bad_retry_policy(tmp_path, extra):
+    (tmp_path / "c.yaml").write_text(
+        "pipeline: sroie\nmodel: gpt-4.1-mini-2025-04-14\nprompt: p.md\ninput: text\n"
+        + extra
+    )
+    with pytest.raises(ValueError):
+        load_config(tmp_path / "c.yaml")
+
+
+def test_timeout_written_as_int_or_float_hashes_alike(tmp_path):
+    base = (
+        "pipeline: sroie\nmodel: gpt-4.1-mini-2025-04-14\nprompt: p.md\ninput: text\n"
+    )
+    (tmp_path / "p.md").write_text("Extract fields.")
+    (tmp_path / "a.yaml").write_text(base + "timeout_s: 60\n")
+    (tmp_path / "b.yaml").write_text(base + "timeout_s: 60.0\n")
+    a, b = load_config(tmp_path / "a.yaml"), load_config(tmp_path / "b.yaml")
+    assert config_hash(a) == config_hash(b)
+
+
+def test_a_stopped_backoff_is_marked(tmp_path):
+    out = tmp_path / "runs.jsonl"
+    go(Replay(fail=lambda case, n: (_ for _ in ()).throw(Retryable("429"))), out,
+       wait=lambda s: True)  # fmt: skip
+    assert {r["error"] for r in read_records(out)} == {
+        "stopped during backoff: Retryable: 429"
+    }

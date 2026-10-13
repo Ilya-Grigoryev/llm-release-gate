@@ -1,6 +1,7 @@
 """Run a pipeline K times per case and append one JSON record per (case, repetition)."""
 
 import json
+import sys
 import threading
 import uuid
 from collections.abc import Callable, Sequence
@@ -51,8 +52,11 @@ def call(
         try:
             return pipeline.run(case), retries, None
         except Retryable as e:
-            if retries == max_retries or wait(min(60, 2**retries)):
-                return None, retries, f"{type(e.__cause__ or e).__name__}: {e}"
+            reason = f"{type(e.__cause__ or e).__name__}: {e}"
+            if retries == max_retries:
+                return None, retries, reason
+            if wait(min(60, 2**retries)):
+                return None, retries, f"stopped during backoff: {reason}"
             retries += 1
         except Fatal:
             raise
@@ -75,9 +79,11 @@ def run(
 ) -> int:
     """Append the records missing from `out` and return how many were written.
 
-    A (case, repetition) counts as done if `out` holds an error-free record for it with
-    the same config and set hash, so a rerun picks up only the rest. On Ctrl-C or a
-    Fatal error the queued calls are dropped, running calls finish and are written.
+    A (case, repetition) counts as done if `out` holds a record with an answer and no
+    pipeline error for the same config and set hash, so a rerun pays only for the rest.
+    On Ctrl-C or a Fatal error the queued calls are dropped, backoffs are cut short and
+    the calls already running finish and are written. A custom `wait` replaces the
+    stop-aware default and is not cut short.
     """
     done = results(out, config_hash, set_hash)
     todo = [(c, k) for c in cases for k in range(repetitions) if (c.id, k) not in done]
@@ -88,17 +94,19 @@ def run(
     if out.exists() and out.stat().st_size and not out.read_bytes().endswith(b"\n"):
         with out.open("a") as f:
             f.write("\n")  # end a line cut off by a crash before appending
+    saved: set[Future] = set()
     written = 0
 
     def write(job: Future, case: Case, rep: int) -> None:
         nonlocal written
+        saved.add(job)  # first, so an interrupt during the write cannot write it twice
         answer, retries, error = job.result()
-        hits = None
+        hits = score_error = None
         if answer:
             try:
                 hits = score(case, answer)
-            except Exception as e:  # noqa: BLE001 - keep the paid answer, record why it has no score
-                error = f"score: {type(e).__name__}: {e}"
+            except Exception as e:  # noqa: BLE001 - keep the paid answer, rescore later
+                score_error = f"{type(e).__name__}: {e}"
         record = {
             "record_version": RECORD_VERSION,
             "config_hash": config_hash,
@@ -110,6 +118,7 @@ def run(
             **(asdict(answer) if answer else EMPTY_ANSWER),
             "hits": hits,
             "score": sum(hits.values()) / len(hits) if hits else None,
+            "score_error": score_error,
             "retries": retries,
             "error": error,
         }
@@ -119,15 +128,22 @@ def run(
 
     pool = ThreadPoolExecutor(workers)
     jobs = {pool.submit(call, pipeline, c, max_retries, wait): (c, k) for c, k in todo}
-    saved = set()
     try:
         for job in as_completed(jobs):
             write(job, *jobs[job])
-            saved.add(job)
     finally:
         stop.set()
-        pool.shutdown(cancel_futures=True)
-        for job, (case, rep) in jobs.items():
-            if job not in saved and not job.cancelled() and job.exception() is None:
-                write(job, case, rep)
+        running = sum(j.running() for j in jobs)
+        if running:
+            print(f"stopping: waiting for {running} running calls", file=sys.stderr)
+        try:
+            pool.shutdown(cancel_futures=True)
+        finally:
+            for job, (case, rep) in jobs.items():
+                if job in saved or not job.done() or job.cancelled() or job.exception():
+                    continue
+                try:
+                    write(job, case, rep)
+                except Exception as e:  # noqa: BLE001 - one bad record must not lose the others
+                    print(f"{case.id}#{rep}: not written: {e}", file=sys.stderr)
     return written
