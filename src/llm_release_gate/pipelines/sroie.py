@@ -14,10 +14,12 @@ from openai import OpenAI
 from llm_release_gate.pipeline import (
     Answer,
     Case,
+    Fatal,
     PipelineConfig,
     Retryable,
     load_config,
 )
+from llm_release_gate.runner import call
 
 FIELDS = ("company", "date", "address", "total")
 INPUTS = ("text", "image")
@@ -91,11 +93,11 @@ class SroiePipeline:
                     {"role": "user", "content": self.content(case)},
                 ],
             )
-        except (
-            openai.RateLimitError,
-            openai.APIConnectionError,
-            openai.InternalServerError,
-        ) as e:
+        except openai.RateLimitError as e:
+            if getattr(e, "code", None) == "insufficient_quota":
+                raise Fatal(str(e)) from e
+            raise Retryable(str(e)) from e
+        except (openai.APIConnectionError, openai.InternalServerError) as e:
             raise Retryable(str(e)) from e
         latency = time.perf_counter() - start
         raw = r.choices[0].message.content or ""
@@ -120,7 +122,14 @@ class SroiePipeline:
 
 def build(config: PipelineConfig, client: OpenAI | None = None) -> SroiePipeline:
     # The runner retries and counts retries, so the SDK must not retry on its own.
-    return SroiePipeline(config, client or OpenAI(max_retries=0, timeout=60))
+    return SroiePipeline(
+        config, client or OpenAI(max_retries=0, timeout=config.timeout_s)
+    )
+
+
+def sleep_then_go_on(seconds: float) -> bool:
+    time.sleep(seconds)
+    return False
 
 
 def main() -> None:
@@ -148,7 +157,9 @@ def main() -> None:
     records = []
     print("| case | field | expected | got | ok |\n|---|---|---|---|---|")
     for case in cases(args.data)[: args.n]:
-        answer = pipeline.run(case)
+        answer, _, error = call(pipeline, case, config.max_retries, sleep_then_go_on)
+        if error:
+            raise SystemExit(f"{case.id}: {error}")
         record = {
             "case": case.id,
             "config": str(args.config),

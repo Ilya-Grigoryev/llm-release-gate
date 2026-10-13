@@ -16,7 +16,7 @@ Work in progress. The gate does not exist yet. Two pipelines under test extract 
 
 You need the Kaggle copy of SROIE in `data/SROIE2019/` (`train/` and `test/`, each with `img/`, `box/` and `entities/`) and `OPENAI_API_KEY` in `.env`.
 
-Each pipeline version is a YAML file in `configs/`: model snapshot, prompt file, input (`text` or `image`) and API parameters.
+Each pipeline version is a YAML file in `configs/`: model snapshot, prompt file, input (`text` or `image`), API parameters and, optionally, `max_retries` (default 5) and `timeout_s` (default 60). Rate limits, timeouts and server errors are retried with backoff 1, 2, 4... s; an account out of quota stops the run.
 
 ```sh
 # OCR text as input

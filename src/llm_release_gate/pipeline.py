@@ -39,6 +39,10 @@ class Retryable(Exception):
     """Raised by a pipeline when the same call may succeed later: rate limit, timeout, server error."""
 
 
+class Fatal(Exception):
+    """Raised by a pipeline when no further call can succeed, e.g. the account is out of quota."""
+
+
 class Pipeline(Protocol):
     def run(self, case: Case) -> Answer: ...
 
@@ -50,15 +54,18 @@ class PipelineConfig:
     prompt: Path
     input: str
     params: dict[str, Any] = field(default_factory=dict)
+    max_retries: int = 5
+    timeout_s: float = 60
 
 
 def load_config(path: Path) -> PipelineConfig:
     """Read a pipeline config. The prompt path is relative to the config file."""
     raw = yaml.safe_load(Path(path).read_text())
-    keys = {"pipeline", "model", "prompt", "input", "params"}
+    optional = {"params", "max_retries", "timeout_s"}
+    keys = {"pipeline", "model", "prompt", "input"} | optional
     if not isinstance(raw, dict) or not raw.keys() <= keys:
         raise ValueError(f"{path}: expected a mapping with keys from {sorted(keys)}")
-    missing = keys - {"params"} - raw.keys()
+    missing = keys - optional - raw.keys()
     if missing:
         raise ValueError(f"{path}: missing {sorted(missing)}")
     if not SNAPSHOT.match(raw["model"]):
@@ -71,6 +78,7 @@ def load_config(path: Path) -> PipelineConfig:
         prompt=Path(path).parent / raw["prompt"],
         input=raw["input"],
         params=raw.get("params") or {},
+        **{k: raw[k] for k in ("max_retries", "timeout_s") if k in raw},
     )
 
 
