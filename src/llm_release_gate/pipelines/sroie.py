@@ -8,9 +8,16 @@ from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
 
+import openai
 from openai import OpenAI
 
-from llm_release_gate.pipeline import Answer, Case, PipelineConfig, load_config
+from llm_release_gate.pipeline import (
+    Answer,
+    Case,
+    PipelineConfig,
+    Retryable,
+    load_config,
+)
 
 FIELDS = ("company", "date", "address", "total")
 INPUTS = ("text", "image")
@@ -67,18 +74,29 @@ class SroiePipeline:
 
     def run(self, case: Case) -> Answer:
         start = time.perf_counter()
-        r = self.client.chat.completions.create(
-            model=self.config.model,
-            **self.config.params,
-            response_format={
-                "type": "json_schema",
-                "json_schema": {"name": "receipt", "strict": True, "schema": SCHEMA},
-            },
-            messages=[
-                {"role": "system", "content": self.prompt},
-                {"role": "user", "content": self.content(case)},
-            ],
-        )
+        try:
+            r = self.client.chat.completions.create(
+                model=self.config.model,
+                **self.config.params,
+                response_format={
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": "receipt",
+                        "strict": True,
+                        "schema": SCHEMA,
+                    },
+                },
+                messages=[
+                    {"role": "system", "content": self.prompt},
+                    {"role": "user", "content": self.content(case)},
+                ],
+            )
+        except (
+            openai.RateLimitError,
+            openai.APIConnectionError,
+            openai.InternalServerError,
+        ) as e:
+            raise Retryable(str(e)) from e
         latency = time.perf_counter() - start
         raw = r.choices[0].message.content or ""
         try:
@@ -101,7 +119,8 @@ class SroiePipeline:
 
 
 def build(config: PipelineConfig, client: OpenAI | None = None) -> SroiePipeline:
-    return SroiePipeline(config, client or OpenAI())
+    # The runner retries and counts retries, so the SDK must not retry on its own.
+    return SroiePipeline(config, client or OpenAI(max_retries=0, timeout=60))
 
 
 def main() -> None:

@@ -2,11 +2,13 @@
 
 import importlib
 import re
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
 import yaml
+
+from llm_release_gate.hashing import canonical_hash, file_hash
 
 SNAPSHOT = re.compile(r".+-(\d{4}-\d{2}-\d{2}|\d{8})$")
 
@@ -31,6 +33,10 @@ class Answer:
     reasoning_tokens: int = 0
     finish_reason: str | None = None
     request_id: str | None = None
+
+
+class Retryable(Exception):
+    """Raised by a pipeline when the same call may succeed later: rate limit, timeout, server error."""
 
 
 class Pipeline(Protocol):
@@ -66,6 +72,11 @@ def load_config(path: Path) -> PipelineConfig:
         input=raw["input"],
         params=raw.get("params") or {},
     )
+
+
+def config_hash(config: PipelineConfig) -> str:
+    """Identity of a pipeline version: every config field plus the bytes of the prompt file."""
+    return canonical_hash({**asdict(config), "prompt": file_hash(config.prompt)})
 
 
 def load_pipeline(config: PipelineConfig, **kwargs) -> Pipeline:
