@@ -8,7 +8,7 @@ from typing import Any, Protocol
 
 import yaml
 
-SNAPSHOT = re.compile(r".+-\d{4}-\d{2}-\d{2}$")
+SNAPSHOT = re.compile(r".+-(\d{4}-\d{2}-\d{2}|\d{8})$")
 
 
 @dataclass(frozen=True)
@@ -29,6 +29,7 @@ class Answer:
     fingerprint: str | None = None
     reasoning_tokens: int = 0
     finish_reason: str | None = None
+    request_id: str | None = None
 
 
 class Pipeline(Protocol):

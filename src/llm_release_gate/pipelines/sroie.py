@@ -96,6 +96,7 @@ class SroiePipeline:
             fingerprint=r.system_fingerprint,
             reasoning_tokens=(details and details.reasoning_tokens) or 0,
             finish_reason=r.choices[0].finish_reason,
+            request_id=r.id,
         )
 
 
@@ -105,10 +106,22 @@ def build(config: PipelineConfig, client: OpenAI | None = None) -> SroiePipeline
 
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--config", type=Path, default=Path("configs/sroie-text.yaml"))
+    p.add_argument(
+        "--config",
+        type=Path,
+        default=Path("configs/sroie-text.yaml"),
+        help="pipeline config; for reasoning models set reasoning_effort, not temperature",
+    )
     p.add_argument("-n", type=int, default=10, help="number of receipts")
-    p.add_argument("--data", type=Path, default=Path("data/SROIE2019/train"))
-    p.add_argument("--out", type=Path, default=Path("data/runs/sroie.jsonl"))
+    p.add_argument(
+        "--data", type=Path, default=Path("data/SROIE2019/train"), help="SROIE split"
+    )
+    p.add_argument(
+        "--out",
+        type=Path,
+        default=Path("data/runs/sroie.jsonl"),
+        help="JSONL file to append to",
+    )
     args = p.parse_args()
     config = load_config(args.config)
     pipeline = build(config)

@@ -24,6 +24,7 @@ class FakeClient:
     def create(self, **request):
         self.requests.append(request)
         return SimpleNamespace(
+            id="chatcmpl-1",
             choices=[
                 SimpleNamespace(
                     message=SimpleNamespace(content=self.content), finish_reason="stop"
@@ -91,6 +92,7 @@ def test_text_input_sends_ocr_lines(tmp_path):
     assert (answer.input_tokens, answer.output_tokens) == (100, 20)
     assert answer.model == "gpt-4.1-mini-2025-04-14"
     assert answer.fingerprint == "fp_test"
+    assert answer.request_id == "chatcmpl-1"
 
 
 def test_image_input_sends_the_scan(tmp_path):
