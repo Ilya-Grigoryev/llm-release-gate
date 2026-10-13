@@ -1,0 +1,8 @@
+pipeline: sroie
+model: gpt-4.1-mini-2025-04-14
+prompt: ../prompts/sroie.md
+input: text
+params:
+  temperature: 0
+  seed: 0
+  max_completion_tokens: 300

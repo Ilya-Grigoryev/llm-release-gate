@@ -10,20 +10,24 @@ The gate runs each case several times and compares the two versions case by case
 
 ## Status
 
-Work in progress. The gate does not exist yet, only the first pipeline under test: it extracts company, address, date and total from scanned receipts in [SROIE](https://rrc.cvc.uab.es/?ch=13) (ICDAR 2019).
+Work in progress. The gate does not exist yet. Two pipelines under test extract company, address, date and total from receipts in [SROIE](https://rrc.cvc.uab.es/?ch=13) (ICDAR 2019): one reads the OCR text, the other reads the scan.
 
 ## Running the pipeline
 
 You need the Kaggle copy of SROIE in `data/SROIE2019/` (`train/` and `test/`, each with `img/`, `box/` and `entities/`) and `OPENAI_API_KEY` in `.env`.
 
+Each pipeline version is a YAML file in `configs/`: model snapshot, prompt file, input (`text` or `image`) and API parameters.
+
 ```sh
 # OCR text as input
 uv run --env-file .env python -m llm_release_gate.pipelines.sroie
 # the scan as input
-uv run --env-file .env python -m llm_release_gate.pipelines.sroie --input image --prompt prompts/sroie_image.md
+uv run --env-file .env python -m llm_release_gate.pipelines.sroie --config configs/sroie-image.yaml
 ```
 
 The pipeline prints expected and extracted fields for the first ten training receipts and appends one JSON line per call to `data/runs/sroie.jsonl`. `--help` lists the options.
+
+To add a pipeline, write a module in `src/llm_release_gate/pipelines/` with a `build(config)` function and put its name in `pipeline:` of the config. Gate code loads the module by that name and does not import pipeline modules.
 
 ## Context
 
