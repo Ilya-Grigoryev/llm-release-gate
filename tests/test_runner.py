@@ -280,7 +280,14 @@ def test_sroie_maps_rate_limits(tmp_path, code, expected):
 
 @pytest.mark.parametrize(
     "extra",
-    ["max_retries: '5'\n", "max_retries: -1\n", "timeout_s: null\n", "timeout_s: 0\n"],
+    [
+        "max_retries: '5'\n",
+        "max_retries: -1\n",
+        "timeout_s: null\n",
+        "timeout_s: 0\n",
+        "timeout_s: .nan\n",
+        "timeout_s: .inf\n",
+    ],
 )
 def test_load_config_rejects_a_bad_retry_policy(tmp_path, extra):
     (tmp_path / "c.yaml").write_text(
@@ -309,3 +316,60 @@ def test_a_stopped_backoff_is_marked(tmp_path):
     assert {r["error"] for r in read_records(out)} == {
         "stopped during backoff: Retryable: 429"
     }
+
+
+def test_an_interrupt_while_scoring_keeps_the_answer(tmp_path):
+    out = tmp_path / "runs.jsonl"
+    interrupted = []
+
+    def interrupt_once(case, answer):
+        if case.id == "synth-002" and not interrupted:
+            interrupted.append(case.id)
+            raise Crash
+        return score(case, answer)
+
+    first = Replay(delay=0.02)
+    with pytest.raises(Crash):
+        go(first, out, workers=1, score=interrupt_once)
+    # the answer being scored when Ctrl-C came is written with the others
+    saved = len(read_records(out))
+    assert saved == len(first.calls) and "synth-002" in {
+        r["case"] for r in read_records(out)
+    }
+    second = Replay()
+    assert go(second, out) == 12 - saved and len(second.calls) == 12 - saved
+
+
+def test_an_unscored_field_keeps_the_answer(tmp_path):
+    out = tmp_path / "runs.jsonl"
+
+    def partial(case, answer):
+        return {**score(case, answer), "total": None}
+
+    assert go(Replay(), out, score=partial) == 12
+    r = read_records(out)[0]
+    assert r["hits"]["total"] is None and r["score"] is None
+    assert r["score_error"].startswith("TypeError") and r["error"] is None
+    assert go(Replay(), out, score=partial) == 0
+
+
+def test_an_unserializable_answer_is_recorded_and_the_rest_written(tmp_path):
+    class Odd(Replay):
+        def run(self, case):
+            answer = super().run(case)
+            if case.id == "synth-002":
+                return replace(answer, output={"total": object()})
+            return answer
+
+    out = tmp_path / "runs.jsonl"
+    assert go(Odd(), out) == 12
+    bad = [r for r in read_records(out) if r["error"]]
+    assert len(bad) == 4 and bad[0]["error"].startswith("record not serializable")
+    assert bad[0]["raw"]
+    assert go(Replay(), out) == 4
+
+
+@pytest.mark.parametrize("max_retries", ["5", -1, True, 2.0])
+def test_run_rejects_a_bad_max_retries(tmp_path, max_retries):
+    with pytest.raises(ValueError):
+        go(Replay(), tmp_path / "runs.jsonl", max_retries=max_retries)

@@ -1,6 +1,7 @@
 """What the gate knows about a pipeline: cases in, answers out, a YAML config per version."""
 
 import importlib
+import math
 import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -71,8 +72,8 @@ def load_config(path: Path) -> PipelineConfig:
     retries, timeout = raw.get("max_retries", 5), raw.get("timeout_s", 60)
     if type(retries) is not int or retries < 0:
         raise ValueError(f"{path}: max_retries must be an integer >= 0")
-    if type(timeout) not in (int, float) or timeout <= 0:
-        raise ValueError(f"{path}: timeout_s must be a number > 0")
+    if type(timeout) not in (int, float) or not 0 < timeout < math.inf:
+        raise ValueError(f"{path}: timeout_s must be a finite number > 0")
     if not SNAPSHOT.match(raw["model"]):
         raise ValueError(
             f"{path}: model must be a dated snapshot, got {raw['model']!r}"
