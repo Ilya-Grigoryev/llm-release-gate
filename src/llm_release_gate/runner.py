@@ -147,8 +147,10 @@ def run(
         written += 1
 
     pool = ThreadPoolExecutor(workers)
-    jobs = {pool.submit(call, pipeline, c, max_retries, wait): (c, k) for c, k in todo}
+    jobs: dict[Future, tuple[Case, int]] = {}
     try:
+        for c, k in todo:
+            jobs[pool.submit(call, pipeline, c, max_retries, wait)] = (c, k)
         for job in as_completed(jobs):
             write(job, *jobs[job])
     finally:

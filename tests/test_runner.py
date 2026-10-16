@@ -1,12 +1,14 @@
 import json
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
 
 import openai
 import pytest
 
+from llm_release_gate import runner
 from llm_release_gate.golden import load_cases
 from llm_release_gate.pipeline import (
     Answer,
@@ -373,3 +375,22 @@ def test_an_unserializable_answer_is_recorded_and_the_rest_written(tmp_path):
 def test_run_rejects_a_bad_max_retries(tmp_path, max_retries):
     with pytest.raises(ValueError):
         go(Replay(), tmp_path / "runs.jsonl", max_retries=max_retries)
+
+
+def test_an_interrupt_while_queueing_keeps_paid_answers(tmp_path, monkeypatch):
+    class Interrupting(ThreadPoolExecutor):
+        submitted = 0
+
+        def submit(self, *args, **kwargs):
+            Interrupting.submitted += 1
+            if Interrupting.submitted == 6:
+                raise Crash
+            return super().submit(*args, **kwargs)
+
+    monkeypatch.setattr(runner, "ThreadPoolExecutor", Interrupting)
+    out = tmp_path / "runs.jsonl"
+    pipeline = Replay(delay=0.02)
+    with pytest.raises(Crash):
+        go(pipeline, out, workers=1)
+    # the queue is dropped and every call that ran is written
+    assert len(read_records(out)) == len(pipeline.calls) <= 2
