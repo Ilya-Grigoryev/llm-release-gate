@@ -1,16 +1,22 @@
 import copy
 import json
+from datetime import date
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
 
 from llm_release_gate.golden import load_cases
-from llm_release_gate.metrics import hits, mean, score
+from llm_release_gate.metrics import hits, mean, parse_date, parse_number, score
 from llm_release_gate.pipeline import Answer
 
 FIXTURES = Path(__file__).parent / "fixtures"
 SPACE_CASE = {"method": "field_match", "normalise": ["whitespace", "casefold"]}
 EXACT = {"method": "field_match"}
+TYPED = {
+    **SPACE_CASE,
+    "fields": {"date": {"type": "date"}, "total": {"type": "number"}},
+}
 
 # Expected values, answer, scoring config -> per-field verdicts and score, counted by hand.
 HAND_COUNTED = [
@@ -70,6 +76,46 @@ HAND_COUNTED = [
         0.5,
         id="values-compared-as-text",
     ),
+    pytest.param(
+        {"company": "Kedai Uji", "date": "25/12/2018", "total": "9.00"},
+        {"company": "KEDAI UJI", "date": "25/12/2018 8:13:39 PM", "total": "RM 9.0"},
+        TYPED,
+        {"company": True, "date": True, "total": True},
+        1.0,
+        id="date-and-total-by-value",
+    ),
+    pytest.param(
+        {"date": "25/12/2018", "total": "9.00"},
+        {"date": "26/12/2018", "total": "9.01"},
+        TYPED,
+        {"date": False, "total": False},
+        0.0,
+        id="a-different-date-or-amount-is-wrong",
+    ),
+    pytest.param(
+        {"date": "25/12/2018", "total": "9.00"},
+        {"date": "Christmas", "total": "nine"},
+        TYPED,
+        {"date": False, "total": False},
+        0.0,
+        id="an-answer-that-does-not-parse-is-wrong",
+    ),
+    pytest.param(
+        {"date": "sometime", "total": "N/A"},
+        {"date": " SOMETIME", "total": "n/a"},
+        TYPED,
+        {"date": True, "total": True},
+        1.0,
+        id="a-label-that-does-not-parse-falls-back-to-text",
+    ),
+    pytest.param(
+        {"company": "Kedai Uji"},
+        {"company": "KEDAI  UJI"},
+        {**SPACE_CASE, "fields": {"company": {"normalise": []}}},
+        {"company": False},
+        0.0,
+        id="field-normalisers-override-the-default",
+    ),
 ]
 
 
@@ -98,11 +144,56 @@ def test_score_does_not_touch_its_inputs():
         ({"method": "field_match", "normalise": ["punctuation"]}, "unknown normaliser"),
         ({"method": "field_match", "normalise": "casefold"}, "must be a list"),
         (None, "scoring must be a mapping"),
+        (
+            {"method": "field_match", "fields": {"total": {"type": "money"}}},
+            "unknown type",
+        ),
+        ({"method": "field_match", "fields": ["total"]}, "fields must be a mapping"),
     ],
 )
 def test_unknown_scoring_is_an_error(config, message):
     with pytest.raises((ValueError, TypeError), match=message):
         score({"company": "A"}, {"company": "A"}, config)
+
+
+@pytest.mark.parametrize(
+    "text, day",
+    [
+        ("25/01/2018", date(2018, 1, 25)),
+        ("10-01-16", date(2016, 1, 10)),
+        ("21 JUN 2018", date(2018, 6, 21)),
+        ("20/JAN/2017", date(2017, 1, 20)),
+        ("29 JUN 18", date(2018, 6, 29)),
+        ("2018-05-01", date(2018, 5, 1)),
+        ("20180428", date(2018, 4, 28)),
+        ("25032018", date(2018, 3, 25)),
+        ("4/22/2018", date(2018, 4, 22)),  # month first when day first is impossible
+        ("23.03.18", date(2018, 3, 23)),
+        ("OCT 3, 2016", date(2016, 10, 3)),
+        ("DATE: 03/10/2018 10:42:15", date(2018, 10, 3)),
+        ("12:30:45", None),
+        ("", None),
+    ],
+)
+def test_parse_date(text, day):
+    assert parse_date(text) == day
+
+
+@pytest.mark.parametrize(
+    "text, amount",
+    [
+        ("190.80", Decimal("190.8")),
+        ("RM7.70", Decimal("7.7")),
+        ("RM 59.20", Decimal("59.2")),
+        ("$7.80", Decimal("7.8")),
+        ("-6.42", Decimal("-6.42")),
+        ("1,007.50", Decimal("1007.5")),
+        ("12,50", None),
+        ("abc", None),
+    ],
+)
+def test_parse_number(text, amount):
+    assert parse_number(text) == amount
 
 
 def test_mean_skips_unscored_fields():

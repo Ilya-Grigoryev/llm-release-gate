@@ -31,6 +31,11 @@ def main() -> None:
     p.add_argument("--skip", type=int, default=10, help="leave out the first receipts")
     p.add_argument("--out", type=Path, default=Path("data/golden/sroie"))
     p.add_argument("--manifest", type=Path, default=Path("golden/sroie.yaml"))
+    p.add_argument(
+        "--rehash",
+        action="store_true",
+        help="same receipts, new set hash: record it in the manifest (after a change to SCORING)",
+    )
     args = p.parse_args()
     if args.out.exists() and any(args.out.iterdir()):
         raise SystemExit(f"{args.out} is not empty; delete it first")
@@ -75,10 +80,13 @@ def main() -> None:
     if errors:
         raise SystemExit("\n".join(errors))
     if manifest:
-        if set_hash != manifest["sha256"]:
+        if set_hash != manifest["sha256"] and not args.rehash:
             raise SystemExit(
-                f"rebuilt set hash {set_hash} differs from {args.manifest}"
+                f"rebuilt set hash {set_hash} differs from {args.manifest}; --rehash records it"
             )
+        if set_hash != manifest["sha256"]:
+            manifest["sha256"] = set_hash
+            args.manifest.write_text(yaml.safe_dump(manifest, sort_keys=False))
         print(f"{len(picked)} cases rebuilt from {args.manifest}, sha256 {set_hash}")
         return
     args.manifest.parent.mkdir(parents=True, exist_ok=True)

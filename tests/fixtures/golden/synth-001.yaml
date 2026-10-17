@@ -15,3 +15,6 @@ expected:
 scoring:
   method: field_match
   normalise: [whitespace, casefold]
+  fields:
+    date: {type: date}
+    total: {type: number}

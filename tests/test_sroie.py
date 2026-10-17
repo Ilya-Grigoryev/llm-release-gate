@@ -123,3 +123,15 @@ def test_golden_cases_run_through_the_pipeline(tmp_path, input):
     client = FakeClient()
     answer = build(config(tmp_path, input), client).run(case)
     assert answer.output == OUTPUT
+
+
+def test_an_empty_label_is_not_scored(tmp_path):
+    (tmp_path / "box").mkdir()
+    (tmp_path / "entities").mkdir()
+    (tmp_path / "box" / "r.txt").write_text("1,1,2,1,2,2,1,2,KEDAI UJI\n")
+    (tmp_path / "entities" / "r.txt").write_text(
+        '{"company": "KEDAI UJI", "total": ""}'
+    )
+    [case] = cases(tmp_path)
+    assert case.expected == {"company": "KEDAI UJI", "total": None}
+    assert score(case.expected, {}, case.scoring)["per_field"]["total"] is None

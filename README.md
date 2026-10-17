@@ -47,10 +47,11 @@ Without a manifest the generator samples 30 training receipts with seed 0, leavi
 
 ## Scoring
 
-A case's `scoring` block picks the scorer. `field_match` compares each expected field with the answer after the listed normalisers (`whitespace`, `casefold`). A field expected as `null` is not scored. The case score is the share of right fields among the scored ones.
+A case's `scoring` block picks the scorer. `field_match` compares each expected field with the answer. `fields` gives a field a type: a `date` or a `number` is compared by value (`25/12/2018` matches `25/12/2018 8:13 PM`, `9.00` matches `RM 9.0`), a `string` as text after the listed normalisers (`whitespace`, `casefold`). A label that does not parse is compared as text. A field expected as `null` is not scored. The case score is the share of right fields among the scored ones. Records keep the scorer version, and runs scored by different versions are not compared.
 
 ```sh
 # rescore saved runs without calling the model; needs data/SROIE2019
+# --variant typed (default), text (whitespace and case only) or strict (exact, as the ICDAR evaluation)
 uv run python -m llm_release_gate.pipelines.sroie_rescore data/runs/2026-10-12/base-text-r*.jsonl
 ```
 

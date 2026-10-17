@@ -18,7 +18,12 @@ from llm_release_gate.pipeline import (
 
 FIELDS = ("company", "date", "address", "total")
 INPUTS = ("text", "image")
-SCORING = {"method": "field_match", "normalise": ["whitespace", "casefold"]}
+# D-005: text fields compared after whitespace and case folding, date and total by value.
+SCORING = {
+    "method": "field_match",
+    "normalise": ["whitespace", "casefold"],
+    "fields": {"date": {"type": "date"}, "total": {"type": "number"}},
+}
 SCHEMA = {
     "type": "object",
     "properties": {f: {"type": "string"} for f in FIELDS},
@@ -34,13 +39,20 @@ def parse_box(text: str) -> str:
     )
 
 
+def labels(path: Path) -> dict:
+    """Expected values of one receipt; an empty label means unlabelled (null), so it is not scored."""
+    return {
+        k: (None if v == "" else v) for k, v in json.loads(path.read_text()).items()
+    }
+
+
 def cases(data: Path) -> list[Case]:
     """One case per receipt in a SROIE split (`box/`, `img/`, `entities/`), sorted by id."""
     return [
         Case(
             id=box.stem,
             inputs={"text": box, "image": data / "img" / f"{box.stem}.jpg"},
-            expected=json.loads((data / "entities" / box.name).read_text()),
+            expected=labels(data / "entities" / box.name),
             scoring=SCORING,
         )
         for box in sorted((data / "box").glob("*.txt"))

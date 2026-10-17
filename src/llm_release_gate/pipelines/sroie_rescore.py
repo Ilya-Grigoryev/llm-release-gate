@@ -7,8 +7,14 @@ import argparse
 from pathlib import Path
 
 from llm_release_gate.metrics import score
-from llm_release_gate.pipelines.sroie import cases
+from llm_release_gate.pipelines.sroie import SCORING, cases
 from llm_release_gate.runner import read_records
+
+VARIANTS = {
+    "typed": SCORING,
+    "text": {"method": "field_match", "normalise": ["whitespace", "casefold"]},
+    "strict": {"method": "field_match"},
+}
 
 
 def main() -> None:
@@ -19,7 +25,14 @@ def main() -> None:
     p.add_argument(
         "--data", type=Path, default=Path("data/SROIE2019/train"), help="SROIE split"
     )
+    p.add_argument(
+        "--variant",
+        choices=sorted(VARIANTS),
+        default="typed",
+        help="typed: SCORING (D-005); text: whitespace and case only; strict: exact, as the ICDAR evaluation",
+    )
     args = p.parse_args()
+    scoring = VARIANTS[args.variant]
     by_id = {c.id: c for c in cases(args.data)}
     scores, changed = [], 0
     for path in args.runs:
@@ -28,7 +41,7 @@ def main() -> None:
             if r["case"] not in by_id:
                 raise SystemExit(f"{path}: case {r['case']} is not in {args.data}")
             case = by_id[r["case"]]
-            result = score(case.expected, r.get("output"), case.scoring)
+            result = score(case.expected, r.get("output"), scoring)
             file_scores.append(result["score"])
             changed += "hits" in r and r["hits"] != result["per_field"]
         print(f"{path.name}: {len(file_scores)} records, mean {average(file_scores)}")
