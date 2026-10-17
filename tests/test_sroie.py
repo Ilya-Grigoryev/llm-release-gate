@@ -135,3 +135,27 @@ def test_an_empty_label_is_not_scored(tmp_path):
     [case] = cases(tmp_path)
     assert case.expected == {"company": "KEDAI UJI", "total": None}
     assert score(case.expected, {}, case.scoring)["per_field"]["total"] is None
+
+
+def test_rescore_writes_copies_and_keeps_the_source(tmp_path, monkeypatch, capsys):
+    from llm_release_gate.pipelines import sroie_rescore
+
+    [case] = cases(FIXTURE)
+    run = tmp_path / "runs" / "r.jsonl"
+    run.parent.mkdir()
+    answer = {**case.expected, "date": case.expected["date"] + " 10:42"}
+    source = json.dumps({"case": case.id, "output": answer, "hits": {}}) + "\n"
+    run.write_text(source)
+    out = tmp_path / "typed"
+    monkeypatch.setattr(
+        "sys.argv", ["x", str(run), "--data", str(FIXTURE), "--write", str(out)]
+    )
+    sroie_rescore.main()
+    copy = json.loads((out / "r.jsonl").read_text())
+    assert copy["score"] == 1.0 and copy["rescored"]["variant"] == "typed"
+    assert run.read_text() == source
+    monkeypatch.setattr(
+        "sys.argv", ["x", str(run), "--data", str(FIXTURE), "--write", str(run.parent)]
+    )
+    with pytest.raises(SystemExit, match="must not overwrite"):
+        sroie_rescore.main()

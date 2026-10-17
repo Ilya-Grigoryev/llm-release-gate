@@ -4,9 +4,10 @@ Local only: the expected values come from the SROIE split in data/, which CI doe
 """
 
 import argparse
+import json
 from pathlib import Path
 
-from llm_release_gate.metrics import score
+from llm_release_gate.metrics import VERSION, score
 from llm_release_gate.pipelines.sroie import SCORING, cases
 from llm_release_gate.runner import read_records
 
@@ -31,12 +32,19 @@ def main() -> None:
         default="typed",
         help="typed: SCORING (D-005); text: whitespace and case only; strict: exact, as the ICDAR evaluation",
     )
+    p.add_argument(
+        "--write",
+        type=Path,
+        help="also write a copy of each file into this directory, with hits and score from the rescore",
+    )
     args = p.parse_args()
     scoring = VARIANTS[args.variant]
+    if args.write:
+        args.write.mkdir(parents=True, exist_ok=True)
     by_id = {c.id: c for c in cases(args.data)}
     scores, changed = [], 0
     for path in args.runs:
-        file_scores = []
+        file_scores, copies = [], []
         for r in read_records(path):
             if r["case"] not in by_id:
                 raise SystemExit(f"{path}: case {r['case']} is not in {args.data}")
@@ -44,6 +52,14 @@ def main() -> None:
             result = score(case.expected, r.get("output"), scoring)
             file_scores.append(result["score"])
             changed += "hits" in r and r["hits"] != result["per_field"]
+            rescored = {"variant": args.variant, "scorer_version": f"metrics/{VERSION}"}
+            hits = {"hits": result["per_field"], "score": result["score"]}
+            copies.append({**r, **hits, "rescored": rescored})
+        if args.write:
+            if (args.write / path.name).resolve() == path.resolve():
+                raise SystemExit(f"{path}: --write must not overwrite the source")
+            text = "".join(json.dumps(c) + "\n" for c in copies)
+            (args.write / path.name).write_text(text)
         print(f"{path.name}: {len(file_scores)} records, mean {average(file_scores)}")
         scores += file_scores
     print(f"all: {len(scores)} records, mean {average(scores)}")
