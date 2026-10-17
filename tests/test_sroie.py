@@ -56,11 +56,11 @@ def config(tmp_path, input):
 
 def test_parse_box_keeps_commas_in_text():
     box = (
-        "72,25,326,25,326,64,72,64,TAN WOON YANN\n"
-        "110,144,383,144,383,163,110,163,NO.53 55,57 & 59,\n"
+        "72,25,326,25,326,64,72,64,KEDAI UJI\n"
+        "110,144,383,144,383,163,110,163,NO.1 3,5 & 7,\n"
         "\n"
     )
-    assert parse_box(box) == "TAN WOON YANN\nNO.53 55,57 & 59,"
+    assert parse_box(box) == "KEDAI UJI\nNO.1 3,5 & 7,"
 
 
 def test_split_cases_score_like_the_golden_set():

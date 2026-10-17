@@ -15,16 +15,16 @@ EXACT = {"method": "field_match"}
 # Expected values, answer, scoring config -> per-field verdicts and score, counted by hand.
 HAND_COUNTED = [
     pytest.param(
-        {"company": "BOOK TA .K SDN BHD", "date": "25/12/2018", "total": "9.00"},
-        {"company": "book ta .k  sdn bhd", "date": "25/12/2018", "address": "X"},
+        {"company": "KEDAI UJI .K SDN BHD", "date": "01/02/2026", "total": "9.00"},
+        {"company": "kedai uji .k  sdn bhd", "date": "01/02/2026", "address": "X"},
         SPACE_CASE,
         {"company": True, "date": True, "total": False},
         2 / 3,
         id="case-and-spacing-ignored-missing-field-wrong-extra-field-ignored",
     ),
     pytest.param(
-        {"company": "BOOK TA", "date": "25/12/2018"},
-        {"company": "book ta", "date": " 25/12/2018"},
+        {"company": "KEDAI UJI", "date": "01/02/2026"},
+        {"company": "kedai uji", "date": " 01/02/2026"},
         EXACT,
         {"company": False, "date": False},
         0.0,
