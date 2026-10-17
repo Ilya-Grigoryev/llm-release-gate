@@ -6,8 +6,9 @@ from types import SimpleNamespace
 import pytest
 
 from llm_release_gate.golden import load_cases
+from llm_release_gate.metrics import score
 from llm_release_gate.pipeline import PipelineConfig
-from llm_release_gate.pipelines.sroie import build, cases, field_hits, parse_box
+from llm_release_gate.pipelines.sroie import SCORING, build, cases, parse_box
 
 FIXTURE = Path(__file__).parent / "fixtures" / "sroie"
 OUTPUT = {"company": "C", "date": "D", "address": "A", "total": "9.00"}
@@ -62,15 +63,11 @@ def test_parse_box_keeps_commas_in_text():
     assert parse_box(box) == "TAN WOON YANN\nNO.53 55,57 & 59,"
 
 
-def test_field_hits_ignores_case_and_spacing():
-    expected = {"company": "BOOK TA .K SDN BHD", "date": "25/12/2018", "total": "9.00"}
-    got = {"company": "book ta .k  sdn bhd", "date": "25/12/2018", "address": "X"}
-    assert field_hits(expected, got) == {
-        "company": True,
-        "date": True,
-        "address": False,
-        "total": False,
-    }
+def test_split_cases_score_like_the_golden_set():
+    [case] = cases(FIXTURE)
+    assert case.scoring == SCORING
+    got = {f: f" {v.lower()} " for f, v in case.expected.items()}
+    assert score(case.expected, got, case.scoring)["score"] == 1.0
 
 
 def test_cases_read_a_split():

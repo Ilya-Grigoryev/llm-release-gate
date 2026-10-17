@@ -349,9 +349,10 @@ def test_an_unscored_field_keeps_the_answer(tmp_path):
         return {**score(case, answer), "total": None}
 
     assert go(Replay(), out, score=partial) == 12
-    r = read_records(out)[0]
-    assert r["hits"]["total"] is None and r["score"] is None
-    assert r["score_error"].startswith("TypeError") and r["error"] is None
+    for r in read_records(out):
+        # the score is the share of right fields among the scored ones
+        assert r["hits"]["total"] is None and r["score"] == 1.0
+        assert r["score_error"] is None and r["error"] is None
     assert go(Replay(), out, score=partial) == 0
 
 

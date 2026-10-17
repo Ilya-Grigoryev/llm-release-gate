@@ -10,10 +10,11 @@ from dataclasses import asdict, fields
 from datetime import UTC, datetime
 from pathlib import Path
 
+from llm_release_gate.metrics import mean
 from llm_release_gate.pipeline import Answer, Case, Fatal, Pipeline, Retryable
 
 RECORD_VERSION = 1
-Scorer = Callable[[Case, Answer], dict[str, bool]]
+Scorer = Callable[[Case, Answer], dict[str, bool | None]]
 EMPTY_ANSWER = {f.name: None for f in fields(Answer)}
 
 
@@ -113,7 +114,7 @@ def run(
         if answer:
             try:
                 hits = score(case, answer)
-                value = sum(hits.values()) / len(hits) if hits else None
+                value = mean(hits)
             except Exception as e:  # noqa: BLE001 - keep the paid answer, rescore later
                 score_error = f"{type(e).__name__}: {e}"
         record = {

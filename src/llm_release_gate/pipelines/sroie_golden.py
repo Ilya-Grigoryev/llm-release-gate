@@ -13,9 +13,7 @@ import yaml
 
 from llm_release_gate.golden import validate
 from llm_release_gate.hashing import file_hash
-from llm_release_gate.pipelines.sroie import cases
-
-SCORING = {"method": "field_match", "normalise": ["whitespace", "casefold"]}
+from llm_release_gate.pipelines.sroie import SCORING, cases
 
 
 def store(company: str) -> str:

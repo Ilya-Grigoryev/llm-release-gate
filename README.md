@@ -43,6 +43,15 @@ Without a manifest the generator samples 30 training receipts with seed 0, leavi
 
 `validate` checks the schema, unique ids and that every input exists inside the set, then prints a sha256 over the parsed cases and the input bytes. Reformatting a case keeps the hash. Editing an expectation or an input changes it. With `--manifest` it also fails unless the ids and the hash match.
 
+## Scoring
+
+A case's `scoring` block picks the scorer. `field_match` compares each expected field with the answer after the listed normalisers (`whitespace`, `casefold`). A field expected as `null` is not scored. The case score is the share of right fields among the scored ones.
+
+```sh
+# rescore saved runs without calling the model; needs data/SROIE2019
+uv run python -m llm_release_gate.pipelines.sroie_rescore data/runs/2026-10-12/base-text-r*.jsonl
+```
+
 ## Context
 
 Bachelor thesis at the University of Vienna, Software Architecture group. Supervisor: Dr. Theodoros Theodoropoulos.

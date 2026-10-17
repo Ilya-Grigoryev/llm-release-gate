@@ -11,6 +11,7 @@ from pathlib import Path
 import openai
 from openai import OpenAI
 
+from llm_release_gate.metrics import score
 from llm_release_gate.pipeline import (
     Answer,
     Case,
@@ -23,6 +24,7 @@ from llm_release_gate.runner import call
 
 FIELDS = ("company", "date", "address", "total")
 INPUTS = ("text", "image")
+SCORING = {"method": "field_match", "normalise": ["whitespace", "casefold"]}
 SCHEMA = {
     "type": "object",
     "properties": {f: {"type": "string"} for f in FIELDS},
@@ -38,14 +40,6 @@ def parse_box(text: str) -> str:
     )
 
 
-def normalize(value: str | None) -> str:
-    return " ".join((value or "").split()).casefold()
-
-
-def field_hits(expected: dict, got: dict) -> dict[str, bool]:
-    return {f: normalize(expected.get(f)) == normalize(got.get(f)) for f in FIELDS}
-
-
 def cases(data: Path) -> list[Case]:
     """One case per receipt in a SROIE split (`box/`, `img/`, `entities/`), sorted by id."""
     return [
@@ -53,6 +47,7 @@ def cases(data: Path) -> list[Case]:
             id=box.stem,
             inputs={"text": box, "image": data / "img" / f"{box.stem}.jpg"},
             expected=json.loads((data / "entities" / box.name).read_text()),
+            scoring=SCORING,
         )
         for box in sorted((data / "box").glob("*.txt"))
     ]
@@ -173,7 +168,7 @@ def main() -> None:
             **config.params,
             **asdict(answer),
             "timestamp": datetime.now(UTC).isoformat(timespec="seconds"),
-            "hits": field_hits(case.expected, answer.output or {}),
+            "hits": score(case.expected, answer.output, case.scoring)["per_field"],
         }
         with args.out.open("a") as f:
             f.write(json.dumps(record) + "\n")
