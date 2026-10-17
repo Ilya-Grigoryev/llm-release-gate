@@ -220,16 +220,19 @@ def main(argv: Sequence[str] | None = None) -> None:
         )
     except Fatal as e:
         sys.exit(f"stopped: {e}")
-    done = results(args.out, **hashes)
-    scores = [r["score"] for r in done.values() if r["score"] is not None]
+    found = results(args.out, **hashes)
+    asked = [(c.id, k) for c in cases for k in range(args.k)]
+    done = [found[key] for key in asked if key in found]
+    scores = [r["score"] for r in done if r["score"] is not None]
     average = f"{sum(scores) / len(scores):.3f}" if scores else "-"
     print(
-        f"{written} records written, {len(done)} of {len(cases) * args.k} done, "
+        f"{written} records written, {len(done)} of {len(asked)} done, "
         f"mean score {average}; config {hashes['config_hash'][:12]}, set {set_hash[:12]}"
     )
-    if len(done) < len(cases) * args.k:
+    if len(done) < len(asked):
+        errors = [r["error"] for r in read_records(args.out) if r.get("error")]
         sys.exit(
-            f"{len(cases) * args.k - len(done)} calls failed; see the error field in {args.out}"
+            f"not done: {len(asked) - len(done)} of {len(asked)}; last error: {errors[-1] if errors else '-'}"
         )
 
 

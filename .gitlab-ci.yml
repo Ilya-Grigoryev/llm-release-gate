@@ -30,5 +30,6 @@ model-call:
   script:
     - uv run python -m llm_release_gate.runner --config configs/sroie-text.yaml --golden tests/fixtures/golden --out model-call.jsonl
   artifacts:
+    when: always
     paths:
       - model-call.jsonl

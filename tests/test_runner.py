@@ -445,7 +445,7 @@ def test_cli_fails_when_calls_fail(tmp_path, monkeypatch):
     monkeypatch.setattr(runner, "load_pipeline", lambda config: Replay(fail=broken))
     config_path = Path(__file__).parent.parent / "configs" / "sroie-text.yaml"
     out = tmp_path / "runs.jsonl"
-    with pytest.raises(SystemExit, match="1 calls failed"):
+    with pytest.raises(SystemExit, match="not done: 1 of 1; last error: RuntimeError"):
         runner.main(
             [
                 "--config",
@@ -472,3 +472,27 @@ def test_cli_refuses_a_missing_golden_set(tmp_path):
                 str(tmp_path / "o.jsonl"),
             ]
         )
+
+
+def test_cli_counts_only_the_requested_repetitions(tmp_path, monkeypatch):
+    def first_rep_fails(case, n):
+        if n == 1:
+            raise RuntimeError("down")
+
+    config_path = Path(__file__).parent.parent / "configs" / "sroie-text.yaml"
+    args = [
+        "--config",
+        str(config_path),
+        "--golden",
+        str(FIXTURES / "golden"),
+        "--out",
+        str(tmp_path / "r.jsonl"),
+    ]
+    monkeypatch.setattr(
+        runner, "load_pipeline", lambda c: Replay(fail=first_rep_fails, delay=0.01)
+    )
+    with pytest.raises(SystemExit):
+        runner.main([*args, "-k", "5", "--workers", "1"])
+    # repetitions 1-4 are done from the first run, repetition 0 fails again
+    with pytest.raises(SystemExit, match="not done: 1 of 3"):
+        runner.main([*args, "-k", "3", "--workers", "1"])
