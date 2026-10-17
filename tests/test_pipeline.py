@@ -125,3 +125,12 @@ def test_whole_floats_in_params_become_ints():
     )
     assert got["p"] == 0.5 and got["n"][1] is True
     assert plain_numbers(True) is True
+
+
+def test_config_hash_changes_with_the_pipeline_code_version(tmp_path, monkeypatch):
+    from llm_release_gate.pipelines import sroie
+
+    (tmp_path / "a").mkdir()
+    before = config_at(tmp_path / "a")
+    monkeypatch.setattr(sroie, "VERSION", sroie.VERSION + 1)
+    assert config_at(tmp_path / "a") != before

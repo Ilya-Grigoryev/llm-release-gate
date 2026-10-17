@@ -21,6 +21,8 @@ class Arm:
 
 def load_arm(path: Path) -> Arm:
     """Read one version's runs: a file must hold one config on one set, scored by one scorer."""
+    if not Path(path).is_file():
+        raise Mismatch(f"{path}: no such file")
     records = [r for r in read_records(path) if r.get("error") is None]
     if not records:
         raise Mismatch(f"{path}: no error-free records")

@@ -155,3 +155,83 @@ def test_a_missing_file_is_an_infra_error_not_a_crash(tmp_path, capsys):
         ]
     )
     assert code == gate.INFRA_ERROR
+
+
+@pytest.mark.parametrize(
+    "base, candidate, threshold, relative",
+    [
+        ({"a": 1.0}, {"a": 0.95}, 5, False),  # 1.0 - 0.95 is not exactly 0.05 in floats
+        ({"a": 0.7}, {"a": 0.65}, 5, False),
+        (
+            {f"c{i}": 1.0 for i in range(30)},
+            {**{f"c{i}": 1.0 for i in range(30)}, **{f"c{i}": 0.75 for i in range(6)}},
+            5,
+            False,
+        ),
+        ({"a": 0.8}, {"a": 0.76}, 5, True),  # 5 % of 0.8 is exactly 4 points
+    ],
+)
+def test_a_drop_exactly_at_the_limit_passes(base, candidate, threshold, relative):
+    v = gate.naive(base, candidate, threshold, relative)
+    assert v.outcome == "pass" and v.diff_pp == pytest.approx(-v.limit_pp)
+
+
+@pytest.mark.parametrize(
+    "threshold, base, candidate",
+    [
+        (float("nan"), {"a": 1.0}, {"a": 0.5}),
+        (float("inf"), {"a": 1.0}, {"a": 0.5}),
+        (-5, {"a": 1.0}, {"a": 1.0}),
+        (5, {"a": 1.0}, {"a": float("nan")}),
+        (5, {"a": 5.0}, {"a": 1.0}),
+    ],
+)
+def test_bad_numbers_are_refused(threshold, base, candidate):
+    with pytest.raises(ValueError):
+        gate.naive(base, candidate, threshold)
+
+
+def test_the_report_says_how_many_runs_were_there(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(runner, "load_pipeline", lambda c: Fixed())
+    base = tmp_path / "base.jsonl"
+    cfg = config(tmp_path, "base", 0)
+    runner.main(
+        ["--config", str(cfg), "--golden", str(GOLDEN), "-k", "3", "--out", str(base)]
+    )
+    cand = runs(tmp_path, monkeypatch, "cand", 1, Fixed())
+    report = tmp_path / "v.json"
+    assert (
+        gate.main(
+            ["--base", str(base), "--candidate", str(cand), "--json", str(report)]
+        )
+        == 0
+    )
+    assert json.loads(report.read_text())["runs_per_case"] == {
+        "base": 3,
+        "candidate": 1,
+    }
+    assert "first run of each version" in capsys.readouterr().out
+
+
+def test_unwritable_report_and_bad_arguments(tmp_path, monkeypatch, capsys):
+    base = runs(tmp_path, monkeypatch, "base", 0, Fixed())
+    args = ["--base", str(base), "--candidate", str(base)]
+    assert (
+        gate.main([*args, "--json", str(tmp_path / "no" / "v.json")])
+        == gate.INFRA_ERROR
+    )
+    with pytest.raises(SystemExit) as e:
+        gate.main([*args, "--threshold", "abc"])
+    assert e.value.code == 2
+
+
+def test_a_missing_file_says_so(tmp_path, capsys):
+    gate.main(
+        [
+            "--base",
+            str(tmp_path / "no.jsonl"),
+            "--candidate",
+            str(tmp_path / "no.jsonl"),
+        ]
+    )
+    assert "no such file" in capsys.readouterr().err

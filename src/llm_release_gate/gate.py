@@ -2,9 +2,12 @@
 
 import argparse
 import json
+import math
 import sys
+import traceback
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass, replace
+from fractions import Fraction
 from pathlib import Path
 
 from llm_release_gate.compare import Arm, Mismatch, load_arm, pair
@@ -26,9 +29,12 @@ class Verdict:
     limit_pp: float  # the drop that blocks, after a relative threshold is applied
     rule: str
     cases: int
-    worse: list[
-        tuple[str, float, float]
-    ]  # (case, base, candidate), largest drops first
+    worse: list[tuple[str, float, float]]  # (case, base, candidate), largest drop first
+
+
+def exact(value: float) -> Fraction:
+    """Scores are shares of fields, so 0.95 means 19/20, not the float next to it."""
+    return Fraction(value).limit_denominator(10**6)
 
 
 def naive(
@@ -37,24 +43,43 @@ def naive(
     threshold_pp: float,
     relative: bool = False,
 ) -> Verdict:
-    """Compare the mean of one score per case and arm.
+    """Compare the mean of one score per case and version.
 
     Absolute: block if the candidate's mean is lower by more than `threshold_pp` points.
-    Relative: the limit is `threshold_pp` percent of the base mean.
+    Relative: the limit is `threshold_pp` percent of the base mean. A drop exactly at the
+    limit passes; the means are compared as exact fractions.
     """
     if base.keys() != candidate.keys() or not base:
         raise ValueError("the arms must score the same, non-empty set of cases")
-    b = sum(base.values()) / len(base)
-    c = sum(candidate.values()) / len(candidate)
+    if not math.isfinite(threshold_pp) or threshold_pp < 0:
+        raise ValueError(f"threshold must be a finite number >= 0, got {threshold_pp}")
+    out_of_range = sorted(
+        {k for k, v in (*base.items(), *candidate.items()) if not 0 <= v <= 1}
+    )
+    if out_of_range:
+        raise ValueError(f"scores outside [0, 1]: {', '.join(out_of_range)}")
+    b = sum(map(exact, base.values())) / len(base)
+    c = sum(map(exact, candidate.values())) / len(candidate)
     diff = 100 * (c - b)
-    limit = threshold_pp * b if relative else threshold_pp
+    limit = exact(threshold_pp) * (b if relative else 1)
     code = QUALITY_FAIL if diff < -limit else PASS
     worse = sorted(
         ((k, base[k], candidate[k]) for k in base if candidate[k] < base[k]),
         key=lambda t: t[2] - t[1],
     )
-    rule = f"block if the mean drops by more than {threshold_pp:g} {'% of the base mean' if relative else 'points'}"
-    return Verdict(VERDICTS[code], code, b, c, diff, limit, rule, len(base), worse)
+    unit = "% of the base mean" if relative else "points"
+    rule = f"block if the mean drops by more than {threshold_pp:g} {unit}"
+    return Verdict(
+        VERDICTS[code],
+        code,
+        float(b),
+        float(c),
+        float(diff),
+        float(limit),
+        rule,
+        len(base),
+        worse,
+    )
 
 
 def rescored(arm: Arm, golden: Path) -> Arm:
@@ -67,9 +92,8 @@ def rescored(arm: Arm, golden: Path) -> Arm:
     cases = {c.id: c for c in load_cases(golden)}
     records = {}
     for key, r in arm.records.items():
-        result = score(
-            cases[r["case"]].expected, r.get("output"), cases[r["case"]].scoring
-        )
+        case = cases[r["case"]]
+        result = score(case.expected, r.get("output"), case.scoring)
         records[key] = {
             **r,
             "hits": result["per_field"],
@@ -82,10 +106,12 @@ def rescored(arm: Arm, golden: Path) -> Arm:
 def first_run(records: list[dict]) -> float:
     """The naive gate looks at one run: the lowest repetition of the case."""
     r = records[0]
-    if r.get("score") is None:
+    if r.get("score") is None and r.get("score_error"):
         raise Mismatch(
-            f"{r['case']}#{r['rep']}: no score ({r.get('score_error')}); pass --golden to rescore"
+            f"{r['case']}#{r['rep']}: no score ({r['score_error']}); pass --golden to rescore"
         )
+    if r.get("score") is None:
+        raise Mismatch(f"{r['case']}: no labelled field to score")
     return r["score"]
 
 
@@ -95,7 +121,10 @@ def markdown(v: Verdict, base: Arm, candidate: Arm) -> str:
         f"**Release gate: {icon} {v.outcome}**",
         "",
         f"Mean score {v.base_mean:.3f} → {v.candidate_mean:.3f} ({v.diff_pp:+.1f} points); {v.rule}.",
-        f"{v.cases} cases, one run per version · config {base.config_hash[:8]} → {candidate.config_hash[:8]} · set {base.set_hash[:8]}",
+        (
+            f"{v.cases} cases, first run of each version · config {base.config_hash[:8]} → "
+            f"{candidate.config_hash[:8]} · set {base.set_hash[:8]}"
+        ),
     ]
     if v.worse:
         lines += ["", "| Case | Base | Candidate |", "|---|---|---|"]
@@ -125,7 +154,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     p.add_argument(
         "--golden",
         type=Path,
-        help="rescore both arms from their saved answers against this set",
+        help="rescore both versions from their saved answers against this set",
     )
     p.add_argument("--json", type=Path, help="write the verdict as JSON")
     p.add_argument("--markdown", type=Path, help="write the merge request comment")
@@ -145,19 +174,30 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.relative,
         )
         text = markdown(v, base, candidate)
-        if args.json:
-            report = {
-                **asdict(v),
-                "base_config": base.config_hash,
-                "candidate_config": candidate.config_hash,
-                "set_hash": base.set_hash,
-                "scorer_version": base.scorer_version,
-            }
-            args.json.write_text(json.dumps(report, indent=2) + "\n")
+        report = {
+            **asdict(v),
+            "threshold_pp": args.threshold,
+            "relative": args.relative,
+            "base_config": base.config_hash,
+            "candidate_config": candidate.config_hash,
+            "set_hash": base.set_hash,
+            "scorer_version": base.scorer_version,
+            "rescored": bool(args.golden),
+            # the naive gate uses only the first of these
+            "runs_per_case": {
+                "base": max(len(b) for b, _ in pairs.values()),
+                "candidate": max(len(c) for _, c in pairs.values()),
+            },
+        }
         if args.markdown:
             args.markdown.write_text(text)
-    except Exception as e:  # noqa: BLE001 - a failure to compare is an infra error, never a verdict
+        if args.json:
+            args.json.write_text(json.dumps(report, indent=2) + "\n")
+    except (Mismatch, ValueError, OSError) as e:
         print(f"infra error: {e}", file=sys.stderr)
+        return INFRA_ERROR
+    except Exception:  # noqa: BLE001 - a bug is an infra error too, never a verdict
+        traceback.print_exc()
         return INFRA_ERROR
     print(text, end="")
     return v.exit_code
