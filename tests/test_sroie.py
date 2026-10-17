@@ -170,3 +170,29 @@ def test_strict_and_text_rescoring_keep_empty_labels(tmp_path):
     )
     [case] = cases(tmp_path, empty_as_null=False)
     assert case.expected == {"company": "KEDAI UJI", "total": ""}
+
+
+@pytest.mark.parametrize(
+    "variant, total", [("typed", None), ("text", False), ("strict", False)]
+)
+def test_rescore_counts_an_empty_label_only_outside_the_gate(
+    tmp_path, monkeypatch, variant, total
+):
+    from llm_release_gate.pipelines import sroie_rescore
+
+    (tmp_path / "box").mkdir()
+    (tmp_path / "entities").mkdir()
+    (tmp_path / "box" / "r.txt").write_text("1,1,2,1,2,2,1,2,KEDAI UJI\n")
+    (tmp_path / "entities" / "r.txt").write_text(
+        '{"company": "KEDAI UJI", "total": ""}'
+    )
+    run = tmp_path / "r.jsonl"
+    answer = {"company": "KEDAI UJI", "total": "8.20"}
+    run.write_text(json.dumps({"case": "r", "output": answer}) + "\n")
+    out = tmp_path / "out"
+    argv = ["x", str(run), "--data", str(tmp_path), "--variant", variant]
+    monkeypatch.setattr("sys.argv", [*argv, "--write", str(out)])
+    sroie_rescore.main()
+    copy = json.loads((out / "r.jsonl").read_text())
+    assert copy["hits"]["total"] is total
+    assert copy["scorer_version"].endswith("" if variant == "typed" else f"+{variant}")

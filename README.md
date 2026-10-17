@@ -51,7 +51,7 @@ A case's `scoring` block picks the scorer. `field_match` compares each expected 
 
 ```sh
 # rescore saved runs without calling the model; needs data/SROIE2019
-# --variant typed (default), text (whitespace and case only) or strict (exact, as the ICDAR evaluation)
+# --variant typed (default), text (whitespace and case only) or strict (exact strings, the ICDAR comparison rule)
 uv run python -m llm_release_gate.pipelines.sroie_rescore data/runs/2026-10-12/base-text-r*.jsonl
 ```
 

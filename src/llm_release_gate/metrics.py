@@ -10,7 +10,7 @@ from llm_release_gate.pipeline import Answer, Case
 
 # Bump when any scorer gives a different verdict for the same answer: records keep it, and runs
 # scored by different versions are not compared.
-VERSION = 3
+VERSION = 4
 
 NORMALISERS: dict[str, Callable[[str], str]] = {
     "whitespace": lambda s: " ".join(s.split()),
@@ -19,87 +19,90 @@ NORMALISERS: dict[str, Callable[[str], str]] = {
 
 MONTHS = {
     m: i
-    for i, m in enumerate(
-        (
-            "jan",
-            "feb",
-            "mar",
-            "apr",
-            "may",
-            "jun",
-            "jul",
-            "aug",
-            "sep",
-            "oct",
-            "nov",
-            "dec",
-        ),
-        1,
-    )
+    for i, m in enumerate(["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"], 1)
 }
-SEP = r"[\s/.-]+"
+SEP = r"[/.-]"  # no spaces: they would join a date to the receipt text around it
 YEAR = r"(\d{4}|\d{2})(?!\d)"
-NUMERIC_DATES = (
-    (re.compile(rf"(?<!\d)(\d{{4}}){SEP}(\d{{1,2}}){SEP}(\d{{1,2}})(?!\d)"), "ymd"),
-    (re.compile(rf"(?<!\d)(\d{{1,2}}){SEP}(\d{{1,2}}){SEP}{YEAR}"), "dmy"),
-    (re.compile(r"(?<!\d)(\d{8})(?!\d)"), "compact"),
-)
 ORDINAL = r"(?:st|nd|rd|th)?"
-DAY_MONTH = re.compile(
-    rf"(?<!\d)(\d{{1,2}}){ORDINAL}[\s/.-]*([a-z]{{3}})[a-z]*\.?(?:,\s*|[\s/.-]+){YEAR}"
+# (pattern, order): matched with a lookahead so that a failed match does not hide a date it overlaps
+PATTERNS = (
+    (rf"(?<!\d)(\d{{4}}){SEP}(\d{{1,2}}){SEP}(\d{{1,2}})(?!\d)", "ymd"),
+    (rf"(?<!\d)(\d{{1,2}}){SEP}(\d{{1,2}}){SEP}{YEAR}", "dmy"),
+    (r"(?<!\d)(\d{8})(?!\d)", "compact"),
+    (
+        rf"(?<!\d)(\d{{1,2}}){ORDINAL}[\s/.-]*([a-z]{{3}})[a-z]*\.?(?:,\s*|[\s/.-]*){YEAR}",
+        "d mon y",
+    ),
+    (
+        rf"\b([a-z]{{3}})[a-z]*\.?[\s/.-]*(\d{{1,2}})(?!\d){ORDINAL}(?:,\s*|[\s/.-]+){YEAR}",
+        "mon d y",
+    ),
 )
-MONTH_DAY = re.compile(
-    rf"\b([a-z]{{3}})[a-z]*\.?[\s/.-]*(\d{{1,2}})(?!\d){ORDINAL}(?:,\s*|[\s/.-]+){YEAR}"
-)
+PATTERNS = tuple((re.compile(f"(?=({p}))"), order) for p, order in PATTERNS)
+SPACED = re.compile(
+    r"\s*(\d{1,2})[\s/.-]+(\d{1,2})[\s/.-]+(\d{4}|\d{2})\s*"
+)  # the whole value: 05 02 18
 
 
 def make_date(y: str, m: int | str, d: str) -> date | None:
     year = int(y) + (2000 if len(y) == 2 else 0)
+    if not 1990 <= year <= 2099:
+        return None
     try:
         return date(year, int(m), int(d))
     except ValueError:
         return None
 
 
-def numeric_date(m: re.Match, order: str) -> date | None:
+def from_groups(groups: tuple[str, ...], order: str) -> date | None:
     if order == "compact":  # 20180428 or 25032018
-        n = m.group(1)
+        n = groups[0]
         return make_date(n[:4], n[4:6], n[6:]) or make_date(n[4:], n[2:4], n[:2])
-    a, b, c = m.groups()
+    a, b, c = groups
     if order == "ymd":
         return make_date(a, b, c)
-    return make_date(c, b, a) or make_date(c, a, b)  # day first unless impossible
+    if order == "dmy":
+        return make_date(c, b, a) or make_date(c, a, b)  # day first unless impossible
+    if order == "d mon y":
+        return make_date(c, MONTHS[b], a) if b in MONTHS else None
+    return make_date(c, MONTHS[a], b) if a in MONTHS else None  # mon d y
 
 
 def parse_date(text: str) -> date | None:
-    """The first valid numeric date in the text, else the first with a month name; None if there is none.
+    """The first valid date in the text, by position; None if there is none.
 
-    A day needs a separator before the year, so `MAR 2018` is not a date.
+    Numbers join only through `/`, `.` or `-`, and a day needs a separator before the year,
+    so `#19- 10/03/2018` gives 10 March and `MAR 2018` gives None. A value that is nothing
+    but a date may also use spaces (`05 02 18`).
     """
     t = text.casefold()
-    numeric = sorted(
-        (m.start(), i, m, order)
-        for i, (pattern, order) in enumerate(NUMERIC_DATES)
+    found = sorted(
+        (m.start(), k, m.groups()[1:], order)
+        for k, (pattern, order) in enumerate(PATTERNS)
         for m in pattern.finditer(t)
     )
-    for *_, m, order in numeric:
-        if found := numeric_date(m, order):
-            return found
-    for pattern, (d, mon, y) in ((DAY_MONTH, (1, 2, 3)), (MONTH_DAY, (2, 1, 3))):
-        for m in pattern.finditer(t):
-            if m.group(mon) in MONTHS and (
-                found := make_date(m.group(y), MONTHS[m.group(mon)], m.group(d))
-            ):
-                return found
+    for _, _, groups, order in found:
+        if day := from_groups(groups, order):
+            return day
+    if m := SPACED.fullmatch(t):
+        return from_groups(m.groups(), "dmy")
     return None
 
 
 def parse_number(text: str) -> Decimal | None:
-    """An amount such as `9.00`, `RM 7.70`, `$7.80` or `1,007.50`; None if the text is not one."""
-    t = re.sub(r"(?i)^(rm|myr|\$)", "", "".join(text.split()))
-    if re.fullmatch(r"-?\d{1,3}(,\d{3})+(\.\d+)?", t):
-        t = t.replace(",", "")
-    return Decimal(t) if re.fullmatch(r"-?\d+(\.\d+)?", t) else None
+    """An amount such as `9.00`, `RM 7.70`, `$7.80`, `-RM6.42`, `9.00 MYR` or `1,007.50`; None if it is not one."""
+    t = "".join(text.split()).casefold()
+    m = re.fullmatch(
+        r"([+-]?)(?:rm|myr|us\$|\$)?([+-]?)([\d,]+(?:\.\d+)?)(?:rm|myr)?", t
+    )
+    if not m or (m.group(1) and m.group(2)):
+        return None
+    sign, digits = m.group(1) or m.group(2), m.group(3)
+    if "," in digits:
+        if not re.fullmatch(r"\d{1,3}(,\d{3})+(\.\d+)?", digits):
+            return None
+        digits = digits.replace(",", "")
+    return Decimal(("-" if sign == "-" else "") + digits)
 
 
 TYPES: dict[str, Callable[[str], Any] | None] = {

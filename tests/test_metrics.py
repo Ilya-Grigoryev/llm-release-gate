@@ -184,6 +184,16 @@ def test_unknown_scoring_is_an_error(config, message):
             date(2018, 12, 25),
         ),  # an impossible date does not end the search
         ("25/12/2018 ref 2018-01-02", date(2018, 12, 25)),  # the first one
+        # receipt lines: numbers next to the date must not join it
+        ("ORD #07 -REG #19- 10/03/2018", date(2018, 3, 10)),
+        ("ORD #50 -REG #19- 18/01/2018 10:27:03", date(2018, 1, 18)),
+        ("18:17 09/03/18", date(2018, 3, 9)),
+        ("RECEIPT #: CS00040529 DATE: 24/05/2018", date(2018, 5, 24)),
+        ("10.42 21/06/2018", date(2018, 6, 21)),
+        ("12 25/12/2018", date(2018, 12, 25)),
+        ("21 JUN 2018 8.13 PM", date(2018, 6, 21)),
+        ("OCT 3, 2016 1.05 PM", date(2016, 10, 3)),
+        ("21JUN2018", date(2018, 6, 21)),
     ],
 )
 def test_parse_date(text, day):
@@ -201,6 +211,13 @@ def test_parse_date(text, day):
         ("1,007.50", Decimal("1007.5")),
         ("12,50", None),
         ("abc", None),
+        ("-RM6.42", Decimal("-6.42")),
+        ("RM-6.42", Decimal("-6.42")),
+        ("+5.00", Decimal(5)),
+        ("9.00 MYR", Decimal(9)),
+        ("US$5.00", Decimal(5)),
+        ("1,00.50", None),
+        ("--5", None),
     ],
 )
 def test_parse_number(text, amount):

@@ -55,7 +55,13 @@ def main() -> None:
             changed += "hits" in r and r["hits"] != result["per_field"]
             rescored = {"variant": args.variant, "scorer_version": f"metrics/{VERSION}"}
             hits = {"hits": result["per_field"], "score": result["score"]}
-            copies.append({**r, **hits, "rescored": rescored})
+            # only the gate's own scorer may look like a gate record to compare
+            version = f"metrics/{VERSION}" + (
+                "" if args.variant == "typed" else f"+{args.variant}"
+            )
+            copies.append(
+                {**r, **hits, "scorer_version": version, "rescored": rescored}
+            )
         if args.write:
             if (args.write / path.name).resolve() == path.resolve():
                 raise SystemExit(f"{path}: --write must not overwrite the source")
