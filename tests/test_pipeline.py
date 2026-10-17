@@ -3,7 +3,12 @@ from pathlib import Path
 
 import pytest
 
-from llm_release_gate.pipeline import load_config, load_pipeline
+from llm_release_gate.pipeline import (
+    config_hash,
+    load_config,
+    load_pipeline,
+    plain_numbers,
+)
 
 REPO = Path(__file__).parent.parent
 SRC = REPO / "src" / "llm_release_gate"
@@ -70,3 +75,51 @@ def test_gate_code_does_not_import_pipelines():
     assert outside
     for path in outside:
         assert not [m for m in imported_modules(path) if "pipelines" in m], path
+
+
+CONFIG = (
+    "pipeline: sroie\nmodel: gpt-4.1-mini-2025-04-14\nprompt: prompt.md\ninput: text\n"
+    "params: {temperature: 0, seed: 0}\n"
+)
+
+
+def config_at(
+    tmp_path: Path, body: str = CONFIG, prompt: str = "Extract fields."
+) -> str:
+    (tmp_path / "prompt.md").write_text(prompt)
+    return config_hash(load_config(write(tmp_path / "c.yaml", body)))
+
+
+def test_config_hash_ignores_key_order_and_formatting(tmp_path):
+    reordered = (
+        "# same version, written differently\n"
+        "input: text\nparams:\n  seed: 0\n  temperature: 0.0\n"
+        "prompt: 'prompt.md'\nmodel: \"gpt-4.1-mini-2025-04-14\"\npipeline: sroie\n"
+    )
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    assert config_at(tmp_path / "a") == config_at(tmp_path / "b", reordered)
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"body": CONFIG.replace("temperature: 0", "temperature: 1")},
+        {"body": CONFIG.replace("2025-04-14", "2025-04-15")},
+        {"body": CONFIG.replace("input: text", "input: image")},
+        {"prompt": "Extract fields carefully."},
+    ],
+)
+def test_config_hash_changes_with_the_version(tmp_path, change):
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    assert config_at(tmp_path / "a") != config_at(tmp_path / "b", **change)
+
+
+def test_whole_floats_in_params_become_ints():
+    assert plain_numbers({"t": 0.0, "p": 0.5, "n": [1.0, True], "d": {"x": 2.0}}) == {
+        "t": 0,
+        "p": 0.5,
+        "n": [1, True],
+        "d": {"x": 2},
+    }

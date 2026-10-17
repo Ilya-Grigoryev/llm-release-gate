@@ -59,6 +59,17 @@ class PipelineConfig:
     timeout_s: float = 60.0
 
 
+def plain_numbers(value: Any) -> Any:
+    """Turn whole floats into ints, nested too, so `temperature: 0` and `0.0` hash alike."""
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, dict):
+        return {k: plain_numbers(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [plain_numbers(v) for v in value]
+    return value
+
+
 def load_config(path: Path) -> PipelineConfig:
     """Read a pipeline config. The prompt path is relative to the config file."""
     raw = yaml.safe_load(Path(path).read_text())
@@ -83,7 +94,7 @@ def load_config(path: Path) -> PipelineConfig:
         model=raw["model"],
         prompt=Path(path).parent / raw["prompt"],
         input=raw["input"],
-        params=raw.get("params") or {},
+        params=plain_numbers(raw.get("params") or {}),
         max_retries=retries,
         timeout_s=float(timeout),  # 60 and 60.0 must hash alike
     )

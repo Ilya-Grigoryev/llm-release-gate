@@ -12,24 +12,26 @@ The gate runs each case several times and compares the two versions case by case
 
 Work in progress. The gate does not exist yet. Two pipelines under test extract company, address, date and total from receipts in [SROIE](https://rrc.cvc.uab.es/?ch=13) (ICDAR 2019): one reads the OCR text, the other reads the scan.
 
-## Running the pipeline
+## Running a version
 
-You need the Kaggle copy of SROIE in `data/SROIE2019/` (`train/` and `test/`, each with `img/`, `box/` and `entities/`) and `OPENAI_API_KEY` in `.env`.
+Each pipeline version is a YAML file in `configs/`: model snapshot, prompt file, input (`text` or `image`), API parameters and, optionally, `max_retries` (default 5) and `timeout_s` (default 60). Its hash covers every field and the prompt's bytes; key order, YAML formatting and `0` versus `0.0` do not change it.
 
-Each pipeline version is a YAML file in `configs/`: model snapshot, prompt file, input (`text` or `image`), API parameters and, optionally, `max_retries` (default 5) and `timeout_s` (default 60). Rate limits, timeouts and server errors are retried with backoff 1, 2, 4... s; an account out of quota stops the run.
+The runner calls the pipeline K times per case of a golden set and appends one JSON record per call, stamped with the config hash, the set hash and the scorer version. A rerun pays only for what is missing. Rate limits, timeouts and server errors are retried with backoff 1, 2, 4... s; an account out of quota stops the run. You need `OPENAI_API_KEY` in `.env`.
 
 ```sh
-# OCR text as input
-uv run --env-file .env python -m llm_release_gate.pipelines.sroie
-# the scan as input
-uv run --env-file .env python -m llm_release_gate.pipelines.sroie --config configs/sroie-image.yaml
+# OCR text, the CI fixture, one call
+uv run --env-file .env python -m llm_release_gate.runner --config configs/sroie-text.yaml --golden tests/fixtures/golden --out data/runs/try.jsonl
+# the scan on the SROIE golden set, 3 runs per receipt
+uv run --env-file .env python -m llm_release_gate.runner --config configs/sroie-image.yaml --golden data/golden/sroie -k 3 --out data/runs/image.jsonl
 ```
 
-The pipeline prints expected and extracted fields for the first ten training receipts and appends one JSON line per call to `data/runs/sroie.jsonl`. `--help` lists the options.
+`llm_release_gate.compare` pairs two such files case by case and refuses files with different set hashes or scorer versions.
 
 To add a pipeline, write a module in `src/llm_release_gate/pipelines/` with a `build(config)` function and put its name in `pipeline:` of the config. Gate code loads the module by that name and does not import pipeline modules.
 
 ## Golden set
+
+The SROIE set needs the Kaggle copy of SROIE in `data/SROIE2019/` (`train/` and `test/`, each with `img/`, `box/` and `entities/`).
 
 Each case is a YAML file with its inputs next to it; `src/llm_release_gate/case.schema.json` defines the format. The SROIE set lives in `data/golden/sroie/` and stays out of git. `golden/sroie.yaml` records the seed, the receipt ids and the set hash.
 

@@ -9,7 +9,8 @@ import openai
 import pytest
 
 from llm_release_gate import runner
-from llm_release_gate.golden import load_cases
+from llm_release_gate.golden import load_cases, validate
+from llm_release_gate.metrics import hits
 from llm_release_gate.pipeline import (
     Answer,
     Fatal,
@@ -77,7 +78,7 @@ def test_one_record_per_case_and_repetition(tmp_path):
         (c.id, k) for c in CASES for k in range(4)
     ]
     r = records[0]
-    assert r["record_version"] == 1
+    assert r["record_version"] == runner.RECORD_VERSION
     assert r["config_hash"] == "c" * 64 and r["set_hash"] == "s" * 64
     assert r["model"] == "gpt-4.1-mini-2025-04-14" and r["fingerprint"] == "fp_replay"
     assert r["raw"] and r["output"] and r["input_tokens"] == 120
@@ -395,3 +396,43 @@ def test_an_interrupt_while_queueing_keeps_paid_answers(tmp_path, monkeypatch):
         go(pipeline, out, workers=1)
     # the queue is dropped and every call that ran is written
     assert len(read_records(out)) == len(pipeline.calls) <= 2
+
+
+def test_records_carry_the_scorer_version(tmp_path):
+    out = tmp_path / "runs.jsonl"
+    go(Replay(), out, score=hits)
+    assert {r["scorer_version"] for r in read_records(out)} == {hits.version}
+    assert {r["record_version"] for r in read_records(out)} == {runner.RECORD_VERSION}
+
+
+def test_cli_stamps_every_record_with_both_hashes(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(runner, "load_pipeline", lambda config: Replay())
+    out = tmp_path / "runs.jsonl"
+    config_path = Path(__file__).parent.parent / "configs" / "sroie-text.yaml"
+    args = ["--config", str(config_path), "--golden", str(FIXTURES / "golden")]
+    runner.main([*args, "-k", "2", "--out", str(out)])
+    records = read_records(out)
+    assert len(records) == 2
+    assert {r["config_hash"] for r in records} == {
+        config_hash(load_config(config_path))
+    }
+    assert {r["set_hash"] for r in records} == {validate(FIXTURES / "golden")[0]}
+    assert "2 records written, 2 of 2 done, mean score 1.000" in capsys.readouterr().out
+    runner.main([*args, "-k", "2", "--out", str(out)])  # nothing left to pay for
+    assert len(read_records(out)) == 2
+
+
+def test_cli_refuses_a_broken_golden_set(tmp_path):
+    (tmp_path / "bad.yaml").write_text("id: [unclosed")
+    config_path = Path(__file__).parent.parent / "configs" / "sroie-text.yaml"
+    with pytest.raises(SystemExit, match="bad.yaml"):
+        runner.main(
+            [
+                "--config",
+                str(config_path),
+                "--golden",
+                str(tmp_path),
+                "--out",
+                str(tmp_path / "o.jsonl"),
+            ]
+        )

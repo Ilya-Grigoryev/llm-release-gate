@@ -1,5 +1,6 @@
 """Run a pipeline K times per case and append one JSON record per (case, repetition)."""
 
+import argparse
 import json
 import sys
 import threading
@@ -10,10 +11,20 @@ from dataclasses import asdict, fields
 from datetime import UTC, datetime
 from pathlib import Path
 
-from llm_release_gate.metrics import mean
-from llm_release_gate.pipeline import Answer, Case, Fatal, Pipeline, Retryable
+from llm_release_gate.golden import load_cases, validate
+from llm_release_gate.metrics import hits, mean
+from llm_release_gate.pipeline import (
+    Answer,
+    Case,
+    Fatal,
+    Pipeline,
+    Retryable,
+    config_hash,
+    load_config,
+    load_pipeline,
+)
 
-RECORD_VERSION = 1
+RECORD_VERSION = 2  # 2: adds scorer_version
 Scorer = Callable[[Case, Answer], dict[str, bool | None]]
 EMPTY_ANSWER = {f.name: None for f in fields(Answer)}
 
@@ -126,6 +137,7 @@ def run(
             "run_id": run_id,
             "timestamp": datetime.now(UTC).isoformat(timespec="seconds"),
             **(asdict(answer) if answer else EMPTY_ANSWER),
+            "scorer_version": getattr(score, "version", None),
             "hits": hits,
             "score": value,
             "score_error": score_error,
@@ -173,3 +185,47 @@ def run(
                 except Exception as e:  # noqa: BLE001 - one bad record must not lose the others
                     print(f"{case.id}#{rep}: not written: {e}", file=sys.stderr)
     return written
+
+
+def main(argv: Sequence[str] | None = None) -> None:
+    p = argparse.ArgumentParser(
+        description="Run one pipeline version over a golden set, K times per case."
+    )
+    p.add_argument("--config", type=Path, required=True, help="pipeline config (YAML)")
+    p.add_argument("--golden", type=Path, required=True, help="golden set directory")
+    p.add_argument("-k", type=int, default=1, help="repetitions per case")
+    p.add_argument("--out", type=Path, required=True, help="JSONL file to append to")
+    p.add_argument("--workers", type=int, default=4, help="parallel calls")
+    args = p.parse_args(argv)
+    if args.k < 1 or args.workers < 1:
+        p.error("-k and --workers must be at least 1")
+    set_hash, errors = validate(args.golden)
+    if errors:
+        sys.exit("\n".join(errors))
+    config = load_config(args.config)
+    hashes = {"config_hash": config_hash(config), "set_hash": set_hash}
+    cases = load_cases(args.golden)
+    try:
+        written = run(
+            load_pipeline(config),
+            cases,
+            args.k,
+            args.out,
+            score=hits,
+            workers=args.workers,
+            max_retries=config.max_retries,
+            **hashes,
+        )
+    except Fatal as e:
+        sys.exit(f"stopped: {e}")
+    done = results(args.out, **hashes)
+    scores = [r["score"] for r in done.values() if r["score"] is not None]
+    average = f"{sum(scores) / len(scores):.3f}" if scores else "-"
+    print(
+        f"{written} records written, {len(done)} of {len(cases) * args.k} done, "
+        f"mean score {average}; config {hashes['config_hash'][:12]}, set {set_hash[:12]}"
+    )
+
+
+if __name__ == "__main__":
+    main()

@@ -5,6 +5,10 @@ from typing import Any
 
 from llm_release_gate.pipeline import Answer, Case
 
+# Bump when any scorer gives a different verdict for the same answer: records keep it, and runs
+# scored by different versions are not compared.
+VERSION = 1
+
 NORMALISERS: dict[str, Callable[[str], str]] = {
     "whitespace": lambda s: " ".join(s.split()),
     "casefold": str.casefold,
@@ -61,3 +65,6 @@ def score(expected: dict, actual: Any, case_config: dict) -> dict:
 def hits(case: Case, answer: Answer) -> dict[str, bool | None]:
     """Per-field verdicts for the runner."""
     return score(case.expected, answer.output, case.scoring)["per_field"]
+
+
+hits.version = f"metrics/{VERSION}"

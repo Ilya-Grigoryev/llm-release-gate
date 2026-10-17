@@ -28,7 +28,7 @@ model-call:
   extends: .python
   when: manual
   script:
-    - uv run python -m llm_release_gate.pipelines.sroie --data tests/fixtures/sroie -n 1 --out model-call.jsonl
+    - uv run python -m llm_release_gate.runner --config configs/sroie-text.yaml --golden tests/fixtures/golden --out model-call.jsonl
   artifacts:
     paths:
       - model-call.jsonl

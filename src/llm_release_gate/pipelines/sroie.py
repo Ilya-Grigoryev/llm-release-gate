@@ -1,26 +1,20 @@
 """SROIE pipeline: receipt OCR text or scan -> LLM -> company, date, address, total."""
 
-import argparse
 import base64
 import json
 import time
-from dataclasses import asdict
-from datetime import UTC, datetime
 from pathlib import Path
 
 import openai
 from openai import OpenAI
 
-from llm_release_gate.metrics import score
 from llm_release_gate.pipeline import (
     Answer,
     Case,
     Fatal,
     PipelineConfig,
     Retryable,
-    load_config,
 )
-from llm_release_gate.runner import call
 
 FIELDS = ("company", "date", "address", "total")
 INPUTS = ("text", "image")
@@ -126,70 +120,3 @@ def build(config: PipelineConfig, client: OpenAI | None = None) -> SroiePipeline
     return SroiePipeline(
         config, client or OpenAI(max_retries=0, timeout=config.timeout_s)
     )
-
-
-def sleep_then_go_on(seconds: float) -> bool:
-    time.sleep(seconds)
-    return False
-
-
-def main() -> None:
-    p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument(
-        "--config",
-        type=Path,
-        default=Path("configs/sroie-text.yaml"),
-        help="pipeline config; for reasoning models set reasoning_effort, not temperature",
-    )
-    p.add_argument("-n", type=int, default=10, help="number of receipts")
-    p.add_argument(
-        "--data", type=Path, default=Path("data/SROIE2019/train"), help="SROIE split"
-    )
-    p.add_argument(
-        "--out",
-        type=Path,
-        default=Path("data/runs/sroie.jsonl"),
-        help="JSONL file to append to",
-    )
-    args = p.parse_args()
-    config = load_config(args.config)
-    pipeline = build(config)
-    args.out.parent.mkdir(parents=True, exist_ok=True)
-    records = []
-    print("| case | field | expected | got | ok |\n|---|---|---|---|---|")
-    for case in cases(args.data)[: args.n]:
-        answer, _, error = call(pipeline, case, config.max_retries, sleep_then_go_on)
-        if error:
-            raise SystemExit(f"{case.id}: {error}")
-        record = {
-            "case": case.id,
-            "config": str(args.config),
-            "input": config.input,
-            **config.params,
-            **asdict(answer),
-            "timestamp": datetime.now(UTC).isoformat(timespec="seconds"),
-            "hits": score(case.expected, answer.output, case.scoring)["per_field"],
-        }
-        with args.out.open("a") as f:
-            f.write(json.dumps(record) + "\n")
-        records.append(record)
-        for field, ok in record["hits"].items():
-            got = (answer.output or {}).get(field)
-            print(
-                f"| {case.id} | {field} | {case.expected.get(field)} | {got} | {'✓' if ok else '✗'} |"
-            )
-
-    n = len(records)
-    print()
-    for field in FIELDS:
-        verdicts = [r["hits"].get(field) for r in records]
-        scored = [v for v in verdicts if v is not None]
-        print(f"{field}: {sum(scored)}/{len(scored)}")
-    tokens_in = sum(r["input_tokens"] for r in records)
-    tokens_out = sum(r["output_tokens"] for r in records)
-    latency = sum(r["latency_s"] for r in records) / n
-    print(f"tokens in/out: {tokens_in}/{tokens_out}, mean latency: {latency:.2f} s")
-
-
-if __name__ == "__main__":
-    main()
