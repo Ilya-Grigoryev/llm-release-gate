@@ -56,8 +56,8 @@ def config(tmp_path, input):
 
 def test_parse_box_keeps_commas_in_text():
     box = (
-        "72,25,326,25,326,64,72,64,KEDAI UJI\n"
-        "110,144,383,144,383,163,110,163,NO.1 3,5 & 7,\n"
+        "12,10,210,10,210,40,12,40,KEDAI UJI\n"
+        "14,52,250,52,250,70,14,70,NO.1 3,5 & 7,\n"
         "\n"
     )
     assert parse_box(box) == "KEDAI UJI\nNO.1 3,5 & 7,"
