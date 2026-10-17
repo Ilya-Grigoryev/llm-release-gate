@@ -54,7 +54,11 @@ def naive(
     if not math.isfinite(threshold_pp) or threshold_pp < 0:
         raise ValueError(f"threshold must be a finite number >= 0, got {threshold_pp}")
     out_of_range = sorted(
-        {k for k, v in (*base.items(), *candidate.items()) if not 0 <= v <= 1}
+        {
+            k
+            for k, v in (*base.items(), *candidate.items())
+            if isinstance(v, bool) or not 0 <= v <= 1
+        }
     )
     if out_of_range:
         raise ValueError(f"scores outside [0, 1]: {', '.join(out_of_range)}")
@@ -120,7 +124,10 @@ def markdown(v: Verdict, base: Arm, candidate: Arm) -> str:
     lines = [
         f"**Release gate: {icon} {v.outcome}**",
         "",
-        f"Mean score {v.base_mean:.3f} → {v.candidate_mean:.3f} ({v.diff_pp:+.1f} points); {v.rule}.",
+        (
+            f"Mean score {v.base_mean:.3f} → {v.candidate_mean:.3f} ({v.diff_pp:+.2f} points, "
+            f"blocks below {-v.limit_pp:+.2f}); {v.rule}."
+        ),
         (
             f"{v.cases} cases, first run of each version · config {base.config_hash[:8]} → "
             f"{candidate.config_hash[:8]} · set {base.set_hash[:8]}"
@@ -130,6 +137,20 @@ def markdown(v: Verdict, base: Arm, candidate: Arm) -> str:
         lines += ["", "| Case | Base | Candidate |", "|---|---|---|"]
         lines += [f"| {k} | {b:.2f} | {c:.2f} |" for k, b, c in v.worse[:5]]
     return "\n".join(lines) + "\n"
+
+
+def write_all(files: dict[Path | None, str]) -> None:
+    """Write every report or none: a comment must not survive a verdict that failed to save."""
+    written = []
+    try:
+        for path, text in files.items():
+            if path:
+                path.write_text(text)
+                written.append(path)
+    except OSError:
+        for path in written:
+            path.unlink(missing_ok=True)
+        raise
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -189,10 +210,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "candidate": max(len(c) for _, c in pairs.values()),
             },
         }
-        if args.markdown:
-            args.markdown.write_text(text)
-        if args.json:
-            args.json.write_text(json.dumps(report, indent=2) + "\n")
+        write_all({args.markdown: text, args.json: json.dumps(report, indent=2) + "\n"})
     except (Mismatch, ValueError, OSError) as e:
         print(f"infra error: {e}", file=sys.stderr)
         return INFRA_ERROR

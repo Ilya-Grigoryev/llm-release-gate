@@ -184,6 +184,7 @@ def test_a_drop_exactly_at_the_limit_passes(base, candidate, threshold, relative
         (-5, {"a": 1.0}, {"a": 1.0}),
         (5, {"a": 1.0}, {"a": float("nan")}),
         (5, {"a": 5.0}, {"a": 1.0}),
+        (5, {"a": True}, {"a": 1.0}),
     ],
 )
 def test_bad_numbers_are_refused(threshold, base, candidate):
@@ -235,3 +236,22 @@ def test_a_missing_file_says_so(tmp_path, capsys):
         ]
     )
     assert "no such file" in capsys.readouterr().err
+
+
+def test_a_comment_is_not_left_behind_when_the_verdict_cannot_be_saved(
+    tmp_path, monkeypatch, capsys
+):
+    base = runs(tmp_path, monkeypatch, "base", 0, Fixed())
+    comment = tmp_path / "c.md"
+    args = ["--base", str(base), "--candidate", str(base), "--markdown", str(comment)]
+    assert (
+        gate.main([*args, "--json", str(tmp_path / "no" / "v.json")])
+        == gate.INFRA_ERROR
+    )
+    assert not comment.exists()
+
+
+def test_the_comment_shows_the_limit_at_the_same_precision():
+    v = gate.naive({"a": 1.0, "b": 1.0}, {"a": 0.9, "b": 1.0}, 5)
+    text = gate.markdown(v, *[gate.Arm("c" * 64, "s" * 64, "metrics/4", {})] * 2)
+    assert "(-5.00 points, blocks below -5.00)" in text
