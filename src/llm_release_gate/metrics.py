@@ -19,7 +19,23 @@ NORMALISERS: dict[str, Callable[[str], str]] = {
 
 MONTHS = {
     m: i
-    for i, m in enumerate(["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"], 1)
+    for i, m in enumerate(
+        [
+            "jan",
+            "feb",
+            "mar",
+            "apr",
+            "may",
+            "jun",
+            "jul",
+            "aug",
+            "sep",
+            "oct",
+            "nov",
+            "dec",
+        ],
+        1,
+    )
 }
 SEP = r"[/.-]"  # no spaces: they would join a date to the receipt text around it
 YEAR = r"(\d{4}|\d{2})(?!\d)"

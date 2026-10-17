@@ -16,6 +16,7 @@ from llm_release_gate.pipeline import (
     Retryable,
 )
 
+VERSION = 1  # bump when the request changes: schema, message layout, image detail
 FIELDS = ("company", "date", "address", "total")
 INPUTS = ("text", "image")
 # D-005: text fields compared after whitespace and case folding, date and total by value.

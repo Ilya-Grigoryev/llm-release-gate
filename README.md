@@ -25,7 +25,23 @@ uv run --env-file .env python -m llm_release_gate.runner --config configs/sroie-
 uv run --env-file .env python -m llm_release_gate.runner --config configs/sroie-image.yaml --golden data/golden/sroie -k 3 --out data/runs/image.jsonl
 ```
 
-`llm_release_gate.compare` pairs two such files case by case and refuses files with different set hashes or scorer versions.
+## The naive gate
+
+The first gate compares one run per version: it blocks when the candidate's mean score is lower than the base's by more than a threshold, 5 points by default (`--relative` reads it as a percentage of the base mean). It pairs the two files case by case and refuses files with different set hashes, different scorer versions or cases missing from one side. `--golden` rescores both sides from their saved answers with the current scorer, without calling the model.
+
+```sh
+uv run python -m llm_release_gate.gate --base data/runs/base.jsonl --candidate data/runs/candidate.jsonl --markdown comment.md --json verdict.json
+```
+
+| Exit code | Meaning |
+|---|---|
+| 0 | pass |
+| 10 | quality fail |
+| 11 | inconclusive (not produced by the naive gate) |
+| 12 | budget fail (not yet checked) |
+| 20 | infra error: the runs cannot be compared, or the tool failed |
+
+Python and argparse keep 1 and 2, so a crash is never read as a verdict.
 
 To add a pipeline, write a module in `src/llm_release_gate/pipelines/` with a `build(config)` function and put its name in `pipeline:` of the config. Gate code loads the module by that name and does not import pipeline modules.
 

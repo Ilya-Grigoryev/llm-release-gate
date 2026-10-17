@@ -101,8 +101,16 @@ def load_config(path: Path) -> PipelineConfig:
 
 
 def config_hash(config: PipelineConfig) -> str:
-    """Identity of a pipeline version: every config field plus the bytes of the prompt file."""
-    return canonical_hash({**asdict(config), "prompt": file_hash(config.prompt)})
+    """Identity of a pipeline version: every config field, the bytes of the prompt file and the
+    pipeline module's VERSION, which the module bumps when its code changes what the model is asked."""
+    module = importlib.import_module(f"llm_release_gate.pipelines.{config.pipeline}")
+    return canonical_hash(
+        {
+            **asdict(config),
+            "prompt": file_hash(config.prompt),
+            "pipeline_version": getattr(module, "VERSION", None),
+        }
+    )
 
 
 def load_pipeline(config: PipelineConfig, **kwargs) -> Pipeline:
