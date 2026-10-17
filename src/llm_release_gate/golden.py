@@ -9,6 +9,7 @@ import jsonschema
 import yaml
 
 from llm_release_gate.hashing import canonical_hash, file_hash
+from llm_release_gate.metrics import score
 from llm_release_gate.pipeline import Case
 
 SCHEMA = json.loads((Path(__file__).parent / "case.schema.json").read_text())
@@ -32,7 +33,7 @@ def load_cases(directory: Path) -> list[Case]:
 
 
 def validate(directory: Path) -> tuple[str | None, list[str]]:
-    """Check every case file; return (set hash, errors). The hash is None if there are errors.
+    """Check every case file and its scoring; return (set hash, errors). The hash is None if there are errors.
 
     The set hash covers each case's parsed content and the bytes of each input,
     so reformatting a YAML file keeps it and editing an expectation or an input changes it.
@@ -52,6 +53,11 @@ def validate(directory: Path) -> tuple[str | None, list[str]]:
             continue
         except TypeError:
             errors.append(f"{path.name}: non-JSON value, quote dates and times")
+            continue
+        try:
+            score(raw["expected"], {}, raw["scoring"])
+        except (ValueError, TypeError) as e:
+            errors.append(f"{path.name}: scoring: {e}")
             continue
         if raw["id"] in seen:
             errors.append(f"{path.name}: id {raw['id']} also in {seen[raw['id']]}")

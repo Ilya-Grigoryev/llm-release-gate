@@ -96,10 +96,12 @@ def test_score_does_not_touch_its_inputs():
         ({"method": "llm_judge"}, "unknown scoring method 'llm_judge'"),
         ({}, "unknown scoring method None"),
         ({"method": "field_match", "normalise": ["punctuation"]}, "unknown normaliser"),
+        ({"method": "field_match", "normalise": "casefold"}, "must be a list"),
+        (None, "scoring must be a mapping"),
     ],
 )
 def test_unknown_scoring_is_an_error(config, message):
-    with pytest.raises(ValueError, match=message):
+    with pytest.raises((ValueError, TypeError), match=message):
         score({"company": "A"}, {"company": "A"}, config)
 
 

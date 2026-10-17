@@ -182,7 +182,9 @@ def main() -> None:
     n = len(records)
     print()
     for field in FIELDS:
-        print(f"{field}: {sum(r['hits'][field] for r in records)}/{n}")
+        verdicts = [r["hits"].get(field) for r in records]
+        scored = [v for v in verdicts if v is not None]
+        print(f"{field}: {sum(scored)}/{len(scored)}")
     tokens_in = sum(r["input_tokens"] for r in records)
     tokens_out = sum(r["output_tokens"] for r in records)
     latency = sum(r["latency_s"] for r in records) / n

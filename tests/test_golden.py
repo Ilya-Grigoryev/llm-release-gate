@@ -103,6 +103,26 @@ def duplicate(g):
             lambda g: (g / "synth-001.yaml").write_text("id: [unclosed"),
             "synth-001.yaml",
         ),
+        (
+            lambda g: edit(
+                g / "synth-001.yaml", lambda d: d["scoring"].update(method="judge")
+            ),
+            "scoring: unknown scoring method 'judge'",
+        ),
+        (
+            lambda g: edit(
+                g / "synth-001.yaml",
+                lambda d: d["scoring"].update(normalise=["punctuation"]),
+            ),
+            "scoring: unknown normaliser",
+        ),
+        (
+            lambda g: edit(
+                g / "synth-001.yaml",
+                lambda d: d["scoring"].update(normalise="casefold"),
+            ),
+            "scoring: normalise must be a list",
+        ),
     ],
 )
 def test_broken_cases_are_reported(golden, break_it, message):

@@ -17,6 +17,8 @@ def field_match(expected: dict, actual: Any, config: dict) -> dict[str, bool | N
     A field expected as null has no label and is not scored (None). Fields the case does not expect are ignored.
     """
     steps = config.get("normalise", [])
+    if not isinstance(steps, list):
+        raise TypeError(f"normalise must be a list, got {steps!r}")
     unknown = [s for s in steps if s not in NORMALISERS]
     if unknown:
         raise ValueError(f"unknown normaliser {unknown}, known: {sorted(NORMALISERS)}")
@@ -45,6 +47,8 @@ def mean(per_field: dict[str, bool | None]) -> float | None:
 
 def score(expected: dict, actual: Any, case_config: dict) -> dict:
     """{"score": mean over scored fields, "per_field": {field: True/False/None}}."""
+    if not isinstance(case_config, dict):
+        raise TypeError(f"scoring must be a mapping, got {case_config!r}")
     method = METHODS.get(case_config.get("method"))
     if method is None:
         raise ValueError(
