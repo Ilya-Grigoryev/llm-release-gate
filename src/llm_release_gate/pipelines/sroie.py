@@ -39,20 +39,21 @@ def parse_box(text: str) -> str:
     )
 
 
-def labels(path: Path) -> dict:
-    """Expected values of one receipt; an empty label means unlabelled (null), so it is not scored."""
-    return {
-        k: (None if v == "" else v) for k, v in json.loads(path.read_text()).items()
-    }
+def labels(path: Path, empty_as_null: bool = True) -> dict:
+    """Expected values of one receipt. An empty label means unlabelled (null), so it is not scored (D-005)."""
+    raw = json.loads(path.read_text())
+    return (
+        {k: (None if v == "" else v) for k, v in raw.items()} if empty_as_null else raw
+    )
 
 
-def cases(data: Path) -> list[Case]:
+def cases(data: Path, empty_as_null: bool = True) -> list[Case]:
     """One case per receipt in a SROIE split (`box/`, `img/`, `entities/`), sorted by id."""
     return [
         Case(
             id=box.stem,
             inputs={"text": box, "image": data / "img" / f"{box.stem}.jpg"},
-            expected=labels(data / "entities" / box.name),
+            expected=labels(data / "entities" / box.name, empty_as_null),
             scoring=SCORING,
         )
         for box in sorted((data / "box").glob("*.txt"))

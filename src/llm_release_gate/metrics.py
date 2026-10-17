@@ -10,7 +10,7 @@ from llm_release_gate.pipeline import Answer, Case
 
 # Bump when any scorer gives a different verdict for the same answer: records keep it, and runs
 # scored by different versions are not compared.
-VERSION = 2
+VERSION = 3
 
 NORMALISERS: dict[str, Callable[[str], str]] = {
     "whitespace": lambda s: " ".join(s.split()),
@@ -37,16 +37,19 @@ MONTHS = {
         1,
     )
 }
+SEP = r"[\s/.-]+"
+YEAR = r"(\d{4}|\d{2})(?!\d)"
 NUMERIC_DATES = (
-    (re.compile(r"(?<!\d)(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})(?!\d)"), "ymd"),
-    (re.compile(r"(?<!\d)(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})(?!\d)"), "dmy"),
+    (re.compile(rf"(?<!\d)(\d{{4}}){SEP}(\d{{1,2}}){SEP}(\d{{1,2}})(?!\d)"), "ymd"),
+    (re.compile(rf"(?<!\d)(\d{{1,2}}){SEP}(\d{{1,2}}){SEP}{YEAR}"), "dmy"),
     (re.compile(r"(?<!\d)(\d{8})(?!\d)"), "compact"),
 )
+ORDINAL = r"(?:st|nd|rd|th)?"
 DAY_MONTH = re.compile(
-    r"(?<!\d)(\d{1,2})[\s/.-]*([a-z]{3})[a-z]*[\s/.,-]*(\d{4}|\d{2})(?!\d)"
+    rf"(?<!\d)(\d{{1,2}}){ORDINAL}[\s/.-]*([a-z]{{3}})[a-z]*\.?(?:,\s*|[\s/.-]+){YEAR}"
 )
 MONTH_DAY = re.compile(
-    r"\b([a-z]{3})[a-z]*[\s/.-]*(\d{1,2}),?[\s/.-]*(\d{4}|\d{2})(?!\d)"
+    rf"\b([a-z]{{3}})[a-z]*\.?[\s/.-]*(\d{{1,2}})(?!\d){ORDINAL}(?:,\s*|[\s/.-]+){YEAR}"
 )
 
 
@@ -58,23 +61,36 @@ def make_date(y: str, m: int | str, d: str) -> date | None:
         return None
 
 
+def numeric_date(m: re.Match, order: str) -> date | None:
+    if order == "compact":  # 20180428 or 25032018
+        n = m.group(1)
+        return make_date(n[:4], n[4:6], n[6:]) or make_date(n[4:], n[2:4], n[:2])
+    a, b, c = m.groups()
+    if order == "ymd":
+        return make_date(a, b, c)
+    return make_date(c, b, a) or make_date(c, a, b)  # day first unless impossible
+
+
 def parse_date(text: str) -> date | None:
-    """The first date in the text, day before month unless that is impossible; None if there is none."""
+    """The first valid numeric date in the text, else the first with a month name; None if there is none.
+
+    A day needs a separator before the year, so `MAR 2018` is not a date.
+    """
     t = text.casefold()
-    for pattern, order in NUMERIC_DATES:
-        if m := pattern.search(t):
-            if order == "compact":  # 20180428 or 25032018
-                n = m.group(1)
-                return make_date(n[:4], n[4:6], n[6:]) or make_date(
-                    n[4:], n[2:4], n[:2]
-                )
-            a, b, c = m.groups()
-            if order == "ymd":
-                return make_date(a, b, c)
-            return make_date(c, b, a) or make_date(c, a, b)
+    numeric = sorted(
+        (m.start(), i, m, order)
+        for i, (pattern, order) in enumerate(NUMERIC_DATES)
+        for m in pattern.finditer(t)
+    )
+    for *_, m, order in numeric:
+        if found := numeric_date(m, order):
+            return found
     for pattern, (d, mon, y) in ((DAY_MONTH, (1, 2, 3)), (MONTH_DAY, (2, 1, 3))):
-        if (m := pattern.search(t)) and m.group(mon) in MONTHS:
-            return make_date(m.group(y), MONTHS[m.group(mon)], m.group(d))
+        for m in pattern.finditer(t):
+            if m.group(mon) in MONTHS and (
+                found := make_date(m.group(y), MONTHS[m.group(mon)], m.group(d))
+            ):
+                return found
     return None
 
 

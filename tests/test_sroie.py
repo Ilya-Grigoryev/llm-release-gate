@@ -159,3 +159,14 @@ def test_rescore_writes_copies_and_keeps_the_source(tmp_path, monkeypatch, capsy
     )
     with pytest.raises(SystemExit, match="must not overwrite"):
         sroie_rescore.main()
+
+
+def test_strict_and_text_rescoring_keep_empty_labels(tmp_path):
+    (tmp_path / "box").mkdir()
+    (tmp_path / "entities").mkdir()
+    (tmp_path / "box" / "r.txt").write_text("1,1,2,1,2,2,1,2,KEDAI UJI\n")
+    (tmp_path / "entities" / "r.txt").write_text(
+        '{"company": "KEDAI UJI", "total": ""}'
+    )
+    [case] = cases(tmp_path, empty_as_null=False)
+    assert case.expected == {"company": "KEDAI UJI", "total": ""}

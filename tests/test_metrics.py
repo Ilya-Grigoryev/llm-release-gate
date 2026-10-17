@@ -173,6 +173,17 @@ def test_unknown_scoring_is_an_error(config, message):
         ("DATE: 03/10/2018 10:42:15", date(2018, 10, 3)),
         ("12:30:45", None),
         ("", None),
+        ("MAR 2018", None),  # no day: the year must not lend one
+        ("Dec 2018", None),
+        ("25th December 2018", date(2018, 12, 25)),
+        ("05 02 18", date(2018, 2, 5)),
+        ("05 02-18", date(2018, 2, 5)),
+        ("25/12/201", None),
+        (
+            "31/02/2018 25/12/2018",
+            date(2018, 12, 25),
+        ),  # an impossible date does not end the search
+        ("25/12/2018 ref 2018-01-02", date(2018, 12, 25)),  # the first one
     ],
 )
 def test_parse_date(text, day):
@@ -213,3 +224,9 @@ def test_golden_case_scored_by_its_own_config():
         0.75,
         1.0,
     ]
+
+
+def test_a_month_without_a_day_does_not_match_a_full_date():
+    assert score({"date": "20/03/2018"}, {"date": "MAR 2018"}, TYPED)["per_field"] == {
+        "date": False
+    }

@@ -30,7 +30,7 @@ def main() -> None:
         "--variant",
         choices=sorted(VARIANTS),
         default="typed",
-        help="typed: SCORING (D-005); text: whitespace and case only; strict: exact, as the ICDAR evaluation",
+        help="typed: SCORING (D-005); text: whitespace and case, as before 17 Oct; strict: exact strings, the ICDAR comparison rule",
     )
     p.add_argument(
         "--write",
@@ -41,7 +41,8 @@ def main() -> None:
     scoring = VARIANTS[args.variant]
     if args.write:
         args.write.mkdir(parents=True, exist_ok=True)
-    by_id = {c.id: c for c in cases(args.data)}
+    # Only the gate's scorer leaves an empty label unscored; text and strict count it, like E-002 and ICDAR.
+    by_id = {c.id: c for c in cases(args.data, empty_as_null=args.variant == "typed")}
     scores, changed = [], 0
     for path in args.runs:
         file_scores, copies = [], []
