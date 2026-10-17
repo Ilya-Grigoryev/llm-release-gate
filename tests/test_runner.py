@@ -436,3 +436,39 @@ def test_cli_refuses_a_broken_golden_set(tmp_path):
                 str(tmp_path / "o.jsonl"),
             ]
         )
+
+
+def test_cli_fails_when_calls_fail(tmp_path, monkeypatch):
+    def broken(case, n):
+        raise RuntimeError("400 bad parameter")
+
+    monkeypatch.setattr(runner, "load_pipeline", lambda config: Replay(fail=broken))
+    config_path = Path(__file__).parent.parent / "configs" / "sroie-text.yaml"
+    out = tmp_path / "runs.jsonl"
+    with pytest.raises(SystemExit, match="1 calls failed"):
+        runner.main(
+            [
+                "--config",
+                str(config_path),
+                "--golden",
+                str(FIXTURES / "golden"),
+                "--out",
+                str(out),
+            ]
+        )
+    assert read_records(out)[0]["error"] == "RuntimeError: 400 bad parameter"
+
+
+def test_cli_refuses_a_missing_golden_set(tmp_path):
+    config_path = Path(__file__).parent.parent / "configs" / "sroie-text.yaml"
+    with pytest.raises(SystemExit, match="not a directory"):
+        runner.main(
+            [
+                "--config",
+                str(config_path),
+                "--golden",
+                str(tmp_path / "nope"),
+                "--out",
+                str(tmp_path / "o.jsonl"),
+            ]
+        )

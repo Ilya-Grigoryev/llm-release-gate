@@ -199,6 +199,8 @@ def main(argv: Sequence[str] | None = None) -> None:
     args = p.parse_args(argv)
     if args.k < 1 or args.workers < 1:
         p.error("-k and --workers must be at least 1")
+    if not args.golden.is_dir():
+        sys.exit(f"{args.golden}: not a directory")
     set_hash, errors = validate(args.golden)
     if errors:
         sys.exit("\n".join(errors))
@@ -225,6 +227,10 @@ def main(argv: Sequence[str] | None = None) -> None:
         f"{written} records written, {len(done)} of {len(cases) * args.k} done, "
         f"mean score {average}; config {hashes['config_hash'][:12]}, set {set_hash[:12]}"
     )
+    if len(done) < len(cases) * args.k:
+        sys.exit(
+            f"{len(cases) * args.k - len(done)} calls failed; see the error field in {args.out}"
+        )
 
 
 if __name__ == "__main__":

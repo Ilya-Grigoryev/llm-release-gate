@@ -66,7 +66,8 @@ def test_refuses_a_case_missing_from_one_arm(tmp_path):
         ([record("x", 0), record("x", 1, config="d" * 64)], "2 config/set pairs"),
         ([record("x", 0), record("x", 1, test_set="t" * 64)], "2 config/set pairs"),
         ([record("x", 0, config=None)], "without a config or set hash"),
-        ([record("x", 0), record("x", 1, scorer_version=None)], "scored by"),
+        ([record("x", 0), record("x", 1, scorer_version="metrics/2")], "scored by"),
+        ([record("x", 0, scorer_version=None)], "without a scorer version"),
         ([record("x", 0, error="boom")], "no error-free records"),
     ],
 )

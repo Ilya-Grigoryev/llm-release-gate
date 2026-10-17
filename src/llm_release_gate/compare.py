@@ -31,6 +31,8 @@ def load_arm(path: Path) -> Arm:
     if not config or not test_set:
         raise Mismatch(f"{path}: records without a config or set hash")
     scorers = {r.get("scorer_version") for r in records}
+    if None in scorers:
+        raise Mismatch(f"{path}: records without a scorer version (record version 1)")
     if len(scorers) != 1:
         raise Mismatch(f"{path}: records scored by {sorted(map(str, scorers))}")
     return Arm(

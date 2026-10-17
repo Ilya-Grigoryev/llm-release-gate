@@ -117,9 +117,11 @@ def test_config_hash_changes_with_the_version(tmp_path, change):
 
 
 def test_whole_floats_in_params_become_ints():
-    assert plain_numbers({"t": 0.0, "p": 0.5, "n": [1.0, True], "d": {"x": 2.0}}) == {
-        "t": 0,
-        "p": 0.5,
-        "n": [1, True],
-        "d": {"x": 2},
-    }
+    got = plain_numbers({"t": 0.0, "p": 0.5, "n": [1.0, True], "d": {"x": 2.0}})
+    assert (
+        type(got["t"]) is int
+        and type(got["d"]["x"]) is int
+        and type(got["n"][0]) is int
+    )
+    assert got["p"] == 0.5 and got["n"][1] is True
+    assert plain_numbers(True) is True
