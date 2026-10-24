@@ -1,0 +1,57 @@
+# The tools the agent sees. Part of the version under test: a pull request may reword a description.
+- name: find_member
+  description: Look up a member by the email they write from.
+  parameters:
+    email: {type: string, description: Email address}
+  required: [email]
+
+- name: get_member
+  description: Look up a member by member id.
+  parameters:
+    member_id: {type: string, description: Member id, e.g. M-101}
+  required: [member_id]
+
+- name: list_bookings
+  description: List a member's active bookings, earliest first.
+  parameters:
+    member_id: {type: string}
+  required: [member_id]
+
+- name: search_availability
+  description: List the spaces of one kind that are free for a whole slot.
+  parameters:
+    kind: {type: string, enum: [desk, room]}
+    start: {type: string, description: "Start time, YYYY-MM-DDTHH:MM"}
+    hours: {type: integer, description: Length in whole hours}
+    people: {type: integer, description: Group size, for rooms}
+  required: [kind, start, hours]
+
+- name: create_booking
+  description: Book a space for a member.
+  parameters:
+    member_id: {type: string}
+    space_id: {type: string, description: "A desk (D-1, D-2, D-3) or a room (R-1, R-2)"}
+    start: {type: string, description: "Start time, YYYY-MM-DDTHH:MM"}
+    hours: {type: integer}
+  required: [member_id, space_id, start, hours]
+
+- name: cancel_booking
+  description: Cancel an active future booking. Issues no credit.
+  parameters:
+    booking_id: {type: string, description: Booking number, e.g. B-201}
+  required: [booking_id]
+
+- name: issue_credit
+  description: Credit an amount in euros to a member's account.
+  parameters:
+    member_id: {type: string}
+    amount_eur: {type: number}
+    reason: {type: string}
+  required: [member_id, amount_eur, reason]
+
+- name: escalate_to_human
+  description: Hand the request to staff with a summary they can act on.
+  parameters:
+    member_id: {type: string}
+    summary: {type: string}
+  required: [member_id, summary]

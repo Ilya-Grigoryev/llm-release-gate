@@ -1,0 +1,16 @@
+id: book-room
+category: happy
+now: "2026-11-02T09:00"
+ticket: >
+  Jonas Weber (jonas.weber@example.com) needs a meeting room for 6 people on Thursday 5 November, 15:00 to 17:00.
+user:
+  known: You are Jonas Weber. Your email is jonas.weber@example.com.
+  instructions: >
+    You need a meeting room for a workshop with 6 people this Thursday, 5 November, from 15:00 to 17:00.
+actions:
+  - [find_member, {email: jonas.weber@example.com}]
+  - [list_bookings, {member_id: M-102}]
+  - [search_availability, {kind: room, start: "2026-11-05T15:00", hours: 2, people: 6}]
+  - [create_booking, {member_id: M-102, space_id: R-2, start: "2026-11-05T15:00", hours: 2}]
+expect:
+  created: [{member_id: M-102, space: R-2, start: "2026-11-05T15:00", hours: 2}]

@@ -1,0 +1,16 @@
+id: cancel-early
+category: policy
+now: "2026-11-02T09:00"
+ticket: >
+  Anna Berger (anna.berger@example.com) asks to cancel her desk booking on Thursday 5 November.
+user:
+  known: You are Anna Berger. Your email is anna.berger@example.com. You don't remember the booking number.
+  instructions: You want to cancel your desk booking this Thursday, 5 November.
+actions:
+  - [find_member, {email: anna.berger@example.com}]
+  - [list_bookings, {member_id: M-101}]
+  - [cancel_booking, {booking_id: B-201}]
+  - [issue_credit, {member_id: M-101, amount_eur: 15, reason: cancelled B-201 more than 24 hours ahead}]
+expect:
+  cancelled: [B-201]
+  credits: [{member_id: M-101, amount_eur: 15}]

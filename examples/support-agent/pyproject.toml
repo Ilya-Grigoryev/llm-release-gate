@@ -1,0 +1,29 @@
+[project]
+name = "support-agent-example"
+version = "0.1.0"
+description = "A coworking support agent with tools over a mock database, with its own test cases"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "llm-release-gate",
+    "openai>=3.24.0",
+    "pyyaml>=6.0.3",
+]
+
+[tool.uv.sources]
+llm-release-gate = { path = "../..", editable = true }
+
+[build-system]
+requires = ["uv_build>=0.11.25,<0.12.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "support_agent"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
