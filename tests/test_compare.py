@@ -2,7 +2,8 @@ import json
 
 import pytest
 
-from llm_release_gate.compare import Mismatch, load_arm, pair
+from llm_release_gate.compare import Arm, Mismatch, load_arm, pair
+from llm_release_gate.pipeline import is_alias
 
 
 def record(case, rep, config="c" * 64, test_set="s" * 64, **extra):
@@ -79,3 +80,38 @@ def test_an_arm_is_one_config_on_one_set(tmp_path, records, message):
 def test_the_last_record_of_a_repetition_wins(tmp_path):
     arm = arm_file(tmp_path / "a.jsonl", [record("x", 0, score=0.5), record("x", 0)])
     assert arm.records[("x", 0)]["score"] == 1.0
+
+
+# models without a date (D-018, T-74)
+
+
+def alias_arm(model, hour, set_hash="s" * 64):
+    records = {
+        ("case-1", 0): {
+            "case": "case-1",
+            "rep": 0,
+            "requested_model": model,
+            "score": 1.0,
+            "timestamp": f"2026-10-25T{hour:02}:00:00+00:00",
+        },
+    }
+    aliases = frozenset({model}) if is_alias(model) else frozenset()
+    return Arm("c" * 64, set_hash, "metrics/5", records, aliases)
+
+
+def test_an_alias_needs_both_arms_run_together():
+    pair(alias_arm("gpt-6-luna", 10), alias_arm("gpt-6-luna", 10))
+    with pytest.raises(Mismatch, match="no date"):
+        pair(alias_arm("gpt-6-luna", 8), alias_arm("gpt-6-luna", 12))
+    pair(
+        alias_arm("gpt-5.4-mini-2026-03-17", 8),
+        alias_arm("gpt-5.4-mini-2026-03-17", 12),
+    )  # dated: fine
+
+
+def test_is_alias():
+    assert is_alias("gpt-6-luna") and is_alias("gpt-4.1-mini")
+    assert not is_alias("gpt-5.4-mini-2026-03-17") and not is_alias(
+        "claude-sonnet-4-5-20250929"
+    )
+    assert not is_alias(None)

@@ -31,7 +31,7 @@ from llm_release_gate.pipeline import (
 from llm_release_gate.prices import Prices, load_prices
 from llm_release_gate.trace import Trace, active, usage
 
-RECORD_VERSION = 3  # 2: adds scorer_version; 3: adds trace, usage, wall_s
+RECORD_VERSION = 4  # 2: scorer_version; 3: trace, usage, wall_s; 4: requested_model
 Scorer = Callable[[Case, Answer], dict[str, bool | None]]
 EMPTY_ANSWER = {f.name: None for f in fields(Answer)}
 
@@ -116,6 +116,7 @@ def run(
     max_retries: int = 5,
     wait: Callable[[float], bool] | None = None,
     prices: Prices | None = None,
+    model: str | None = None,
 ) -> int:
     """Append the records missing from `out` and return how many were written.
 
@@ -123,7 +124,8 @@ def run(
     for the same config and set hash, so a rerun pays only for the rest.
     On Ctrl-C or a Fatal error the queued calls are dropped, backoffs are cut short and
     the calls already running finish and are written. A custom `wait` replaces the
-    stop-aware default and is not cut short. `prices` puts a list price on each model step.
+    stop-aware default and is not cut short. `prices` puts a list price on each model step;
+    `model` is the model the config asks for, kept next to the one the provider reports.
     """
     if type(max_retries) is not int or max_retries < 0:
         raise ValueError(f"max_retries must be a non-negative int, got {max_retries!r}")
@@ -175,6 +177,7 @@ def run(
             "rep": rep,
             "run_id": run_id,
             "timestamp": datetime.now(UTC).isoformat(timespec="seconds"),
+            "requested_model": model,
             **(asdict(answer) if answer else EMPTY_ANSWER),
             "wall_s": trace.wall_s,
             "trace": None if trace.empty() else trace.to_dict(),
@@ -303,6 +306,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             workers=args.workers,
             max_retries=config.max_retries,
             prices=prices,
+            model=config.model,
             **hashes,
         )
     except Fatal as e:

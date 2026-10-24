@@ -314,3 +314,9 @@ def test_the_comment_names_every_outcome(outcome, icon):
     v = gate.Verdict(outcome, 0, 1.0, 1.0, 0.0, 5.0, "rule", 1, [])
     arm = gate.Arm("c" * 64, "s" * 64, "metrics/4", {})
     assert f"**Release gate: {icon} {outcome}**" in gate.markdown(v, arm, arm)
+
+
+def test_the_comment_warns_about_a_model_without_a_date():
+    arm = gate.Arm("c" * 64, "s" * 64, "metrics/5", {}, frozenset({"gpt-6-luna"}))
+    v = gate.naive({"a": 1.0}, {"a": 1.0}, 5)
+    assert "Model without a date (gpt-6-luna)" in gate.markdown(v, arm, arm)

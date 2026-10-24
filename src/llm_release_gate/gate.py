@@ -173,6 +173,12 @@ def markdown(
             f"{candidate.config_hash[:8]} · set {base.set_hash[:8]}"
         ),
     ]
+    aliases = sorted(base.aliases | candidate.aliases)
+    if aliases:
+        lines.append(
+            f"⚠️ Model without a date ({', '.join(aliases)}): the provider may change it; "
+            "both versions ran within an hour of each other."
+        )
     if costs and None in costs:
         lines.append("Cost: a model in these runs has no price.")
     elif costs:
@@ -258,6 +264,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "scorer_version": base.scorer_version,
             "rescored": bool(args.golden),
             "cost_usd": dict(zip(("base", "candidate"), costs)) if costs else None,
+            "models_without_date": sorted(base.aliases | candidate.aliases),
             # the naive gate uses only the first of these
             "runs_per_case": {
                 "base": max(len(b) for b, _ in pairs.values()),

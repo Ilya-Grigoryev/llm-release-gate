@@ -195,7 +195,11 @@ def test_a_record_holds_the_trace_its_usage_and_the_raw_responses(tmp_path):
         reply.model_dump = lambda mode, d=model_dump: d
     record_run(Adapter({"synth-001": lambda: model}), out, prices=PRICES)
     [r] = read_records(out)
-    assert r["record_version"] == 3 and r["error"] is None and r["wall_s"] >= 0
+    assert (
+        r["record_version"] == runner.RECORD_VERSION
+        and r["error"] is None
+        and r["wall_s"] >= 0
+    )
     t = r["trace"]
     assert t["v"] == 1 and t["stop"] == "done" and t["final_state"] == {"balance": 5}
     assert [s["kind"] for s in t["steps"]] == ["llm", "tool", "llm"]
@@ -524,6 +528,7 @@ def test_the_runner_cli_prices_the_steps(tmp_path):
         ]
     )
     [r] = read_records(out)
+    assert r["requested_model"] == "fake-model-2026-01-01"  # next to the reported one
     assert [s["cost_usd"] for s in r["trace"]["steps"] if s["kind"] == "llm"] == [
         pytest.approx(120 / 1e6),
         pytest.approx(140 / 1e6),

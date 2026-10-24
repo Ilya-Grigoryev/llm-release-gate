@@ -20,11 +20,16 @@ Name the module by its import path in the config of each version:
 
 ```yaml
 pipeline: my_app.gate_adapter   # installed, or importable from where you run the gate
-model: gpt-4.1-mini-2025-04-14  # a dated snapshot
+model: gpt-4.1-mini-2025-04-14  # a dated snapshot if there is one
 prompt: prompts/extract.md      # relative to this file, or named files: {extract: a.md, check: b.md}
 input: text
 params: {temperature: 0}
 ```
+
+Prefer a dated snapshot. A name without a date (`gpt-6-luna`) works, but the provider may change the model behind it,
+so the gate takes three precautions: every record keeps the requested model next to the one the provider reports and the
+time, the gate's comment warns about it, and the gate refuses to compare two versions whose runs are more than an hour
+apart.
 
 The gate's code imports no pipeline. Give your module a `VERSION` and bump it when your code changes what the model gets. [`examples/sroie/`](examples/sroie/) is a whole project set up this way.
 

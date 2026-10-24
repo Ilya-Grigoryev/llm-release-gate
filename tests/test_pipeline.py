@@ -38,7 +38,7 @@ def test_load_config_resolves_prompt_next_to_config(tmp_path):
 @pytest.mark.parametrize(
     "body",
     [
-        "pipeline: replay_pipeline\nmodel: gpt-4.1-mini\nprompt: p.md\ninput: text\n",  # alias
+        "pipeline: replay_pipeline\nmodel: ''\nprompt: p.md\ninput: text\n",  # no model
         "pipeline: replay_pipeline\nmodel: gpt-4.1-mini-2025-04-14\nprompt: p.md\n",  # no input
         (
             "pipeline: replay_pipeline\nmodel: gpt-4.1-mini-2025-04-14\nprompt: p.md\ninput: text\n"
@@ -227,3 +227,8 @@ def test_a_bad_pipeline_name_is_a_config_error(tmp_path, monkeypatch, name, mess
     for load in (config_hash, load_pipeline):
         with pytest.raises(ValueError, match=re.escape(message)):
             load(config)
+
+
+def test_load_config_accepts_a_model_without_a_date(tmp_path):
+    body = "pipeline: replay_pipeline\nmodel: gpt-6-luna\nprompt: p.md\ninput: text\n"
+    assert load_config(write(tmp_path / "c.yaml", body)).model == "gpt-6-luna"

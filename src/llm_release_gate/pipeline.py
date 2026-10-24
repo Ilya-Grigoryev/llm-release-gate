@@ -103,10 +103,8 @@ def load_config(path: Path) -> PipelineConfig:
         raise ValueError(f"{path}: max_retries must be an integer >= 0")
     if type(timeout) not in (int, float) or not 0 < timeout < math.inf:
         raise ValueError(f"{path}: timeout_s must be a finite number > 0")
-    if not SNAPSHOT.match(raw["model"]):
-        raise ValueError(
-            f"{path}: model must be a dated snapshot, got {raw['model']!r}"
-        )
+    if not isinstance(raw["model"], str) or not raw["model"]:
+        raise ValueError(f"{path}: model must be a name, got {raw['model']!r}")
     try:
         prompt = prompt_files(raw["prompt"], Path(path).parent)
     except ValueError as e:
@@ -120,6 +118,11 @@ def load_config(path: Path) -> PipelineConfig:
         max_retries=retries,
         timeout_s=float(timeout),  # 60 and 60.0 must hash alike
     )
+
+
+def is_alias(model: str | None) -> bool:
+    """A model name without a date: the provider may change the model behind it (D-018)."""
+    return bool(model) and not SNAPSHOT.match(model)
 
 
 def pipeline_module(name: str) -> ModuleType:
