@@ -81,7 +81,8 @@ def test_gitlab_edits_its_note_on_the_merge_request():
     assert post("new\n", target(GITLAB_ENV), api) == "updated"
     get, put = api.calls
     notes = "https://git01lab.example/api/v4/projects/123/merge_requests/5/notes"
-    assert get[1] == f"{notes}?per_page=100" and get[2] == {"PRIVATE-TOKEN": "glpat"}
+    assert get[1] == f"{notes}?per_page=100&order_by=created_at&sort=asc"
+    assert get[2] == {"PRIVATE-TOKEN": "glpat"}
     assert put[:2] == ("PUT", f"{notes}/11")
     assert "[Job log](https://git01lab.example/me/gate/-/jobs/9)" in put[3]["body"]
 
@@ -135,3 +136,21 @@ def test_a_dry_run_prints_the_comment_and_posts_nothing(tmp_path, monkeypatch, c
     monkeypatch.setattr(comment, "call", lambda *a, **k: pytest.fail("posted"))
     comment.main([str(text), "--dry-run"])
     assert capsys.readouterr().out == "**Release gate: ❌ quality fail**\n"
+
+
+def test_check_fails_before_any_paid_run_without_a_token(monkeypatch, capsys):
+    monkeypatch.setattr(comment.os, "environ", {**GITLAB_ENV, "GITLAB_TOKEN": ""})
+    with pytest.raises(SystemExit, match="cannot comment: set GITLAB_TOKEN"):
+        comment.main(["--check"])
+    monkeypatch.setattr(comment.os, "environ", GITLAB_ENV)
+    comment.main(["--check"])
+    assert capsys.readouterr().out == "can comment\n"
+
+
+def test_without_a_verdict_the_request_still_hears_why(tmp_path, monkeypatch):
+    api = FakeAPI()
+    monkeypatch.setattr(comment.os, "environ", GITLAB_ENV)
+    monkeypatch.setattr(comment, "call", api)
+    comment.main([str(tmp_path / "missing.md")])
+    method, _, _, body = api.calls[-1]
+    assert method == "POST" and "infra error" in body["body"]
