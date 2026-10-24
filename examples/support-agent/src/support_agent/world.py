@@ -85,6 +85,8 @@ class World:
             begin = datetime.fromisoformat(start)
         except (TypeError, ValueError):
             raise ToolError(f"start must be YYYY-MM-DDTHH:MM, got {start!r}") from None
+        if begin.tzinfo:
+            raise ToolError("give Vienna local time, without an offset")
         if type(hours) is not int or hours < 1:
             raise ToolError("hours must be a whole number >= 1")
         end = begin + timedelta(hours=hours)
@@ -124,6 +126,8 @@ class World:
     # tools
 
     def find_member(self, email: str) -> dict:
+        if not isinstance(email, str):
+            raise ToolError("email must be a string")
         for m in self.tables["members"]:
             if m["email"].lower() == email.strip().lower():
                 return dict(m)
@@ -146,6 +150,8 @@ class World:
     ) -> list[dict]:
         if kind not in PRICE_EUR:
             raise ToolError("kind must be desk or room")
+        if type(people) is not int or people < 1:
+            raise ToolError("people must be a whole number >= 1")
         begin, end = self._slot(start, hours)
         return [
             {"space_id": s["id"], "name": s["name"], "capacity": s["capacity"]}
@@ -163,7 +169,8 @@ class World:
         begin, end = self._slot(start, hours)
         if self._busy(space_id, begin, end):
             raise ToolError(f"{space_id} is taken for part of this slot")
-        number = max(int(b["id"].split("-")[1]) for b in self.tables["bookings"]) + 1
+        ids = [int(b["id"].split("-")[1]) for b in self.tables["bookings"]]
+        number = max(ids, default=0) + 1
         booking = {
             "id": f"B-{number}",
             "member_id": member_id,
@@ -188,8 +195,9 @@ class World:
 
     def issue_credit(self, member_id: str, amount_eur: float, reason: str) -> dict:
         self._member(member_id)
-        if not isinstance(amount_eur, (int, float)) or amount_eur <= 0:
+        if type(amount_eur) not in (int, float) or amount_eur <= 0:
             raise ToolError("amount_eur must be a positive number")
+        amount_eur = round(float(amount_eur), 2)  # 15 and 15.0 must store alike
         credits = self.tables["credits"]
         credits.append(
             {"member_id": member_id, "amount_eur": amount_eur, "reason": reason}

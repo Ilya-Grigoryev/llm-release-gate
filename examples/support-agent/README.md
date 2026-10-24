@@ -8,21 +8,20 @@ tools, under a written policy. The test cases are this project's own, the way a 
 |---|---|
 | `policy.md` | the agent's policy: verification, plans, cancellation credits, escalation |
 | `tools.yaml` | the tools the agent sees, with their descriptions |
-| `simulator.md` | guidelines for the model that plays the member |
-| `cases/` | `world.yaml`, the starting database, and one file per case |
+| `cases/` | `world.yaml`, the starting database; `simulator.yaml`, the member simulator; one file per case |
 | `src/support_agent/world.py` | the database in memory and the eight tools |
 | `src/support_agent/agent.py` | the agent loop, the simulated member, one run of a case |
 | `src/support_agent/run.py` | runs cases against the API and prints what happened |
 
-`policy.md` and `tools.yaml` are the version under test: a pull request that edits them changes the agent. The member
-simulator (`simulator.md`, its model and parameters) belongs to the test set, so a change to the agent never changes the
-member it talks to.
+The version under test is `policy.md`, `tools.yaml`, the agent's model and parameters, its step limit and the agent
+code. The member simulator (`cases/simulator.yaml`: model, parameters, guidelines) belongs to the test set with the
+cases, so a pull request that changes the agent leaves the member as it was.
 
 ## Two modes
 
 - **Alone:** the agent gets the case's `ticket` as one message and cannot ask questions. Only the agent adds noise.
-- **Chat:** a model plays the member from the case's `user` scenario and ends the chat with `###STOP###`. The simulator
-  adds its own noise, and the difference between the modes estimates how much.
+- **Chat** (`--chat`): a model plays the member from the case's `user` scenario and ends the chat with `###STOP###`.
+  The simulator adds its own noise, and the difference between the modes estimates how much.
 
 ## Cases
 
@@ -36,11 +35,11 @@ exactly that change, so a wrong reference fails before any model sees the case.
 | policy | `cancel-early`, `cancel-late`, `move-booking` |
 | escalation | `cancel-big-credit` |
 | refusal | `room-on-basic`, `wrong-name`, `overlap` |
-| ambiguous | `which-booking` (the member does not say which booking until asked) |
+| ambiguous | `which-booking`: in a chat the member does not say which booking until asked; alone, the ticket names it |
 
-The tools enforce only what a booking system would: no double-booked space, opening hours, no past slots. Plans, a
-member's overlapping bookings, credits and escalation are policy. The agent can break them, and the cases check
-whether it does.
+The tools enforce only what a booking system would: no double-booked space, opening hours, no past slots. Plans, the
+1 to 4 hour length, a member's overlapping bookings, name checks, credits and escalation are policy. The agent can break
+them, and the cases check whether it does.
 
 ## Running
 
@@ -53,10 +52,13 @@ uv run pytest
 uv run --env-file ../../.env python -m support_agent.run cases/cancel-late.yaml cases/overlap.yaml \
   --model gpt-5.4-mini-2026-03-17 --params '{"temperature": 0}'
 # in a chat with a simulated member
-uv run --env-file ../../.env python -m support_agent.run cases/which-booking.yaml \
-  --model gpt-5.4-mini-2026-03-17 --params '{"temperature": 0}' \
-  --user-model gpt-5.4-mini-2026-03-17 --user-params '{"temperature": 0}'
+uv run --env-file ../../.env python -m support_agent.run cases/which-booking.yaml --chat \
+  --model gpt-5.4-mini-2026-03-17 --params '{"temperature": 0}'
 ```
 
 Each run prints the agent's tool calls and replies, the change it made to the database, the expected change, and
-whether they match.
+whether they match. `--out runs.jsonl` keeps one line per run with the time, the hashes of `policy.md`, `tools.yaml` and
+`simulator.yaml`, and the model the API reports.
+
+The database comparison sees only the end state. An agent that skips the name check, or one whose simulated member did
+the work, can still match it; checks on the agent's own steps come with the gate's trace.

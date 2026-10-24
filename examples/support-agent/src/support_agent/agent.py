@@ -9,7 +9,7 @@ from support_agent.world import ToolError, World
 GREETING = "Hi! How can I help you today?"
 SOLO = (
     "\n\n## This conversation\n\nYou are working on a written ticket. The member is not in the chat, so you cannot ask"
-    " questions or get confirmations: act on the ticket as written, then reply with a short summary of what you did."
+    " questions or get confirmations: act on the ticket within the policy, then reply with a short summary of what you did."
 )
 STOP = "###STOP###"
 

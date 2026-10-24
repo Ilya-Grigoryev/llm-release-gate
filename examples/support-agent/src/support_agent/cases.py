@@ -49,7 +49,7 @@ def load_cases(folder: Path) -> list[SupportCase]:
     return [
         load_case(p)
         for p in sorted(Path(folder).glob("*.yaml"))
-        if p.name != "world.yaml"
+        if p.name not in ("world.yaml", "simulator.yaml")
     ]
 
 

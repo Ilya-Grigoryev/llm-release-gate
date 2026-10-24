@@ -120,3 +120,30 @@ def test_state_is_a_copy():
     w.state()["bookings"].clear()
     assert w.list_bookings("M-1")
     assert TABLES["bookings"][0]["status"] == "active"
+
+
+def test_odd_arguments_get_errors_not_crashes():
+    w = world()
+    with pytest.raises(ToolError, match="string"):
+        w.find_member(123)
+    with pytest.raises(ToolError, match="offset"):
+        w.search_availability("desk", "2026-11-04T09:00+01:00", 1)
+    with pytest.raises(ToolError, match="people"):
+        w.search_availability("room", "2026-11-04T09:00", 1, people="six")
+    with pytest.raises(ToolError, match="positive"):
+        w.issue_credit("M-1", True, "bool is not money")
+
+
+def test_credits_store_one_number_type():
+    w = world()
+    w.issue_credit("M-1", 15, "a")
+    w.issue_credit("M-1", 15.0, "b")
+    amounts = [c["amount_eur"] for c in w.state()["credits"]]
+    assert amounts == [15.0, 15.0] and all(type(a) is float for a in amounts)
+
+
+def test_the_first_booking_of_an_empty_world():
+    empty = World({**TABLES, "bookings": []}, "2026-11-02T09:00")
+    assert (
+        empty.create_booking("M-1", "D-1", "2026-11-03T10:00", 1)["booking_id"] == "B-1"
+    )
