@@ -71,6 +71,10 @@ uv run python -m llm_release_gate.golden validate tests/fixtures/golden
 
 A case's `scoring` block picks the scorer. `field_match` compares each expected field with the answer. `fields` gives a field a type: a `date` or a `number` is compared by value (`25/12/2018` matches `25/12/2018 8:13 PM`, `9.00` matches `RM 9.0`), a `string` as text after the listed normalisers (`whitespace`, `casefold`). A label that does not parse is compared as text. A field expected as `null` is not scored. The case score is the share of right fields among the scored ones. Records keep the scorer version, and runs scored by different versions are not compared.
 
+## CI
+
+`.gitlab-ci.yml` and `.github/workflows/ci.yml` run the same checks: lint, the tests of the gate and of the example, and a validation of the test golden set. A manual `model-call` job makes one paid call and needs `OPENAI_API_KEY` as a GitLab CI/CD variable or a GitHub secret.
+
 ## Context
 
 Bachelor thesis at the University of Vienna, Software Architecture group. Supervisor: Dr. Theodoros Theodoropoulos.

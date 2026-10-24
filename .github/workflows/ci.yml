@@ -1,0 +1,63 @@
+# The same checks as .gitlab-ci.yml.
+name: ci
+
+on:
+  push:
+  workflow_dispatch:  # also runs model-call
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install --quiet uv==0.11.25
+      - run: uv sync --locked
+      - name: lint
+        run: |
+          uv run ruff format --check
+          uv run ruff check
+      - name: test
+        run: uv run pytest
+      - name: validate
+        run: uv run python -m llm_release_gate.golden validate tests/fixtures/golden
+
+  # The SROIE example installs the gate the way another project would.
+  example-test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: examples/sroie
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install --quiet uv==0.11.25
+      - run: uv sync --locked
+      - run: uv run pytest
+
+  # Paid call, so it runs only when started by hand.
+  model-call:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: examples/sroie
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install --quiet uv==0.11.25
+      - run: uv sync --locked
+      - run: uv run python -m llm_release_gate.runner --config configs/sroie-text.yaml --golden ../../tests/fixtures/golden --out model-call.jsonl
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: model-call
+          path: examples/sroie/model-call.jsonl
