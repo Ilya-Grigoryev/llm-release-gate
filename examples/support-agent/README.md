@@ -15,6 +15,7 @@ tools, under a written policy. The test cases are this project's own, the way a 
 | `src/support_agent/gate_adapter.py` | the gate's view: `build(config)` and `run(case)`, recording a trace |
 | `src/support_agent/golden.py` | builds `golden/solo` and `golden/chat` from `cases/` |
 | `configs/support.yaml` | the version under test for the gate |
+| `variants/`, `configs/support-*.yaml` | three edits of the policy: `reordered` (same text, other order), `no-verification` (no name check, overlapping bookings allowed), `credit-always` (a credit for every cancellation) |
 
 The version under test is `policy.md`, `tools.yaml`, the agent's model and parameters, its step limit and the agent
 code. The member simulator (`cases/simulator.yaml`: model, parameters, guidelines) belongs to the test set with the
