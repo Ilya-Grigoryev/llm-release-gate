@@ -7,7 +7,7 @@ from openai import OpenAI
 
 from llm_release_gate.pipeline import Answer, Case, PipelineConfig
 from sroie_example import pipeline
-from sroie_example.pipeline import SroiePipeline
+from sroie_example.pipeline import SroiePipeline, client_for
 
 # Both calls go through pipeline.py, so its VERSION is part of this one.
 VERSION = (pipeline.VERSION, 1)  # bump the 1 when this file changes what a call sends
@@ -49,7 +49,4 @@ class StepsPipeline(SroiePipeline):
 
 
 def build(config: PipelineConfig, client: OpenAI | None = None) -> StepsPipeline:
-    # The runner retries and counts retries, so the SDK must not retry on its own.
-    return StepsPipeline(
-        config, client or OpenAI(max_retries=0, timeout=config.timeout_s)
-    )
+    return StepsPipeline(config, client or client_for(config))
