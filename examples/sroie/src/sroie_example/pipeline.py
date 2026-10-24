@@ -65,6 +65,8 @@ class SroiePipeline:
     def __init__(self, config: PipelineConfig, client: OpenAI):
         if config.input not in INPUTS:
             raise ValueError(f"input must be one of {INPUTS}, got {config.input!r}")
+        if not isinstance(config.prompt, Path):
+            raise ValueError("prompt must be one file")  # noqa: TRY004 - a config error
         self.config = config
         self.client = client
         self.prompt = config.prompt.read_text()
@@ -78,6 +80,10 @@ class SroiePipeline:
         return [{"type": "image_url", "image_url": {"url": url, "detail": "high"}}]
 
     def run(self, case: Case) -> Answer:
+        return self.ask(self.prompt, self.content(case))
+
+    def ask(self, system: str, content: str | list) -> Answer:
+        """One call that answers with the four fields."""
         start = time.perf_counter()
         try:
             r = self.client.chat.completions.create(
@@ -92,8 +98,8 @@ class SroiePipeline:
                     },
                 },
                 messages=[
-                    {"role": "system", "content": self.prompt},
-                    {"role": "user", "content": self.content(case)},
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": content},
                 ],
             )
         except openai.RateLimitError as e:

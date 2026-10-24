@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import openai
 import pytest
 import yaml
-from sroie_example import golden, rescore
+from sroie_example import golden, rescore, steps
 from sroie_example.pipeline import SCORING, build, cases, parse_box
 
 from llm_release_gate.golden import load_cases, validate
@@ -28,20 +28,22 @@ RAW = json.dumps(OUTPUT)
 
 
 class FakeClient:
-    """Stands in for `openai.OpenAI`: records requests, returns a canned completion."""
+    """Stands in for `openai.OpenAI`: records requests, returns canned completions in turn."""
 
-    def __init__(self, content=RAW):
+    def __init__(self, *contents):
         self.requests = []
-        self.content = content
+        self.contents = contents or (RAW,)
         self.chat = SimpleNamespace(completions=SimpleNamespace(create=self.create))
 
     def create(self, **request):
         self.requests.append(request)
+        n = len(self.requests)
+        content = self.contents[min(n, len(self.contents)) - 1]
         return SimpleNamespace(
-            id="chatcmpl-1",
+            id=f"chatcmpl-{n}",
             choices=[
                 SimpleNamespace(
-                    message=SimpleNamespace(content=self.content), finish_reason="stop"
+                    message=SimpleNamespace(content=content), finish_reason="stop"
                 )
             ],
             model="gpt-4.1-mini-2025-04-14",
@@ -118,7 +120,7 @@ def test_image_input_sends_the_scan(tmp_path):
 
 
 def test_unparsable_answer_keeps_raw_text(tmp_path):
-    client = FakeClient(content='{"company": "C", "da')
+    client = FakeClient('{"company": "C", "da')
     answer = build(config(tmp_path, "text"), client).run(cases(FIXTURE)[0])
     assert answer.output is None
     assert answer.raw == '{"company": "C", "da'
@@ -154,11 +156,72 @@ def test_the_ci_smoke_set_runs_through_the_pipeline(tmp_path, input):
     assert answer.output == OUTPUT
 
 
-@pytest.mark.parametrize("name", ["sroie-text.yaml", "sroie-image.yaml"])
-def test_shipped_configs_load_through_the_gate(name):
-    config = load_config(EXAMPLE / "configs" / name)
-    assert config.pipeline == "sroie_example.pipeline" and config_hash(config)
-    assert load_pipeline(config, client=object()).config.input in name
+@pytest.mark.parametrize(
+    "name, input",
+    [("sroie-text", "text"), ("sroie-image", "image"), ("sroie-steps", "text")],
+)
+def test_shipped_configs_load_through_the_gate(name, input):
+    config = load_config(EXAMPLE / "configs" / f"{name}.yaml")
+    assert config.pipeline.startswith("sroie_example.") and config_hash(config)
+    assert load_pipeline(config, client=object()).config.input == input
+
+
+def test_one_and_two_steps_are_different_versions():
+    one, two = (
+        load_config(EXAMPLE / "configs" / f"{n}.yaml")
+        for n in ("sroie-text", "sroie-steps")
+    )
+    assert two.prompt["extract"] == one.prompt
+    assert config_hash(one) != config_hash(two)
+
+
+CHECKED = {**OUTPUT, "date": "25/12/2018", "total": "9.00"}
+
+
+def steps_config(tmp_path, input="text"):
+    (tmp_path / "check.md").write_text("Check fields.")
+    single = config(tmp_path, input)
+    named = {"extract": single.prompt, "check": tmp_path / "check.md"}
+    return replace(single, pipeline="sroie_example.steps", prompt=named)
+
+
+def test_steps_send_the_first_answer_to_the_check(tmp_path):
+    client = FakeClient(RAW, json.dumps(CHECKED))
+    answer = steps.build(steps_config(tmp_path), client).run(cases(FIXTURE)[0])
+    first, second = client.requests
+    assert first["messages"][0]["content"] == "Extract fields."
+    assert second["messages"][0]["content"] == "Check fields."
+    receipt = first["messages"][1]["content"]
+    assert (
+        second["messages"][1]["content"]
+        == f"{receipt}\n\nFields from the first step:\n{RAW}"
+    )
+    assert answer.output == CHECKED and answer.request_id == "chatcmpl-2"
+    assert (answer.input_tokens, answer.output_tokens) == (200, 40)
+
+
+def test_steps_show_the_scan_to_the_check(tmp_path):
+    scan = tmp_path / "scan.jpg"
+    scan.write_bytes(b"\xff\xd8not a real jpeg")
+    case = cases(FIXTURE)[0]
+    case = replace(case, inputs={**case.inputs, "image": scan})
+    client = FakeClient(RAW, json.dumps(CHECKED))
+    steps.build(steps_config(tmp_path, "image"), client).run(case)
+    image, fields = client.requests[1]["messages"][1]["content"]
+    assert image["type"] == "image_url" and fields["text"].endswith(RAW)
+
+
+def test_steps_stop_when_the_first_answer_is_not_json(tmp_path):
+    client = FakeClient('{"company": "C", "da')
+    answer = steps.build(steps_config(tmp_path), client).run(cases(FIXTURE)[0])
+    assert len(client.requests) == 1 and answer.output is None
+
+
+def test_each_pipeline_refuses_the_other_prompt_shape(tmp_path):
+    with pytest.raises(ValueError, match="extract, check"):
+        steps.build(config(tmp_path, "text"), FakeClient())
+    with pytest.raises(ValueError, match="one file"):
+        build(steps_config(tmp_path), FakeClient())
 
 
 def rate_limit(code=None):

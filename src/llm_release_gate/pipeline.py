@@ -53,7 +53,9 @@ class Pipeline(Protocol):
 class PipelineConfig:
     pipeline: str
     model: str
-    prompt: Path
+    prompt: (
+        Path | dict[str, Path]
+    )  # one file, or named files for a pipeline with several prompts
     input: str
     params: dict[str, Any] = field(default_factory=dict)
     max_retries: int = 5
@@ -71,8 +73,23 @@ def plain_numbers(value: Any) -> Any:
     return value
 
 
+def prompt_files(raw: Any, base: Path) -> Path | dict[str, Path]:
+    """`prompt:` is one file or a mapping of names to files, relative to `base`."""
+    if isinstance(raw, str):
+        return base / raw
+    if (
+        isinstance(raw, dict)
+        and raw
+        and all(isinstance(k, str) and isinstance(v, str) for k, v in raw.items())
+    ):
+        return {name: base / ref for name, ref in raw.items()}
+    raise ValueError(
+        f"prompt must be a file or a mapping of names to files, got {raw!r}"
+    )
+
+
 def load_config(path: Path) -> PipelineConfig:
-    """Read a pipeline config. The prompt path is relative to the config file."""
+    """Read a pipeline config. Prompt paths are relative to the config file."""
     raw = yaml.safe_load(Path(path).read_text())
     optional = {"params", "max_retries", "timeout_s"}
     keys = {"pipeline", "model", "prompt", "input"} | optional
@@ -90,10 +107,14 @@ def load_config(path: Path) -> PipelineConfig:
         raise ValueError(
             f"{path}: model must be a dated snapshot, got {raw['model']!r}"
         )
+    try:
+        prompt = prompt_files(raw["prompt"], Path(path).parent)
+    except ValueError as e:
+        raise ValueError(f"{path}: {e}") from None
     return PipelineConfig(
         pipeline=raw["pipeline"],
         model=raw["model"],
-        prompt=Path(path).parent / raw["prompt"],
+        prompt=prompt,
         input=raw["input"],
         params=plain_numbers(raw.get("params") or {}),
         max_retries=retries,
@@ -115,13 +136,16 @@ def pipeline_module(name: str) -> ModuleType:
 
 
 def config_hash(config: PipelineConfig) -> str:
-    """Identity of a pipeline version: every config field, the bytes of the prompt file and the
+    """Identity of a pipeline version: every config field, the bytes of each prompt file and the
     pipeline module's VERSION, which the module bumps when its code changes what the model is asked."""
     module = pipeline_module(config.pipeline)
+    prompt = config.prompt
     return canonical_hash(
         {
             **asdict(config),
-            "prompt": file_hash(config.prompt),
+            "prompt": file_hash(prompt)
+            if isinstance(prompt, Path)
+            else {name: file_hash(p) for name, p in prompt.items()},
             "pipeline_version": getattr(module, "VERSION", None),
         }
     )

@@ -5,6 +5,7 @@ A pipeline under the gate, set up the way another project would use it: it insta
 | Path | What |
 |---|---|
 | `src/sroie_example/pipeline.py` | `build(config)`: one OpenAI call per receipt, a JSON schema with the four fields |
+| `src/sroie_example/steps.py` | the same in two calls: extract the fields, then check them against the receipt |
 | `src/sroie_example/golden.py` | builds the golden set from a SROIE split |
 | `src/sroie_example/rescore.py` | rescores saved runs without calling the model |
 | `golden/sroie.yaml` | seed, receipt ids and hash of the golden set |
@@ -32,4 +33,16 @@ uv run python -m sroie_example.rescore ../../data/runs/2026-10-12/base-text-r*.j
 uv run pytest
 ```
 
-An edit to a prompt in `prompts/` makes a new pipeline version with its own config hash. Bump `VERSION` in `pipeline.py` when you change what the code sends to the model.
+## One step or two
+
+`configs/sroie-steps.yaml` runs `sroie_example.steps`. Step 1 extracts the fields with the prompt of `sroie-text.yaml`; step 2 gets the receipt and those fields and checks them with `prompts/sroie_check.md`. A record holds the final answer and the tokens and time of both calls. To see whether the second call pays off, run both versions on the same set and let the gate compare them:
+
+```sh
+uv run --env-file ../../.env python -m llm_release_gate.runner --config configs/sroie-text.yaml --golden ../../data/golden/sroie --out ../../data/runs/one-step.jsonl
+uv run --env-file ../../.env python -m llm_release_gate.runner --config configs/sroie-steps.yaml --golden ../../data/golden/sroie --out ../../data/runs/two-steps.jsonl
+uv run python -m llm_release_gate.gate --base ../../data/runs/one-step.jsonl --candidate ../../data/runs/two-steps.jsonl
+```
+
+The gate sees only the final answer for now: it cannot yet tell which step went wrong.
+
+An edit to a prompt in `prompts/` makes a new pipeline version with its own config hash. Bump `VERSION` in `pipeline.py` or `steps.py` when you change what the code sends to the model.

@@ -21,7 +21,7 @@ Name the module by its import path in the config of each version:
 ```yaml
 pipeline: my_app.gate_adapter   # installed, or importable from where you run the gate
 model: gpt-4.1-mini-2025-04-14  # a dated snapshot
-prompt: prompts/extract.md      # relative to this file
+prompt: prompts/extract.md      # relative to this file, or named files: {extract: a.md, check: b.md}
 input: text
 params: {temperature: 0}
 ```
@@ -30,7 +30,7 @@ The gate's code imports no pipeline. Give your module a `VERSION` and bump it wh
 
 ## Running a version
 
-Each pipeline version is a YAML file: pipeline module, model snapshot, prompt file, input, API parameters and, optionally, `max_retries` (default 5) and `timeout_s` (default 60). Its hash covers every field, the prompt's bytes and the module's `VERSION`; key order, YAML formatting and `0` versus `0.0` do not change it.
+Each pipeline version is a YAML file: pipeline module, model snapshot, prompt file (or named prompt files for a pipeline with several steps), input, API parameters and, optionally, `max_retries` (default 5) and `timeout_s` (default 60). Its hash covers every field, the bytes of each prompt and the module's `VERSION`; key order, YAML formatting and `0` versus `0.0` do not change it.
 
 The runner calls the pipeline K times per case of a golden set and appends one JSON record per call, stamped with the config hash, the set hash and the scorer version. A rerun pays only for what is missing. The runner retries rate limits, timeouts and server errors with backoff 1, 2, 4... s and stops when the account is out of quota.
 

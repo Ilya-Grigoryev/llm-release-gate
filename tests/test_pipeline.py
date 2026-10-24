@@ -114,6 +114,35 @@ def test_config_hash_changes_with_the_version(tmp_path, change):
     assert config_at(tmp_path / "a") != config_at(tmp_path / "b", **change)
 
 
+NAMED = CONFIG.replace(
+    "prompt: prompt.md", "prompt: {extract: prompt.md, check: check.md}"
+)
+
+
+def test_named_prompts_resolve_next_to_the_config_and_enter_the_hash(tmp_path):
+    (tmp_path / "prompt.md").write_text("Extract fields.")
+    (tmp_path / "check.md").write_text("Check fields.")
+    config = load_config(write(tmp_path / "c.yaml", NAMED))
+    assert config.prompt == {
+        "extract": tmp_path / "prompt.md",
+        "check": tmp_path / "check.md",
+    }
+    before = config_hash(config)
+    swapped = NAMED.replace(
+        "extract: prompt.md, check: check.md", "check: check.md, extract: prompt.md"
+    )
+    assert config_hash(load_config(write(tmp_path / "d.yaml", swapped))) == before
+    (tmp_path / "check.md").write_text("Check the fields.")
+    assert config_hash(config) != before
+
+
+@pytest.mark.parametrize("prompt", ["{}", "[a.md, b.md]", "{check: 1}", "7"])
+def test_a_bad_prompt_is_rejected(tmp_path, prompt):
+    body = CONFIG.replace("prompt: prompt.md", f"prompt: {prompt}")
+    with pytest.raises(ValueError, match="prompt must be"):
+        load_config(write(tmp_path / "c.yaml", body))
+
+
 def test_whole_floats_in_params_become_ints():
     got = plain_numbers({"t": 0.0, "p": 0.5, "n": [1.0, True], "d": {"x": 2.0}})
     assert (
