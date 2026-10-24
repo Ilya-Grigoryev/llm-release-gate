@@ -255,3 +255,47 @@ def test_the_comment_shows_the_limit_at_the_same_precision():
     v = gate.naive({"a": 1.0, "b": 1.0}, {"a": 0.9, "b": 1.0}, 5)
     text = gate.markdown(v, *[gate.Arm("c" * 64, "s" * 64, "metrics/4", {})] * 2)
     assert "(-5.00 points, blocks below -5.00)" in text
+
+
+def test_the_comment_shows_what_the_decision_cost(tmp_path, monkeypatch, capsys):
+    base = runs(tmp_path, monkeypatch, "base", 0, Fixed())
+    cand = runs(tmp_path, monkeypatch, "cand", 1, Fixed())
+    prices = tmp_path / "prices.yaml"
+    # the longest matching prefix wins
+    prices.write_text("gpt-4.1: [9, 9]\ngpt-4.1-mini: [0.40, 1.60]\n")
+    report, comment = tmp_path / "v.json", tmp_path / "c.md"
+    args = ["--base", str(base), "--candidate", str(cand), "--prices", str(prices)]
+    args += ["--json", str(report), "--markdown", str(comment)]
+    assert gate.main(args) == gate.PASS
+    one = (100 * 0.40 + 20 * 1.60) / 1e6  # one case, 100 input and 20 output tokens
+    assert json.loads(report.read_text())["cost_usd"] == pytest.approx(
+        {"base": one, "candidate": one}
+    )
+    assert "Cost of this decision $0.000: base $0.000" in comment.read_text()
+
+
+@pytest.mark.parametrize(
+    "prices, code, text",
+    [
+        ("gpt-5: [1, 1]\n", gate.PASS, "has no price"),
+        ("gpt-4.1-mini: [0.40]\n", gate.INFRA_ERROR, None),
+        ("gpt-4.1-mini: [-1, 1]\n", gate.INFRA_ERROR, None),
+    ],
+)
+def test_prices_cover_every_model_or_say_so(
+    tmp_path, monkeypatch, capsys, prices, code, text
+):
+    base = runs(tmp_path, monkeypatch, "base", 0, Fixed())
+    cand = runs(tmp_path, monkeypatch, "cand", 1, Fixed())
+    (tmp_path / "p.yaml").write_text(prices)
+    comment = tmp_path / "c.md"
+    args = [
+        "--base",
+        str(base),
+        "--candidate",
+        str(cand),
+        "--prices",
+        str(tmp_path / "p.yaml"),
+    ]
+    assert gate.main([*args, "--markdown", str(comment)]) == code
+    assert (text in comment.read_text()) if text else not comment.exists()

@@ -10,6 +10,8 @@ from dataclasses import asdict, dataclass, replace
 from fractions import Fraction
 from pathlib import Path
 
+import yaml
+
 from llm_release_gate.compare import Arm, Mismatch, load_arm, pair
 from llm_release_gate.golden import load_cases, validate
 from llm_release_gate.metrics import VERSION, score
@@ -72,7 +74,7 @@ def naive(
         key=lambda t: t[2] - t[1],
     )
     unit = "% of the base mean" if relative else "points"
-    rule = f"block if the mean drops by more than {threshold_pp:g} {unit}"
+    rule = f"naive rule: block if the mean drops by more than {threshold_pp:g} {unit}"
     return Verdict(
         VERDICTS[code],
         code,
@@ -119,7 +121,44 @@ def first_run(records: list[dict]) -> float:
     return r["score"]
 
 
-def markdown(v: Verdict, base: Arm, candidate: Arm) -> str:
+def load_prices(path: Path) -> dict[str, tuple[float, float]]:
+    """Model name prefix -> USD per 1M input tokens and per 1M output tokens."""
+    raw = yaml.safe_load(Path(path).read_text())
+    ok = isinstance(raw, dict) and all(
+        isinstance(k, str)
+        and isinstance(v, list)
+        and len(v) == 2
+        and all(type(x) in (int, float) and x >= 0 for x in v)
+        for k, v in raw.items()
+    )
+    if not ok:
+        raise ValueError(
+            f"{path}: expected `model: [input, output]` in USD per 1M tokens"
+        )
+    return {k: (float(v[0]), float(v[1])) for k, v in raw.items()}
+
+
+def cost(arm: Arm, prices: dict[str, tuple[float, float]]) -> float | None:
+    """USD for the arm's recorded calls; None if a model has no price. The longest matching prefix wins."""
+    total = 0.0
+    for r in arm.records.values():
+        model = str(r.get("model") or "")
+        key = max((k for k in prices if model.startswith(k)), key=len, default=None)
+        if key is None:
+            return None
+        p_in, p_out = prices[key]
+        total += (
+            (r.get("input_tokens") or 0) * p_in + (r.get("output_tokens") or 0) * p_out
+        ) / 1e6
+    return total
+
+
+def markdown(
+    v: Verdict,
+    base: Arm,
+    candidate: Arm,
+    costs: tuple[float | None, float | None] | None = None,
+) -> str:
     icon = {"pass": "✅", "quality fail": "❌"}[v.outcome]
     lines = [
         f"**Release gate: {icon} {v.outcome}**",
@@ -133,6 +172,14 @@ def markdown(v: Verdict, base: Arm, candidate: Arm) -> str:
             f"{candidate.config_hash[:8]} · set {base.set_hash[:8]}"
         ),
     ]
+    if costs and None in costs:
+        lines.append("Cost: a model in these runs has no price.")
+    elif costs:
+        b, c = costs
+        lines.append(
+            f"Cost of this decision ${b + c:.3f}: base ${b:.3f}, candidate ${c:.3f} "
+            "(successful calls, list prices)."
+        )
     if v.worse:
         lines += ["", "| Case | Base | Candidate |", "|---|---|---|"]
         lines += [f"| {k} | {b:.2f} | {c:.2f} |" for k, b, c in v.worse[:5]]
@@ -177,6 +224,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         type=Path,
         help="rescore both versions from their saved answers against this set",
     )
+    p.add_argument(
+        "--prices", type=Path, help="YAML `model: [input, output]`, USD per 1M tokens"
+    )
     p.add_argument("--json", type=Path, help="write the verdict as JSON")
     p.add_argument("--markdown", type=Path, help="write the merge request comment")
     args = p.parse_args(argv)
@@ -194,7 +244,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.threshold,
             args.relative,
         )
-        text = markdown(v, base, candidate)
+        prices = load_prices(args.prices) if args.prices else None
+        costs = (cost(base, prices), cost(candidate, prices)) if prices else None
+        text = markdown(v, base, candidate, costs)
         report = {
             **asdict(v),
             "threshold_pp": args.threshold,
@@ -204,6 +256,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "set_hash": base.set_hash,
             "scorer_version": base.scorer_version,
             "rescored": bool(args.golden),
+            "cost_usd": dict(zip(("base", "candidate"), costs)) if costs else None,
             # the naive gate uses only the first of these
             "runs_per_case": {
                 "base": max(len(b) for b, _ in pairs.values()),
