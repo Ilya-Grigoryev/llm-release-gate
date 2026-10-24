@@ -41,7 +41,7 @@ uv run --env-file ../../.env python -m llm_release_gate.runner --config configs/
 
 ## The naive gate
 
-The first gate compares one run per version: it blocks when the candidate's mean score is lower than the base's by more than a threshold, 5 points by default (`--relative` reads it as a percentage of the base mean). It pairs the two files case by case and refuses files with different set hashes, different scorer versions or cases missing from one side. `--golden` rescores both sides from their saved answers with the current scorer, without calling the model.
+The first gate compares one run per version: it blocks when the candidate's mean score is lower than the base's by more than a threshold, 5 points by default (`--relative` reads it as a percentage of the base mean). It pairs the two files case by case and refuses files with different set hashes, different scorer versions or cases missing from one side. `--golden` rescores both sides from their saved answers with the current scorer, without calling the model. `--prices` takes a YAML of `model: [input, output]` in USD per 1M tokens and adds what the decision cost: every successful call of both runs.
 
 ```sh
 uv run python -m llm_release_gate.gate --base data/runs/base.jsonl --candidate data/runs/candidate.jsonl --markdown comment.md --json verdict.json
@@ -73,7 +73,17 @@ A case's `scoring` block picks the scorer. `field_match` compares each expected 
 
 ## CI
 
-`.gitlab-ci.yml` and `.github/workflows/ci.yml` run the same checks: lint, the tests of the gate and of the example, and a validation of the test golden set. A manual `model-call` job makes one paid call and needs `OPENAI_API_KEY` as a GitLab CI/CD variable or a GitHub secret.
+`.gitlab-ci.yml` and `.github/workflows/ci.yml` run the same checks on every push: lint, the tests of the gate and of the example, and a validation of the test golden set. A manual `model-call` job makes one paid call.
+
+On a pull or merge request, `release-gate` gates the SROIE example. `ci/gate.sh` runs the version from the target branch and the one from the request on the golden set, in parallel and each with its own code, then the gate. `python -m llm_release_gate.comment` posts the verdict as one comment and edits it on later pushes. The job only advises until you make it a required check (GitHub) or drop `allow_failure` (GitLab). A run costs about $0.06: 30 scans per version.
+
+It needs:
+
+- `OPENAI_API_KEY` as a GitHub secret or a masked GitLab CI/CD variable;
+- the golden set archive, `sroie.tar.gz` of `data/golden/sroie`: the release `golden-sroie-9436cc87` on GitHub, the generic package `golden-sroie/9436cc87` on GitLab; the job checks it against `examples/sroie/golden/sroie.yaml`;
+- on GitLab, `GITLAB_TOKEN`: a project access token with the `api` scope, to write the comment.
+
+`python -m llm_release_gate.comment comment.md --dry-run` prints the comment and posts nothing.
 
 ## Context
 

@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# Gate a pull or merge request: run the base version (from BASE_REV) and the candidate (this
+# checkout) on the golden set, compare them and write OUT_DIR/comment.md.
+# Usage: ci/gate.sh BASE_REV EXAMPLE_DIR CONFIG GOLDEN_DIR OUT_DIR   (CONFIG relative to EXAMPLE_DIR)
+# Exits with the gate's code: 0 pass, 10 quality fail, 11 inconclusive, 12 budget fail, 20 infra error.
+set -uo pipefail
+base_rev=$1 example=$2 config=$3
+golden=$(cd "$4" && pwd)
+mkdir -p "$5" && out=$(cd "$5" && pwd)
+root=$(pwd)
+
+infra() {  # MESSAGE [LOG]: a comment for a run that could not decide
+  {
+    printf '**Release gate: ⚠️ infra error**\n\n%s\n' "$1"
+    if [ -n "${2:-}" ]; then printf '\n```\n%s\n```\n' "$(tail -n 15 "$2")"; fi
+  } > "$out/comment.md"
+  echo "infra error: $1" >&2
+  exit 20
+}
+
+run() {  # TREE OUT: one version's runs, with that tree's own code
+  cd "$1/$example" && uv sync --locked --quiet &&
+    uv run python -m llm_release_gate.runner --config "$config" --golden "$golden" --out "$2"
+}
+
+trap 'git -C "$root" worktree remove --force "$out/base-tree" 2> /dev/null' EXIT
+git worktree add --detach "$out/base-tree" "$base_rev" > /dev/null ||
+  infra "Cannot check out the target branch ($base_rev)."
+[ -f "$out/base-tree/$example/$config" ] ||
+  infra "The target branch has no $example/$config, so there is no base version to compare with."
+
+(run "$out/base-tree" "$out/base.jsonl") > "$out/base.log" 2>&1 & base_pid=$!
+(run "$root" "$out/candidate.jsonl") > "$out/candidate.log" 2>&1 & candidate_pid=$!
+wait "$base_pid"; base_status=$?
+wait "$candidate_pid"; candidate_status=$?
+for arm in base candidate; do echo "--- $arm"; cat "$out/$arm.log"; done
+[ "$base_status" -eq 0 ] || infra "The base version did not finish its runs." "$out/base.log"
+[ "$candidate_status" -eq 0 ] || infra "The candidate did not finish its runs." "$out/candidate.log"
+
+cd "$root/$example"
+prices=()
+if [ -f prices.yaml ]; then prices=(--prices prices.yaml); fi
+uv run python -m llm_release_gate.gate --base "$out/base.jsonl" --candidate "$out/candidate.jsonl" \
+  --golden "$golden" ${prices[@]+"${prices[@]}"} --markdown "$out/comment.md" --json "$out/verdict.json" 2> "$out/gate.log"
+code=$?
+cat "$out/gate.log" >&2
+if [ "$code" -eq 20 ] || [ ! -f "$out/comment.md" ]; then infra "The gate could not compare the runs." "$out/gate.log"; fi
+exit "$code"

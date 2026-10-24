@@ -46,3 +46,34 @@ model-call:
     when: always
     paths:
       - examples/sroie/model-call.jsonl
+
+# Base version (the target branch) against the candidate (this merge request) on the golden set from
+# the Package Registry (D-010); one comment with the verdict. Needs GITLAB_TOKEN (api scope) and
+# OPENAI_API_KEY as masked CI/CD variables. Advisory: allow_failure keeps the merge open.
+release-gate:
+  extends: .python
+  image: python:3.12  # git and curl
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  allow_failure: true
+  timeout: 30m
+  variables:
+    CONFIG: configs/sroie-image.yaml
+    GOLDEN_PACKAGE: golden-sroie/9436cc87/sroie.tar.gz
+  script:
+    - curl --fail --silent --show-error --header "JOB-TOKEN: $CI_JOB_TOKEN" -o /tmp/sroie.tar.gz "$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/generic/$GOLDEN_PACKAGE"
+    - mkdir -p data/golden && tar -xzf /tmp/sroie.tar.gz -C data/golden
+    - (cd examples/sroie && uv sync --locked && uv run python -m llm_release_gate.golden validate ../../data/golden/sroie --manifest golden/sroie.yaml)
+    - git fetch --depth=1 origin "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
+    - |
+      code=0
+      ci/gate.sh FETCH_HEAD examples/sroie "$CONFIG" data/golden/sroie out || code=$?
+      (cd examples/sroie && uv run python -m llm_release_gate.comment ../../out/comment.md) || [ "$code" -ne 0 ] || code=1
+      exit "$code"
+  artifacts:
+    when: always
+    paths:
+      - out/*.jsonl
+      - out/*.json
+      - out/*.md
+      - out/*.log

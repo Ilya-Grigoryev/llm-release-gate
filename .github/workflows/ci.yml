@@ -3,10 +3,12 @@ name: ci
 
 on:
   push:
+  pull_request:  # runs release-gate only
   workflow_dispatch:  # also runs model-call
 
 jobs:
   gate:
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -26,6 +28,7 @@ jobs:
 
   # The SROIE example installs the gate the way another project would.
   example-test:
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -61,3 +64,47 @@ jobs:
         with:
           name: model-call
           path: examples/sroie/model-call.jsonl
+
+  # Base version (the target branch) against the candidate (this pull request merged into it) on
+  # the golden set; one comment with the verdict. Advisory: make it a required check to block merges.
+  release-gate:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pull-requests: write
+    env:
+      CONFIG: configs/sroie-image.yaml
+      GOLDEN_RELEASE: golden-sroie-9436cc87
+      GH_TOKEN: ${{ github.token }}
+      GITHUB_TOKEN: ${{ github.token }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: pip install --quiet uv==0.11.25
+      - name: golden set
+        run: |
+          gh release download "$GOLDEN_RELEASE" -p sroie.tar.gz -D /tmp
+          mkdir -p data/golden && tar -xzf /tmp/sroie.tar.gz -C data/golden
+          cd examples/sroie && uv sync --locked
+          uv run python -m llm_release_gate.golden validate ../../data/golden/sroie --manifest golden/sroie.yaml
+      - name: gate
+        run: |
+          git fetch --depth=1 origin "$GITHUB_BASE_REF"
+          code=0
+          ci/gate.sh FETCH_HEAD examples/sroie "$CONFIG" data/golden/sroie out || code=$?
+          (cd examples/sroie && uv run python -m llm_release_gate.comment ../../out/comment.md) || [ "$code" -ne 0 ] || code=1
+          exit "$code"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: release-gate
+          path: |
+            out/*.jsonl
+            out/*.json
+            out/*.md
+            out/*.log
