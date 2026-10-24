@@ -15,7 +15,7 @@ Run the commands from this directory. The data stays out of git, in the reposito
 
 ```sh
 uv sync
-# rebuild the golden set from the ids in golden/sroie.yaml
+# rebuild the golden set from the ids in golden/sroie.yaml, into an empty ../../data/golden/sroie
 uv run python -m sroie_example.golden
 uv run python -m llm_release_gate.golden validate ../../data/golden/sroie --manifest golden/sroie.yaml
 ```

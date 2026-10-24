@@ -208,7 +208,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         config = load_config(args.config)
         hashes = {"config_hash": config_hash(config), "set_hash": set_hash}
         pipeline = load_pipeline(config)
-    except ValueError as e:
+    except (ValueError, OSError) as e:  # a bad config, a missing prompt file
         sys.exit(str(e))
     cases = load_cases(args.golden)
     try:

@@ -451,3 +451,11 @@ def test_cli_reports_a_bad_pipeline_without_a_traceback(tmp_path):
     ):
         runner.main([*args, "--out", str(tmp_path / "o.jsonl")])
     assert not (tmp_path / "o.jsonl").exists()
+
+
+def test_cli_reports_a_missing_prompt_without_a_traceback(tmp_path):
+    config_path = tmp_path / "c.yaml"
+    config_path.write_text((FIXTURES / "config.yaml").read_text())
+    args = ["--config", str(config_path), "--golden", str(FIXTURES / "golden")]
+    with pytest.raises(SystemExit, match="prompt.md"):
+        runner.main([*args, "--out", str(tmp_path / "o.jsonl")])
