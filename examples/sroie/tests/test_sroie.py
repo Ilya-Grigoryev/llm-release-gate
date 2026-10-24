@@ -361,3 +361,14 @@ def test_rescore_counts_an_empty_label_only_outside_the_gate(
     copy = json.loads((out / "r.jsonl").read_text())
     assert copy["hits"]["total"] is total
     assert copy["scorer_version"].endswith("" if variant == "typed" else f"+{variant}")
+
+
+def test_a_missing_api_key_is_a_config_error(tmp_path, monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    for module in (one_step, steps):
+        with pytest.raises(ValueError, match="OPENAI_API_KEY"):
+            module.build(
+                config(tmp_path, "text")
+                if module is one_step
+                else steps_config(tmp_path)
+            )

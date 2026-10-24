@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 MARKER = "<!-- llm-release-gate -->"
+NO_VERDICT = "**Release gate: ⚠️ infra error**\n\nThe job stopped before the gate wrote a verdict; see the job log.\n"
 Send = Callable[..., Any]
 
 
@@ -21,7 +22,8 @@ class NoTarget(Exception):
 
 @dataclass(frozen=True)
 class Target:
-    comments: str  # list with GET, create with POST
+    comments: str  # create with POST
+    listing: str  # GET: the earlier comments, oldest first
     edit: str  # one comment, `{id}` filled in
     edit_method: str
     headers: dict[str, str]
@@ -42,8 +44,10 @@ def target(env: Mapping[str, str]) -> Target:
         api = env.get("GITHUB_API_URL", "https://api.github.com")
         issues = f"{api}/repos/{env['GITHUB_REPOSITORY']}/issues"
         run = env.get("GITHUB_RUN_ID")
+        comments = f"{issues}/{event['pull_request']['number']}/comments"
         return Target(
-            f"{issues}/{event['pull_request']['number']}/comments",
+            comments,
+            f"{comments}?per_page=100",
             f"{issues}/comments/{{id}}",
             "PATCH",
             {
@@ -68,6 +72,7 @@ def target(env: Mapping[str, str]) -> Target:
         )
         return Target(
             notes,
+            f"{notes}?per_page=100&order_by=created_at&sort=asc",
             f"{notes}/{{id}}",
             "PUT",
             {"PRIVATE-TOKEN": token},
@@ -92,9 +97,7 @@ def post(text: str, t: Target, send: Send | None = None) -> str:
     send = send or call
     body = f"{MARKER}\n{text}" + (f"\n[Job log]({t.run_url})\n" if t.run_url else "")
     earlier = [
-        c
-        for c in send("GET", f"{t.comments}?per_page=100", t.headers)
-        if MARKER in (c.get("body") or "")
+        c for c in send("GET", t.listing, t.headers) if MARKER in (c.get("body") or "")
     ]
     if earlier:
         send(
@@ -107,19 +110,33 @@ def post(text: str, t: Target, send: Send | None = None) -> str:
 
 def main(argv: list[str] | None = None) -> None:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("file", type=Path, help="Markdown from the gate's --markdown")
+    p.add_argument(
+        "file", type=Path, nargs="?", help="Markdown from the gate's --markdown"
+    )
     p.add_argument(
         "--dry-run", action="store_true", help="print the comment, post nothing"
     )
+    p.add_argument(
+        "--check",
+        action="store_true",
+        help="only check that this job can comment, before paying for runs",
+    )
     args = p.parse_args(argv)
-    if not args.file.is_file():
-        sys.exit(f"{args.file}: no such file")
-    text = args.file.read_text()
+    if not args.check and not args.file:
+        p.error("give the Markdown file, or --check")
     if args.dry_run:
-        print(text, end="")
+        if not args.file.is_file():
+            sys.exit(f"{args.file}: no such file")
+        print(args.file.read_text(), end="")
         return
+    # no file: the job failed before the gate ran, and the request still learns that
+    text = args.file.read_text() if args.file and args.file.is_file() else NO_VERDICT
     try:
-        print(f"comment {post(text, target(os.environ))}")
+        t = target(os.environ)
+        if args.check:
+            print("can comment")
+            return
+        print(f"comment {post(text, t)}")
     except NoTarget as e:
         sys.exit(f"cannot comment: {e}")
     except urllib.error.HTTPError as e:

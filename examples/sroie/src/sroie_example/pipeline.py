@@ -135,8 +135,13 @@ class SroiePipeline:
         )
 
 
-def build(config: PipelineConfig, client: OpenAI | None = None) -> SroiePipeline:
+def client_for(config: PipelineConfig) -> OpenAI:
     # The runner retries and counts retries, so the SDK must not retry on its own.
-    return SroiePipeline(
-        config, client or OpenAI(max_retries=0, timeout=config.timeout_s)
-    )
+    try:
+        return OpenAI(max_retries=0, timeout=config.timeout_s)
+    except openai.OpenAIError as e:  # no OPENAI_API_KEY: a config error, not a crash
+        raise ValueError(str(e)) from e
+
+
+def build(config: PipelineConfig, client: OpenAI | None = None) -> SroiePipeline:
+    return SroiePipeline(config, client or client_for(config))

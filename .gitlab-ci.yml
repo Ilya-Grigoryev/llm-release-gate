@@ -56,20 +56,20 @@ release-gate:
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
   allow_failure: true
+  interruptible: true  # a new push replaces the run for the old one
   timeout: 30m
   variables:
     CONFIG: configs/sroie-image.yaml
     GOLDEN_PACKAGE: golden-sroie/9436cc87/sroie.tar.gz
   script:
+    - (cd examples/sroie && uv sync --locked && uv run python -m llm_release_gate.comment --check)
     - curl --fail --silent --show-error --header "JOB-TOKEN: $CI_JOB_TOKEN" -o /tmp/sroie.tar.gz "$CI_API_V4_URL/projects/$CI_PROJECT_ID/packages/generic/$GOLDEN_PACKAGE"
     - mkdir -p data/golden && tar -xzf /tmp/sroie.tar.gz -C data/golden
-    - (cd examples/sroie && uv sync --locked && uv run python -m llm_release_gate.golden validate ../../data/golden/sroie --manifest golden/sroie.yaml)
+    - (cd examples/sroie && uv run python -m llm_release_gate.golden validate ../../data/golden/sroie --manifest golden/sroie.yaml)
     - git fetch --depth=1 origin "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
-    - |
-      code=0
-      ci/gate.sh FETCH_HEAD examples/sroie "$CONFIG" data/golden/sroie out || code=$?
-      (cd examples/sroie && uv run python -m llm_release_gate.comment ../../out/comment.md) || [ "$code" -ne 0 ] || code=1
-      exit "$code"
+    - ci/gate.sh FETCH_HEAD examples/sroie "$CONFIG" data/golden/sroie out
+  after_script:  # runs after a failed script too
+    - cd examples/sroie && uv run python -m llm_release_gate.comment ../../out/comment.md
   artifacts:
     when: always
     paths:
