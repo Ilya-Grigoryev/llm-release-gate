@@ -99,7 +99,7 @@ def rescored(arm: Arm, golden: Path) -> Arm:
     records = {}
     for key, r in arm.records.items():
         case = cases[r["case"]]
-        result = score(case.expected, r.get("output"), case.scoring)
+        result = score(case.expected, r.get("output"), case.scoring, r.get("trace"))
         records[key] = {
             **r,
             "hits": result["per_field"],

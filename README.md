@@ -103,6 +103,23 @@ uv run python -m llm_release_gate.golden validate tests/fixtures/golden
 
 A case's `scoring` block picks the scorer. `field_match` compares each expected field with the answer. `fields` gives a field a type: a `date` or a `number` is compared by value (`25/12/2018` matches `25/12/2018 8:13 PM`, `9.00` matches `RM 9.0`), a `string` as text after the listed normalisers (`whitespace`, `casefold`). A label that does not parse is compared as text. A field expected as `null` is not scored. The case score is the share of right fields among the scored ones. Records keep the scorer version, and runs scored by different versions are not compared.
 
+`checks` runs a list of checks over the answer and the trace. Each gives true or false, a share, or nothing when it does not apply; the record keeps every result, and `aggregate` turns them into the case score: `mean` (default) or `all` (1 only if every scored check passes).
+
+```yaml
+scoring:
+  method: checks
+  aggregate: all
+  checks:
+    - {id: state, kind: state, key: state_change}    # equals expected.state_change
+    - {id: acted, kind: active}                      # the agent called a tool itself
+    - {id: verified, kind: order, first: find_member, then: [create_booking, cancel_booking]}
+    - {id: no-big-credit, kind: not_called, tool: issue_credit, args: {amount_eur: {gt: 30}}}
+    - {id: steps, kind: max_steps, max: 12}
+    - {id: reply, kind: regex, field: reply, pattern: "B-\\d+"}
+```
+
+Answer checks: `field_match`, `exact`, `contains`, `regex`, `number` (with `tol`), `json_schema`, `refusal`. Trace checks: `called` and `not_called` (with argument conditions `eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `in`), `order`, `max_steps`, `active`, `actions` (one result per expected action), `state`, `doc_found` (the share of expected documents retrieved). `function` calls your own `module:function` with the expected values, the answer, the trace and the check. Trace checks look at the steps of the runner's last attempt, at the agent unless `actor` says otherwise, and fail when the run has no trace.
+
 ## CI
 
 `.gitlab-ci.yml` and `.github/workflows/ci.yml` run the same checks on every push: lint, the tests of the gate and of each example, and a validation of the test golden set.

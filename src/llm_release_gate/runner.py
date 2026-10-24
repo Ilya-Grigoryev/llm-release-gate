@@ -152,7 +152,8 @@ def run(
         hits = value = score_error = None
         if answer:
             try:
-                hits = score(case, answer)
+                with active(trace):  # a scorer may check the trace
+                    hits = score(case, answer)
                 value = mean(hits)
             except Exception as e:  # noqa: BLE001 - keep the paid answer, rescore later
                 score_error = f"{type(e).__name__}: {e}"

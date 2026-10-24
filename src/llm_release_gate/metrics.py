@@ -10,7 +10,7 @@ from llm_release_gate.pipeline import Answer, Case
 
 # Bump when any scorer gives a different verdict for the same answer: records keep it, and runs
 # scored by different versions are not compared.
-VERSION = 4
+VERSION = 5  # 5: method `checks`, aggregate `all`; field_match unchanged
 
 NORMALISERS: dict[str, Callable[[str], str]] = {
     "whitespace": lambda s: " ".join(s.split()),
@@ -175,17 +175,41 @@ def field_match(expected: dict, actual: Any, config: dict) -> dict[str, bool | N
     }
 
 
-METHODS = {"field_match": field_match}
+def by_checks(
+    expected: dict, actual: Any, config: dict, trace: dict | None = None
+) -> dict:
+    from llm_release_gate import checks
+
+    return checks.run(expected, actual, config, trace)
 
 
-def mean(per_field: dict[str, bool | None]) -> float | None:
-    """Share of right fields among the scored ones; None if no field was scored."""
-    scored = [v for v in per_field.values() if v is not None]
+METHODS: dict[str, Callable] = {
+    "field_match": lambda expected, actual, config, trace=None: field_match(
+        expected, actual, config
+    ),
+    "checks": by_checks,
+}
+AGGREGATES = ("mean", "all")
+
+
+def mean(per_field: dict[str, bool | float | None]) -> float | None:
+    """Mean over the scored results (True 1, False 0, a share as it is); None if nothing was scored."""
+    scored = [float(v) for v in per_field.values() if v is not None]
     return sum(scored) / len(scored) if scored else None
 
 
-def score(expected: dict, actual: Any, case_config: dict) -> dict:
-    """{"score": mean over scored fields, "per_field": {field: True/False/None}}."""
+def aggregate(results: dict[str, bool | float | None], how: str) -> float | None:
+    """The case's score from its results (D-015): `mean`, or `all` — 1 if every scored result is full, else 0."""
+    if how == "mean":
+        return mean(results)
+    scored = [v for v in results.values() if v is not None]
+    return (1.0 if all(float(v) == 1 for v in scored) else 0.0) if scored else None
+
+
+def score(
+    expected: dict, actual: Any, case_config: dict, trace: dict | None = None
+) -> dict:
+    """{"score": the aggregate, "per_field": {field or check: True/False/share/None}}."""
     if not isinstance(case_config, dict):
         raise TypeError(f"scoring must be a mapping, got {case_config!r}")
     method = METHODS.get(case_config.get("method"))
@@ -193,13 +217,21 @@ def score(expected: dict, actual: Any, case_config: dict) -> dict:
         raise ValueError(
             f"unknown scoring method {case_config.get('method')!r}, known: {sorted(METHODS)}"
         )
-    per_field = method(expected, actual, case_config)
-    return {"score": mean(per_field), "per_field": per_field}
+    how = case_config.get("aggregate", "mean")
+    if how not in AGGREGATES:
+        raise ValueError(f"aggregate must be one of {AGGREGATES}, got {how!r}")
+    per_field = method(expected, actual, case_config, trace)
+    return {"score": aggregate(per_field, how), "per_field": per_field}
 
 
-def hits(case: Case, answer: Answer) -> dict[str, bool | None]:
-    """Per-field verdicts for the runner."""
-    return score(case.expected, answer.output, case.scoring)["per_field"]
+def hits(case: Case, answer: Answer, trace: dict | None = None) -> dict[str, Any]:
+    """Per-field (or per-check) verdicts for the runner; the runner's current trace if none is given."""
+    if trace is None:
+        from llm_release_gate.trace import current
+
+        t = current()
+        trace = None if t is None or t.empty() else t.to_dict()
+    return score(case.expected, answer.output, case.scoring, trace)["per_field"]
 
 
 hits.version = f"metrics/{VERSION}"
