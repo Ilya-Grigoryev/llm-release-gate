@@ -1,4 +1,4 @@
-# The same checks as .gitlab-ci.yml.
+# The same checks as .gitlab-ci.yml, without its secret detection.
 name: ci
 
 on:
@@ -9,8 +9,8 @@ jobs:
   gate:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - run: pip install --quiet uv==0.11.25
@@ -31,8 +31,8 @@ jobs:
       run:
         working-directory: examples/sroie
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - run: pip install --quiet uv==0.11.25
@@ -49,14 +49,14 @@ jobs:
     env:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - run: pip install --quiet uv==0.11.25
       - run: uv sync --locked
       - run: uv run python -m llm_release_gate.runner --config configs/sroie-text.yaml --golden ../../tests/fixtures/golden --out model-call.jsonl
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: model-call
