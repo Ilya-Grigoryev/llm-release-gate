@@ -4,7 +4,6 @@ name: ci
 on:
   push:
   pull_request:  # runs release-gate only
-  workflow_dispatch:  # also runs model-call
 
 jobs:
   gate:
@@ -41,29 +40,6 @@ jobs:
       - run: pip install --quiet uv==0.11.25
       - run: uv sync --locked
       - run: uv run pytest
-
-  # Paid call, so it runs only when started by hand.
-  model-call:
-    if: github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: examples/sroie
-    env:
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.12"
-      - run: pip install --quiet uv==0.11.25
-      - run: uv sync --locked
-      - run: uv run python -m llm_release_gate.runner --config configs/sroie-text.yaml --golden ../../tests/fixtures/golden --out model-call.jsonl
-      - uses: actions/upload-artifact@v7
-        if: always()
-        with:
-          name: model-call
-          path: examples/sroie/model-call.jsonl
 
   # Base version (the target branch) against the candidate (this pull request merged into it) on
   # the golden set; one comment with the verdict. Advisory: make it a required check to block merges.

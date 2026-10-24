@@ -149,14 +149,6 @@ def test_a_built_golden_set_runs_through_the_pipeline(tmp_path, monkeypatch, inp
     assert answer.output == OUTPUT
 
 
-@pytest.mark.parametrize("input", ["text", "image"])
-def test_the_ci_smoke_set_runs_through_the_pipeline(tmp_path, input):
-    # the model-call job in CI runs this pipeline on the gate's own fixture
-    [case] = load_cases(EXAMPLE.parent.parent / "tests" / "fixtures" / "golden")
-    answer = build(config(tmp_path, input), FakeClient()).run(case)
-    assert answer.output == OUTPUT
-
-
 @pytest.mark.parametrize(
     "name, input",
     [("sroie-text", "text"), ("sroie-image", "image"), ("sroie-steps", "text")],

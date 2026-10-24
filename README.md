@@ -73,7 +73,7 @@ A case's `scoring` block picks the scorer. `field_match` compares each expected 
 
 ## CI
 
-`.gitlab-ci.yml` and `.github/workflows/ci.yml` run the same checks on every push: lint, the tests of the gate and of the example, and a validation of the test golden set. A manual `model-call` job makes one paid call.
+`.gitlab-ci.yml` and `.github/workflows/ci.yml` run the same checks on every push: lint, the tests of the gate and of the example, and a validation of the test golden set.
 
 On a pull or merge request, `release-gate` gates the SROIE example. `ci/gate.sh` runs the version from the target branch and the one from the request on the golden set, in parallel and each with its own code, then the gate. `python -m llm_release_gate.comment` posts the verdict as one comment and edits it on later pushes. The job only advises until you make it a required check (GitHub) or drop `allow_failure` (GitLab). A run costs about $0.06: 30 scans per version.
 

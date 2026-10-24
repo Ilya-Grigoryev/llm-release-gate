@@ -36,17 +36,6 @@ example-test:
   script:
     - uv run pytest
 
-# Paid call, so it runs only when started by hand.
-model-call:
-  extends: .example
-  when: manual
-  script:
-    - uv run python -m llm_release_gate.runner --config configs/sroie-text.yaml --golden ../../tests/fixtures/golden --out model-call.jsonl
-  artifacts:
-    when: always
-    paths:
-      - examples/sroie/model-call.jsonl
-
 # Base version (the target branch) against the candidate (this merge request) on the golden set from
 # the Package Registry (D-010); one comment with the verdict. Needs GITLAB_TOKEN (api scope) and
 # OPENAI_API_KEY as masked CI/CD variables. Advisory: allow_failure keeps the merge open.
