@@ -6,9 +6,11 @@ from dataclasses import replace
 from openai import OpenAI
 
 from llm_release_gate.pipeline import Answer, Case, PipelineConfig
+from sroie_example import pipeline
 from sroie_example.pipeline import SroiePipeline
 
-VERSION = 1  # bump when what step 2 sees of the receipt or the fields changes
+# Both calls go through pipeline.py, so its VERSION is part of this one.
+VERSION = (pipeline.VERSION, 1)  # bump the 1 when what step 2 sees changes
 STEPS = ("extract", "check")
 
 

@@ -8,6 +8,7 @@ import openai
 import pytest
 import yaml
 from sroie_example import golden, rescore, steps
+from sroie_example import pipeline as one_step
 from sroie_example.pipeline import SCORING, build, cases, parse_box
 
 from llm_release_gate.golden import load_cases, validate
@@ -51,7 +52,7 @@ class FakeClient:
             usage=SimpleNamespace(
                 prompt_tokens=100,
                 completion_tokens=20,
-                completion_tokens_details=SimpleNamespace(reasoning_tokens=0),
+                completion_tokens_details=SimpleNamespace(reasoning_tokens=n),
             ),
         )
 
@@ -198,6 +199,33 @@ def test_steps_send_the_first_answer_to_the_check(tmp_path):
     )
     assert answer.output == CHECKED and answer.request_id == "chatcmpl-2"
     assert (answer.input_tokens, answer.output_tokens) == (200, 40)
+    assert answer.reasoning_tokens == 1 + 2
+
+
+def test_a_check_that_is_not_json_fails_the_case(tmp_path):
+    client = FakeClient(RAW, '{"company": "C", "da')
+    answer = steps.build(steps_config(tmp_path), client).run(cases(FIXTURE)[0])
+    assert answer.output is None and answer.raw == '{"company": "C", "da'
+    assert answer.input_tokens == 200
+
+
+def test_a_rate_limit_in_the_check_reaches_the_runner(tmp_path):
+    client = FakeClient()
+    create = client.chat.completions.create
+
+    def second_call_limited(**request):
+        if client.requests:
+            raise rate_limit()
+        return create(**request)
+
+    client.chat.completions.create = second_call_limited
+    with pytest.raises(Retryable):
+        steps.build(steps_config(tmp_path), client).run(cases(FIXTURE)[0])
+
+
+def test_the_steps_version_follows_the_one_step_code():
+    # a change to pipeline.py changes what both calls send, so it must change this version too
+    assert steps.VERSION[0] == one_step.VERSION
 
 
 def test_steps_show_the_scan_to_the_check(tmp_path):

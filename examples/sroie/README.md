@@ -43,6 +43,6 @@ uv run --env-file ../../.env python -m llm_release_gate.runner --config configs/
 uv run python -m llm_release_gate.gate --base ../../data/runs/one-step.jsonl --candidate ../../data/runs/two-steps.jsonl
 ```
 
-The gate sees only the final answer for now: it cannot yet tell which step went wrong.
+Step 2 also asks for DD/MM/YYYY dates and totals with two decimals; the gate compares dates and amounts by value, so the format alone does not move the score. If step 2 returns no JSON, the case scores 0 even when step 1 was right. A retry repeats both calls, and the record counts the tokens of the last attempt only. The gate sees only the final answer for now: it cannot yet tell which step went wrong.
 
-An edit to a prompt in `prompts/` makes a new pipeline version with its own config hash. Bump `VERSION` in `pipeline.py` or `steps.py` when you change what the code sends to the model.
+An edit to a prompt in `prompts/` makes a new pipeline version with its own config hash. Bump `VERSION` in `pipeline.py` when you change what the code sends to the model; the two-step version includes it. In `steps.py`, bump the second number when you change what step 2 gets.
