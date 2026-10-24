@@ -77,8 +77,8 @@ class Fixed:
 def config(tmp_path, name, temperature):
     path = tmp_path / f"{name}.yaml"
     path.write_text(
-        "pipeline: sroie\nmodel: gpt-4.1-mini-2025-04-14\n"
-        f"prompt: {REPO / 'prompts' / 'sroie.md'}\ninput: text\n"
+        "pipeline: replay_pipeline\nmodel: gpt-4.1-mini-2025-04-14\n"
+        f"prompt: {REPO / 'tests' / 'fixtures' / 'prompt.md'}\ninput: text\n"
         f"params: {{temperature: {temperature}, seed: 0}}\n"
     )
     return path

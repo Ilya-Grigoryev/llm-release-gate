@@ -1,6 +1,6 @@
 """Rescore recorded SROIE runs from their saved answers, without calling the model.
 
-Local only: the expected values come from the SROIE split in data/, which CI does not have.
+Local only: the expected values come from the SROIE split in the repository's data/, which CI does not have.
 """
 
 import argparse
@@ -8,8 +8,8 @@ import json
 from pathlib import Path
 
 from llm_release_gate.metrics import VERSION, score
-from llm_release_gate.pipelines.sroie import SCORING, cases
 from llm_release_gate.runner import read_records
+from sroie_example.pipeline import SCORING, cases
 
 VARIANTS = {
     "typed": SCORING,
@@ -24,7 +24,10 @@ def main() -> None:
         "runs", type=Path, nargs="+", help="JSONL files with case and output"
     )
     p.add_argument(
-        "--data", type=Path, default=Path("data/SROIE2019/train"), help="SROIE split"
+        "--data",
+        type=Path,
+        default=Path("../../data/SROIE2019/train"),
+        help="SROIE split",
     )
     p.add_argument(
         "--variant",

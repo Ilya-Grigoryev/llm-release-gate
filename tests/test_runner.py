@@ -1,12 +1,10 @@
-import json
-import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
 
-import openai
 import pytest
+from replay_pipeline import Replay
 
 from llm_release_gate import runner
 from llm_release_gate.golden import load_cases, validate
@@ -19,7 +17,6 @@ from llm_release_gate.pipeline import (
     config_hash,
     load_config,
 )
-from llm_release_gate.pipelines.sroie import build
 from llm_release_gate.runner import read_records, results, run
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -35,34 +32,6 @@ def score(case, answer):
 
 class Crash(BaseException):
     """Stands in for the process being killed."""
-
-
-class Replay:
-    """A recorded provider: replays model answers from a fixture, in order, per case."""
-
-    def __init__(self, fail=None, delay=0.0, answers=None):
-        lines = (FIXTURES / "replay" / "synth-001.jsonl").read_text().splitlines()
-        self.answers = answers or [Answer(**json.loads(line)) for line in lines]
-        self.calls = []
-        self.fail = fail or (lambda case, n: None)
-        self.delay = delay
-        self.lock = threading.Lock()
-        self.active = self.peak = 0
-
-    def run(self, case):
-        with self.lock:
-            n = sum(c == case.id for c in self.calls)
-            self.calls.append(case.id)
-            number = len(self.calls)
-            self.active += 1
-            self.peak = max(self.peak, self.active)
-        try:
-            time.sleep(self.delay)
-            self.fail(case, number)
-            return self.answers[n % len(self.answers)]
-        finally:
-            with self.lock:
-                self.active -= 1
 
 
 def go(pipeline, out, **kwargs):
@@ -238,7 +207,7 @@ def test_config_hash_follows_prompt_text_and_retry_policy(tmp_path):
     prompt = tmp_path / "prompt.md"
     prompt.write_text("Extract fields.")
     config = PipelineConfig(
-        "sroie", "gpt-4.1-mini-2025-04-14", prompt, "text", {"seed": 0}
+        "replay_pipeline", "gpt-4.1-mini-2025-04-14", prompt, "text", {"seed": 0}
     )
     before = config_hash(config)
     assert config_hash(replace(config, params={"seed": 0})) == before
@@ -249,36 +218,11 @@ def test_config_hash_follows_prompt_text_and_retry_policy(tmp_path):
 
 def test_load_config_reads_the_retry_policy(tmp_path):
     (tmp_path / "c.yaml").write_text(
-        "pipeline: sroie\nmodel: gpt-4.1-mini-2025-04-14\nprompt: p.md\ninput: text\n"
+        "pipeline: replay_pipeline\nmodel: gpt-4.1-mini-2025-04-14\nprompt: p.md\ninput: text\n"
         "max_retries: 2\ntimeout_s: 30\n"
     )
     config = load_config(tmp_path / "c.yaml")
     assert (config.max_retries, config.timeout_s) == (2, 30)
-
-
-def rate_limit(code=None):
-    # Built without an HTTP response: only the class and the code matter to the pipeline.
-    error = openai.RateLimitError.__new__(openai.RateLimitError)
-    Exception.__init__(error, "slow down")
-    error.code = code
-    return error
-
-
-@pytest.mark.parametrize(
-    "code, expected", [(None, Retryable), ("insufficient_quota", Fatal)]
-)
-def test_sroie_maps_rate_limits(tmp_path, code, expected):
-    def create(**request):
-        raise rate_limit(code)
-
-    client = type("Client", (), {})()
-    client.chat = type("Chat", (), {})()
-    client.chat.completions = type("Completions", (), {"create": staticmethod(create)})
-    prompt = tmp_path / "prompt.md"
-    prompt.write_text("Extract fields.")
-    config = PipelineConfig("sroie", "gpt-4.1-mini-2025-04-14", prompt, "text")
-    with pytest.raises(expected):
-        build(config, client).run(SYNTH)
 
 
 @pytest.mark.parametrize(
@@ -294,7 +238,7 @@ def test_sroie_maps_rate_limits(tmp_path, code, expected):
 )
 def test_load_config_rejects_a_bad_retry_policy(tmp_path, extra):
     (tmp_path / "c.yaml").write_text(
-        "pipeline: sroie\nmodel: gpt-4.1-mini-2025-04-14\nprompt: p.md\ninput: text\n"
+        "pipeline: replay_pipeline\nmodel: gpt-4.1-mini-2025-04-14\nprompt: p.md\ninput: text\n"
         + extra
     )
     with pytest.raises(ValueError):
@@ -302,9 +246,7 @@ def test_load_config_rejects_a_bad_retry_policy(tmp_path, extra):
 
 
 def test_timeout_written_as_int_or_float_hashes_alike(tmp_path):
-    base = (
-        "pipeline: sroie\nmodel: gpt-4.1-mini-2025-04-14\nprompt: p.md\ninput: text\n"
-    )
+    base = "pipeline: replay_pipeline\nmodel: gpt-4.1-mini-2025-04-14\nprompt: p.md\ninput: text\n"
     (tmp_path / "p.md").write_text("Extract fields.")
     (tmp_path / "a.yaml").write_text(base + "timeout_s: 60\n")
     (tmp_path / "b.yaml").write_text(base + "timeout_s: 60.0\n")
@@ -405,10 +347,10 @@ def test_records_carry_the_scorer_version(tmp_path):
     assert {r["record_version"] for r in read_records(out)} == {runner.RECORD_VERSION}
 
 
-def test_cli_stamps_every_record_with_both_hashes(tmp_path, monkeypatch, capsys):
-    monkeypatch.setattr(runner, "load_pipeline", lambda config: Replay())
+def test_cli_stamps_every_record_with_both_hashes(tmp_path, capsys):
+    # no monkeypatch: the runner imports replay_pipeline by the name in the config
     out = tmp_path / "runs.jsonl"
-    config_path = Path(__file__).parent.parent / "configs" / "sroie-text.yaml"
+    config_path = FIXTURES / "config.yaml"
     args = ["--config", str(config_path), "--golden", str(FIXTURES / "golden")]
     runner.main([*args, "-k", "2", "--out", str(out)])
     records = read_records(out)
@@ -424,7 +366,7 @@ def test_cli_stamps_every_record_with_both_hashes(tmp_path, monkeypatch, capsys)
 
 def test_cli_refuses_a_broken_golden_set(tmp_path):
     (tmp_path / "bad.yaml").write_text("id: [unclosed")
-    config_path = Path(__file__).parent.parent / "configs" / "sroie-text.yaml"
+    config_path = FIXTURES / "config.yaml"
     with pytest.raises(SystemExit, match="bad.yaml"):
         runner.main(
             [
@@ -443,7 +385,7 @@ def test_cli_fails_when_calls_fail(tmp_path, monkeypatch):
         raise RuntimeError("400 bad parameter")
 
     monkeypatch.setattr(runner, "load_pipeline", lambda config: Replay(fail=broken))
-    config_path = Path(__file__).parent.parent / "configs" / "sroie-text.yaml"
+    config_path = FIXTURES / "config.yaml"
     out = tmp_path / "runs.jsonl"
     with pytest.raises(SystemExit, match="not done: 1 of 1; last error: RuntimeError"):
         runner.main(
@@ -460,7 +402,7 @@ def test_cli_fails_when_calls_fail(tmp_path, monkeypatch):
 
 
 def test_cli_refuses_a_missing_golden_set(tmp_path):
-    config_path = Path(__file__).parent.parent / "configs" / "sroie-text.yaml"
+    config_path = FIXTURES / "config.yaml"
     with pytest.raises(SystemExit, match="not a directory"):
         runner.main(
             [
@@ -479,7 +421,7 @@ def test_cli_counts_only_the_requested_repetitions(tmp_path, monkeypatch):
         if n == 1:
             raise RuntimeError("down")
 
-    config_path = Path(__file__).parent.parent / "configs" / "sroie-text.yaml"
+    config_path = FIXTURES / "config.yaml"
     args = [
         "--config",
         str(config_path),
@@ -496,3 +438,16 @@ def test_cli_counts_only_the_requested_repetitions(tmp_path, monkeypatch):
     # repetitions 1-4 are done from the first run, repetition 0 fails again
     with pytest.raises(SystemExit, match="not done: 1 of 3"):
         runner.main([*args, "-k", "3", "--workers", "1"])
+
+
+def test_cli_reports_a_bad_pipeline_without_a_traceback(tmp_path):
+    body = (FIXTURES / "config.yaml").read_text()
+    config_path = tmp_path / "c.yaml"
+    config_path.write_text(body.replace("replay_pipeline", "no_such_app.adapter"))
+    (tmp_path / "prompt.md").write_text("Extract fields.")
+    args = ["--config", str(config_path), "--golden", str(FIXTURES / "golden")]
+    with pytest.raises(
+        SystemExit, match="pipeline 'no_such_app.adapter': cannot import"
+    ):
+        runner.main([*args, "--out", str(tmp_path / "o.jsonl")])
+    assert not (tmp_path / "o.jsonl").exists()

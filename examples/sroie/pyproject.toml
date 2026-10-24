@@ -1,0 +1,23 @@
+[project]
+name = "sroie-example"
+version = "0.1.0"
+description = "Receipt field extraction on SROIE, a pipeline checked by llm-release-gate"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "llm-release-gate",
+    "openai>=3.24.0",
+    "pyyaml>=6.0.3",
+]
+
+[tool.uv.sources]
+llm-release-gate = { path = "../..", editable = true }
+
+[build-system]
+requires = ["uv_build>=0.11.25,<0.12.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]

@@ -13,7 +13,7 @@ import yaml
 
 from llm_release_gate.golden import validate
 from llm_release_gate.hashing import file_hash
-from llm_release_gate.pipelines.sroie import SCORING, cases
+from sroie_example.pipeline import SCORING, cases
 
 
 def store(company: str) -> str:
@@ -25,11 +25,11 @@ def store(company: str) -> str:
 
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--src", type=Path, default=Path("data/SROIE2019/train"))
+    p.add_argument("--src", type=Path, default=Path("../../data/SROIE2019/train"))
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("-n", type=int, default=30, help="number of cases")
     p.add_argument("--skip", type=int, default=10, help="leave out the first receipts")
-    p.add_argument("--out", type=Path, default=Path("data/golden/sroie"))
+    p.add_argument("--out", type=Path, default=Path("../../data/golden/sroie"))
     p.add_argument("--manifest", type=Path, default=Path("golden/sroie.yaml"))
     p.add_argument(
         "--rehash",

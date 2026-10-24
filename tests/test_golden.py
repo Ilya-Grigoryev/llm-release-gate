@@ -7,7 +7,6 @@ import yaml
 
 from llm_release_gate.golden import load_cases, validate
 from llm_release_gate.hashing import canonical_hash
-from llm_release_gate.pipelines.sroie_golden import store
 
 FIXTURE = Path(__file__).parent / "fixtures" / "golden"
 
@@ -141,19 +140,6 @@ def test_canonical_hash_ignores_key_order():
         {"b": [1, 2], "a": 1}
     )
     assert canonical_hash({"a": 1}) != canonical_hash({"a": "1"})
-
-
-@pytest.mark.parametrize(
-    "company, chain",
-    [
-        ("TEST MART (M) SDN BHD", "TEST MART"),
-        ("UJI BAKERIES (KL) SDN BHD", "UJI BAKERIES"),
-        ("42 DEMO MART S/B", "42 DEMO MART"),
-        ("A.B.C. TEA & CO (M) SDN. BHD.", "ABC TEA & CO"),
-    ],
-)
-def test_store_chain(company, chain):
-    assert store(company) == chain
 
 
 def test_yml_files_count_as_cases(golden):

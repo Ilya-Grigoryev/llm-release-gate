@@ -1,16 +1,28 @@
 import json
+import shutil
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
+import openai
 import pytest
+import yaml
+from sroie_example import golden, rescore
+from sroie_example.pipeline import SCORING, build, cases, parse_box
 
-from llm_release_gate.golden import load_cases
+from llm_release_gate.golden import load_cases, validate
 from llm_release_gate.metrics import score
-from llm_release_gate.pipeline import PipelineConfig
-from llm_release_gate.pipelines.sroie import SCORING, build, cases, parse_box
+from llm_release_gate.pipeline import (
+    Fatal,
+    PipelineConfig,
+    Retryable,
+    config_hash,
+    load_config,
+    load_pipeline,
+)
 
-FIXTURE = Path(__file__).parent / "fixtures" / "sroie"
+EXAMPLE = Path(__file__).parent.parent
+FIXTURE = Path(__file__).parent / "fixtures"
 OUTPUT = {"company": "C", "date": "D", "address": "A", "total": "9.00"}
 RAW = json.dumps(OUTPUT)
 
@@ -46,7 +58,7 @@ def config(tmp_path, input):
     prompt = tmp_path / "prompt.md"
     prompt.write_text("Extract fields.")
     return PipelineConfig(
-        pipeline="sroie",
+        pipeline="sroie_example.pipeline",
         model="gpt-4.1-mini-2025-04-14",
         prompt=prompt,
         input=input,
@@ -118,11 +130,61 @@ def test_unknown_input_is_rejected(tmp_path):
 
 
 @pytest.mark.parametrize("input", ["text", "image"])
-def test_golden_cases_run_through_the_pipeline(tmp_path, input):
-    [case] = load_cases(Path(__file__).parent / "fixtures" / "golden")
-    client = FakeClient()
-    answer = build(config(tmp_path, input), client).run(case)
+def test_a_built_golden_set_runs_through_the_pipeline(tmp_path, monkeypatch, input):
+    split = tmp_path / "train"
+    shutil.copytree(FIXTURE, split)
+    (split / "img").mkdir()
+    (split / "img" / "sample.jpg").write_bytes(b"\xff\xd8not a real jpeg")
+    out, manifest = tmp_path / "golden", tmp_path / "sroie.yaml"
+    argv = ["x", "--src", str(split), "-n", "1", "--skip", "0", "--out", str(out)]
+    monkeypatch.setattr("sys.argv", [*argv, "--manifest", str(manifest)])
+    golden.main()
+    set_hash, errors = validate(out)
+    assert not errors and yaml.safe_load(manifest.read_text())["sha256"] == set_hash
+    [case] = load_cases(out)
+    answer = build(config(tmp_path, input), FakeClient()).run(case)
     assert answer.output == OUTPUT
+
+
+@pytest.mark.parametrize("name", ["sroie-text.yaml", "sroie-image.yaml"])
+def test_shipped_configs_load_through_the_gate(name):
+    config = load_config(EXAMPLE / "configs" / name)
+    assert config.pipeline == "sroie_example.pipeline" and config_hash(config)
+    assert load_pipeline(config, client=object()).config.input in name
+
+
+def rate_limit(code=None):
+    # Built without an HTTP response: only the class and the code matter to the pipeline.
+    error = openai.RateLimitError.__new__(openai.RateLimitError)
+    Exception.__init__(error, "slow down")
+    error.code = code
+    return error
+
+
+@pytest.mark.parametrize(
+    "code, expected", [(None, Retryable), ("insufficient_quota", Fatal)]
+)
+def test_rate_limits_map_to_retry_or_stop(tmp_path, code, expected):
+    def create(**request):
+        raise rate_limit(code)
+
+    client = FakeClient()
+    client.chat.completions.create = create
+    with pytest.raises(expected):
+        build(config(tmp_path, "text"), client).run(cases(FIXTURE)[0])
+
+
+@pytest.mark.parametrize(
+    "company, chain",
+    [
+        ("TEST MART (M) SDN BHD", "TEST MART"),
+        ("UJI BAKERIES (KL) SDN BHD", "UJI BAKERIES"),
+        ("42 DEMO MART S/B", "42 DEMO MART"),
+        ("A.B.C. TEA & CO (M) SDN. BHD.", "ABC TEA & CO"),
+    ],
+)
+def test_store_chain(company, chain):
+    assert golden.store(company) == chain
 
 
 def test_an_empty_label_is_not_scored(tmp_path):
@@ -138,8 +200,6 @@ def test_an_empty_label_is_not_scored(tmp_path):
 
 
 def test_rescore_writes_copies_and_keeps_the_source(tmp_path, monkeypatch, capsys):
-    from llm_release_gate.pipelines import sroie_rescore
-
     [case] = cases(FIXTURE)
     run = tmp_path / "runs" / "r.jsonl"
     run.parent.mkdir()
@@ -150,7 +210,7 @@ def test_rescore_writes_copies_and_keeps_the_source(tmp_path, monkeypatch, capsy
     monkeypatch.setattr(
         "sys.argv", ["x", str(run), "--data", str(FIXTURE), "--write", str(out)]
     )
-    sroie_rescore.main()
+    rescore.main()
     copy = json.loads((out / "r.jsonl").read_text())
     assert copy["score"] == 1.0 and copy["rescored"]["variant"] == "typed"
     assert run.read_text() == source
@@ -158,7 +218,7 @@ def test_rescore_writes_copies_and_keeps_the_source(tmp_path, monkeypatch, capsy
         "sys.argv", ["x", str(run), "--data", str(FIXTURE), "--write", str(run.parent)]
     )
     with pytest.raises(SystemExit, match="must not overwrite"):
-        sroie_rescore.main()
+        rescore.main()
 
 
 def test_strict_and_text_rescoring_keep_empty_labels(tmp_path):
@@ -178,8 +238,6 @@ def test_strict_and_text_rescoring_keep_empty_labels(tmp_path):
 def test_rescore_counts_an_empty_label_only_outside_the_gate(
     tmp_path, monkeypatch, variant, total
 ):
-    from llm_release_gate.pipelines import sroie_rescore
-
     (tmp_path / "box").mkdir()
     (tmp_path / "entities").mkdir()
     (tmp_path / "box" / "r.txt").write_text("1,1,2,1,2,2,1,2,KEDAI UJI\n")
@@ -192,7 +250,7 @@ def test_rescore_counts_an_empty_label_only_outside_the_gate(
     out = tmp_path / "out"
     argv = ["x", str(run), "--data", str(tmp_path), "--variant", variant]
     monkeypatch.setattr("sys.argv", [*argv, "--write", str(out)])
-    sroie_rescore.main()
+    rescore.main()
     copy = json.loads((out / "r.jsonl").read_text())
     assert copy["hits"]["total"] is total
     assert copy["scorer_version"].endswith("" if variant == "typed" else f"+{variant}")

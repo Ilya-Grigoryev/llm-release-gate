@@ -9,7 +9,6 @@ authors = [
 requires-python = ">=3.12"
 dependencies = [
     "jsonschema>=4.26.0",
-    "openai>=3.24.0",
     "pyyaml>=6.0.3",
 ]
 
@@ -22,3 +21,7 @@ dev = [
     "pytest>=9.1.1",
     "ruff>=0.16.10",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["tests"]  # the test pipeline module, named in test configs
