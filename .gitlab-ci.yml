@@ -7,14 +7,6 @@ include:
     - pip install --quiet uv==0.11.25
     - uv sync --locked
 
-# The SROIE example installs the gate the way another project would.
-.example:
-  extends: .python
-  before_script:
-    - pip install --quiet uv==0.11.25
-    - cd examples/sroie
-    - uv sync --locked
-
 lint:
   extends: .python
   script:
@@ -31,8 +23,16 @@ validate:
   script:
     - uv run python -m llm_release_gate.golden validate tests/fixtures/golden
 
+# Each example installs the gate the way another project would.
 example-test:
-  extends: .example
+  extends: .python
+  parallel:
+    matrix:
+      - EXAMPLE: [sroie, support-agent]
+  before_script:
+    - pip install --quiet uv==0.11.25
+    - cd examples/$EXAMPLE
+    - uv sync --locked
   script:
     - uv run pytest
 

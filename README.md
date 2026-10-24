@@ -10,7 +10,7 @@ The gate runs each case several times and compares the two versions case by case
 
 ## Status
 
-Work in progress. The naive gate works: it compares one run per version against a fixed threshold. The statistical rule, the cost and latency budgets and the merge request job come next. [`examples/sroie/`](examples/sroie/) holds the pipeline under test: it extracts company, address, date and total from receipts in [SROIE](https://rrc.cvc.uab.es/?ch=13) (ICDAR 2019), from the OCR text or from the scan.
+Work in progress. The naive gate works: it compares one run per version against a fixed threshold. The statistical rule, the cost and latency budgets and the merge request job come next. [`examples/sroie/`](examples/sroie/) holds the pipeline under test: it extracts company, address, date and total from receipts in [SROIE](https://rrc.cvc.uab.es/?ch=13) (ICDAR 2019), from the OCR text or from the scan. [`examples/support-agent/`](examples/support-agent/) is a tool-using support agent over a mock database, with its own test cases; the gate does not run it yet.
 
 ## Your pipeline
 
@@ -73,7 +73,7 @@ A case's `scoring` block picks the scorer. `field_match` compares each expected 
 
 ## CI
 
-`.gitlab-ci.yml` and `.github/workflows/ci.yml` run the same checks on every push: lint, the tests of the gate and of the example, and a validation of the test golden set.
+`.gitlab-ci.yml` and `.github/workflows/ci.yml` run the same checks on every push: lint, the tests of the gate and of each example, and a validation of the test golden set.
 
 On a pull or merge request, `release-gate` gates the SROIE example. `ci/gate.sh` runs the version from the target branch and the one from the request on the golden set, in parallel and each with its own code, then the gate. `python -m llm_release_gate.comment` posts the verdict as one comment and edits it on later pushes. The job only advises until you make it a required check (GitHub) or drop `allow_failure` (GitLab). A run costs about $0.06: 30 scans per version.
 

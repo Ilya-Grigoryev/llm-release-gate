@@ -25,13 +25,16 @@ jobs:
       - name: validate
         run: uv run python -m llm_release_gate.golden validate tests/fixtures/golden
 
-  # The SROIE example installs the gate the way another project would.
+  # Each example installs the gate the way another project would.
   example-test:
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        example: [sroie, support-agent]
     defaults:
       run:
-        working-directory: examples/sroie
+        working-directory: examples/${{ matrix.example }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
