@@ -202,6 +202,14 @@ def test_steps_send_the_first_answer_to_the_check(tmp_path):
     assert answer.reasoning_tokens == 1 + 2
 
 
+def test_steps_add_up_their_time(tmp_path, monkeypatch):
+    clock = iter([0.0, 1.5, 10.0, 10.25]).__next__  # step 1 takes 1.5 s, step 2 0.25 s
+    monkeypatch.setattr(one_step, "time", SimpleNamespace(perf_counter=clock))
+    client = FakeClient(RAW, json.dumps(CHECKED))
+    answer = steps.build(steps_config(tmp_path), client).run(cases(FIXTURE)[0])
+    assert answer.latency_s == 1.75
+
+
 def test_a_check_that_is_not_json_fails_the_case(tmp_path):
     client = FakeClient(RAW, '{"company": "C", "da')
     answer = steps.build(steps_config(tmp_path), client).run(cases(FIXTURE)[0])

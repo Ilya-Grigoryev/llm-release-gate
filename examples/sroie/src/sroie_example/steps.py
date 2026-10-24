@@ -10,7 +10,7 @@ from sroie_example import pipeline
 from sroie_example.pipeline import SroiePipeline
 
 # Both calls go through pipeline.py, so its VERSION is part of this one.
-VERSION = (pipeline.VERSION, 1)  # bump the 1 when what step 2 sees changes
+VERSION = (pipeline.VERSION, 1)  # bump the 1 when this file changes what a call sends
 STEPS = ("extract", "check")
 
 
