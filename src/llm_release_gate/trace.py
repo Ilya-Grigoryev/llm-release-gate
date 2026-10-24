@@ -152,7 +152,13 @@ def usage(trace: dict, prices: Prices | None = None) -> dict[str, dict]:
         u["tokens_out"] += s["tokens_out"]
         cost = s.get("cost_usd")
         if cost is None and prices:
-            cost = usd(s["model"], s["tokens_in"], s["tokens_out"], prices)
+            cost = usd(
+                s["model"],
+                s["tokens_in"],
+                s["tokens_out"],
+                prices,
+                s.get("tokens_cached"),
+            )
         u["cost_usd"] = (
             None if cost is None or u["cost_usd"] is None else u["cost_usd"] + cost
         )
@@ -239,18 +245,20 @@ def llm_fields(r: Any, prices: Prices) -> dict:
     """A model step from an OpenAI chat completion: what the API reported, the new output only."""
     choice, used = r.choices[0], r.usage
     message = choice.message
+    cached = field(field(used, "prompt_tokens_details"), "cached_tokens") or 0
     fields: dict[str, Any] = {
         "status": "ok",
         "model": r.model,
         "tokens_in": used.prompt_tokens,
         "tokens_out": used.completion_tokens,
-        "tokens_cached": field(field(used, "prompt_tokens_details"), "cached_tokens")
-        or 0,
+        "tokens_cached": cached,
         "tokens_reasoning": field(
             field(used, "completion_tokens_details"), "reasoning_tokens"
         )
         or 0,
-        "cost_usd": usd(r.model, used.prompt_tokens, used.completion_tokens, prices)
+        "cost_usd": usd(
+            r.model, used.prompt_tokens, used.completion_tokens, prices, cached
+        )
         if prices
         else None,
         "finish_reason": FINISH.get(choice.finish_reason, "other"),

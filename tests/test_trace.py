@@ -284,3 +284,44 @@ def test_the_runner_cli_reads_a_price_table(tmp_path, capsys):
         runner.main([*args, "--prices", str(bad)])
     runner.main([*args, "--prices", str(good)])
     assert "1 records written" in capsys.readouterr().out
+
+
+# cached input
+
+
+def test_cached_input_costs_its_own_price(tmp_path):
+    from llm_release_gate.prices import load_prices, usd
+
+    table = tmp_path / "p.yaml"
+    table.write_text("gpt-5.4-mini: [0.75, 4.50, 0.075]\ngpt-4.1-mini: [0.40, 1.60]\n")
+    prices = load_prices(table)
+    # 10 000 tokens in, 9 000 of them cached, 100 out
+    assert usd("gpt-5.4-mini-2026-03-17", 10_000, 100, prices, 9_000) == pytest.approx(
+        (1_000 * 0.75 + 9_000 * 0.075 + 100 * 4.50) / 1e6
+    )
+    # without a cached price, cached tokens cost the full input price, as before
+    assert usd("gpt-4.1-mini-2025-04-14", 10_000, 100, prices, 9_000) == pytest.approx(
+        (10_000 * 0.40 + 100 * 1.60) / 1e6
+    )
+    table.write_text("gpt-5.4-mini: [0.75, 4.50, 0.075, 1]\n")
+    with pytest.raises(ValueError, match="cached input"):
+        load_prices(table)
+
+
+def test_the_wrapped_client_prices_cached_tokens():
+    from types import SimpleNamespace
+
+    reply = completion("ok", tokens=(10_000, 100))
+    reply.usage.prompt_tokens_details = SimpleNamespace(cached_tokens=9_000)
+    t = trace.Trace({"fake-model": (1.0, 2.0, 0.1)})
+    with trace.active(t):
+        trace.openai_client(ScriptedModel([reply])).chat.completions.create(
+            model="fake", messages=[]
+        )
+    s = t.steps[0]
+    assert s["tokens_cached"] == 9_000
+    assert s["cost_usd"] == pytest.approx((1_000 * 1.0 + 9_000 * 0.1 + 100 * 2.0) / 1e6)
+    s["cost_usd"] = None  # priced later by the gate from the same table
+    assert trace.usage(t.to_dict(), t.prices)["agent"]["cost_usd"] == pytest.approx(
+        (1_000 * 1.0 + 9_000 * 0.1 + 100 * 2.0) / 1e6
+    )
