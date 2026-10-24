@@ -128,8 +128,13 @@ def cost(arm: Arm, prices: Prices) -> float | None:
     """
     total = 0.0
     for r in arm.records.values():
-        if r.get("trace"):
-            per_actor = usage(r["trace"], prices).values()
+        answered = [
+            s
+            for s in (r.get("trace") or {}).get("steps", [])
+            if s["kind"] == "llm" and s.get("status") == "ok"
+        ]
+        if answered:  # priced by the gate's table, whatever the runner had
+            per_actor = usage(r["trace"], prices, reprice=True).values()
             spent = [u["cost_usd"] for u in per_actor]
             if None in spent:
                 return None

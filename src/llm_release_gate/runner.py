@@ -135,6 +135,7 @@ def run(
     out.parent.mkdir(parents=True, exist_ok=True)
     end_line(out)
     native = out.with_name(out.stem + ".native.jsonl")
+    end_line(native)
     saved: set[Future] = set()
     written = 0
 
@@ -145,10 +146,19 @@ def run(
         finally:
             trace.wall_s = round(time.monotonic() - start, 3)
 
+    def outcome(job: Future, trace: Trace) -> tuple[Answer | None, int, str | None]:
+        """The job's result; a Fatal error becomes an error record that keeps the partial trace."""
+        error = job.exception()
+        if isinstance(error, Fatal):
+            return None, trace.run_attempt, f"Fatal: {error}"
+        return job.result()
+
     def line(
         job: Future, case: Case, rep: int, trace: Trace
     ) -> tuple[str, dict | None]:
-        answer, retries, error = job.result()
+        answer, retries, error = outcome(job, trace)
+        if error and trace.stop is None and not trace.empty():
+            trace.stop = "error"
         hits = value = score_error = None
         if answer:
             try:
@@ -175,7 +185,13 @@ def run(
             "retries": retries,
             "error": error,
         }
-        record["usage"] = usage(record["trace"], prices) if record["trace"] else None
+        try:
+            record["usage"] = (
+                usage(record["trace"], prices) if record["trace"] else None
+            )
+        except Exception as e:  # noqa: BLE001 - a malformed step must not lose the record
+            record["usage"] = None
+            record["usage_error"] = f"{type(e).__name__}: {e}"
         raw = None
         if trace.native:
             record["trace"]["native"] = native.name
@@ -191,8 +207,16 @@ def run(
             record["error"] = f"record not serializable: {e}"
             return json.dumps(record, default=repr) + "\n", raw
 
-    def write(job: Future, case: Case, rep: int, trace: Trace) -> None:
+    def write(
+        job: Future, case: Case, rep: int, trace: Trace, reraise: bool = True
+    ) -> None:
         nonlocal written
+        fatal = job.exception() if isinstance(job.exception(), Fatal) else None
+        if fatal and trace.empty():  # nothing was paid for: no record, as before traces
+            saved.add(job)
+            if reraise:
+                raise fatal
+            return
         text, raw = line(job, case, rep, trace)
         if (
             raw is not None
@@ -204,6 +228,8 @@ def run(
         # mark after the write: an interrupt in between duplicates the record at worst
         saved.add(job)
         written += 1
+        if fatal and reraise:
+            raise fatal  # the partial trace is written; now stop the run
 
     pool = ThreadPoolExecutor(workers)
     jobs: dict[Future, tuple[Case, int, Trace]] = {}
@@ -225,15 +251,12 @@ def run(
         finally:
             end_line(out)
             for left, (case, rep, trace) in jobs.items():
-                if (
-                    left in saved
-                    or not left.done()
-                    or left.cancelled()
-                    or left.exception()
-                ):
+                if left in saved or not left.done() or left.cancelled():
+                    continue
+                if left.exception() and not isinstance(left.exception(), Fatal):
                     continue
                 try:
-                    write(left, case, rep, trace)
+                    write(left, case, rep, trace, reraise=False)
                 except Exception as e:  # noqa: BLE001 - one bad record must not lose the others
                     print(f"{case.id}#{rep}: not written: {e}", file=sys.stderr)
     return written

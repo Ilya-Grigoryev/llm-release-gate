@@ -1,12 +1,15 @@
+import json
 from pathlib import Path
 
 import pytest
 from agent_pipeline import Adapter, ScriptedModel, World, agent, completion
 
-from llm_release_gate import gate, runner, trace
+from llm_release_gate import gate, metrics, runner, trace
 from llm_release_gate.compare import load_arm
 from llm_release_gate.golden import load_cases, validate
 from llm_release_gate.metrics import hits
+from llm_release_gate.pipeline import Answer, Fatal, Retryable
+from llm_release_gate.prices import usd
 from llm_release_gate.runner import read_records
 
 GOLDEN = Path(__file__).parent / "fixtures" / "golden"
@@ -325,3 +328,203 @@ def test_the_wrapped_client_prices_cached_tokens():
     assert trace.usage(t.to_dict(), t.prices)["agent"]["cost_usd"] == pytest.approx(
         (1_000 * 1.0 + 9_000 * 0.1 + 100 * 2.0) / 1e6
     )
+
+
+# review round 1 (25.10.)
+
+
+def test_a_fatal_error_keeps_the_partial_trace_and_stops(tmp_path):
+    out = tmp_path / "runs.jsonl"
+    broke = lambda: ScriptedModel(
+        [completion(calls=[("c1", "add", {"amount": 5})]), PermissionError("quota")]
+    )
+    with pytest.raises(Fatal):
+        record_run(Adapter({"synth-001": broke}), out)
+    [r] = read_records(out)
+    assert r["error"].startswith("Fatal") and r["trace"]["stop"] == "error"
+    assert r["usage"]["agent"]["llm_calls"] == 1  # the paid call is kept
+
+
+@pytest.mark.parametrize("day", ["2026-10-06", "2026-10-12"])
+def test_records_from_before_the_runner_still_read_score_and_cost(day):
+    [r] = read_records(Path(__file__).parent / "fixtures" / "records" / f"{day}.jsonl")
+    [case] = load_cases(GOLDEN)
+    assert "trace" not in r and "config_hash" not in r
+    assert metrics.score(case.expected, r["output"], case.scoring)["score"] == 1.0
+    assert usd(
+        r["model"],
+        r["input_tokens"],
+        r["output_tokens"],
+        {"gpt-4.1-mini": (0.40, 1.60)},
+    ) == pytest.approx((336 * 0.40 + 83 * 1.60) / 1e6)
+
+
+def test_a_retry_that_reuses_call_ids_keeps_its_own_tool_steps(tmp_path):
+    class Rebuilt(Adapter):  # path 1 only: the tools are not wrapped
+        def run(self, case):
+            world = World()
+            client = trace.openai_client(self.scripts[case.id]())
+            try:
+                agent(client, world, "add 5")
+            except TimeoutError as e:
+                raise Retryable(str(e)) from e
+            return Answer(
+                output={},
+                raw="",
+                input_tokens=0,
+                output_tokens=0,
+                latency_s=0.0,
+                model="m",
+            )
+
+    scripts = iter(
+        [
+            ScriptedModel(
+                [completion(calls=[("c1", "add", {"amount": 5})]), TimeoutError("slow")]
+            ),
+            script(),  # the same call id "c1" again
+        ]
+    )
+    out = tmp_path / "runs.jsonl"
+    record_run(Rebuilt({"synth-001": lambda: next(scripts)}), out, wait=lambda s: False)
+    [r] = read_records(out)
+    tools = [
+        (s["run_attempt"], s.get("call_id"))
+        for s in r["trace"]["steps"]
+        if s["kind"] == "tool"
+    ]
+    assert tools == [(0, "c1"), (1, "c1")]
+    assert [s["kind"] for s in trace.last_attempt(r["trace"])] == ["llm", "tool", "llm"]
+
+
+def test_a_step_cannot_break_types_or_its_number():
+    t = trace.Trace()
+    with pytest.raises(ValueError, match="tokens_in"):
+        t.step(
+            "llm",
+            "agent",
+            status="ok",
+            model="m",
+            tokens_in=None,
+            tokens_out=1,
+            cost_usd=None,
+        )
+    with pytest.raises(ValueError, match="attempt"):
+        t.step("llm", "agent", status="error", error="x", attempt=0)
+    s = t.step("message", "agent", text="hi", seq=99, run_attempt=7)
+    assert s["seq"] == 0 and s["run_attempt"] == 0
+
+
+def test_a_result_json_cannot_hold_is_kept_as_its_repr():
+    t = trace.Trace()
+    with trace.active(t):
+        trace.wrap_tool(lambda name, args: {"when": object()})("now", {})
+    assert t.steps[0]["result"]["when"].startswith("<object object")
+    json.dumps(t.to_dict())
+
+
+def test_model_step_details():
+    from types import SimpleNamespace
+
+    reply = completion(calls=[("c1", "add", {"amount": 5})])
+    reply.choices[0].finish_reason = "content_filter"
+    reply.choices[0].message.tool_calls[0].function.arguments = "{not json"
+    reply.usage.prompt_tokens_details = SimpleNamespace(cached_tokens=40)
+    reply.usage.completion_tokens_details = SimpleNamespace(reasoning_tokens=3)
+    t = trace.Trace()
+    trace.openai_client(ScriptedModel([reply]), trace=t).chat.completions.create(
+        model="m", messages=[]
+    )
+    s = t.steps[0]  # recorded through `trace=`, with no current trace
+    assert s["finish_reason"] == "other" and s["extra"] == {
+        "finish_reason": "content_filter"
+    }
+    assert s["tokens_cached"] == 40 and s["tokens_reasoning"] == 3
+    assert s["tool_calls"][0]["args"] == "{not json"
+
+
+def test_streamed_calls_and_other_methods_pass_through_with_a_note():
+    model = script()
+    model.chat.completions.parse = lambda **kw: "parsed"
+    client = trace.openai_client(model)
+    t = trace.Trace()
+    with trace.active(t):
+        client.chat.completions.create(model="m", messages=[], stream=True)
+        assert client.chat.completions.parse(model="m") == "parsed"
+    assert t.steps == [] and t.notes == ["agent: a streamed call is not recorded"]
+    assert t.to_dict()["notes"] == t.notes
+
+
+def test_attempts_restart_with_each_runner_attempt():
+    t = trace.Trace()
+    t.step("llm", "agent", status="error", error="x", attempt=1)
+    t.run_attempt = 1
+    assert t.failures("agent") == 0
+    assert trace.last_attempt(t.to_dict()) == []  # the final attempt has no steps yet
+
+
+def test_parallel_runs_keep_their_own_traces(tmp_path):
+    set_hash, _ = validate(GOLDEN)
+    [case] = load_cases(GOLDEN)
+    from dataclasses import replace as copy
+
+    cases = [copy(case, id=f"c{i}") for i in range(8)]
+    out = tmp_path / "runs.jsonl"
+    runner.run(
+        Adapter({c.id: script for c in cases}),
+        cases,
+        2,
+        out,
+        config_hash="c" * 64,
+        set_hash=set_hash,
+        score=hits,
+        workers=4,
+    )
+    records = read_records(out)
+    assert len(records) == 16
+    assert all([s["seq"] for s in r["trace"]["steps"]] == [0, 1, 2] for r in records)
+
+
+def test_the_gate_prices_with_its_own_table_and_falls_back_to_answer_tokens(tmp_path):
+    out = tmp_path / "runs.jsonl"
+    record_run(
+        Adapter({"synth-001": script}), out, prices={"fake-model": (100.0, 100.0)}
+    )
+    arm = load_arm(out)
+    assert gate.cost(arm, PRICES) == pytest.approx(
+        (230 * 1 + 15 * 2) / 1e6
+    )  # the gate's table wins
+    no_steps = tmp_path / "bare.jsonl"
+    r = {
+        **read_records(out)[0],
+        "trace": {"v": 1, "steps": [], "stop": "done"},
+        "input_tokens": 1000,
+        "output_tokens": 0,
+        "model": "fake-model-1",
+    }
+    no_steps.write_text(json.dumps(r) + "\n")
+    assert gate.cost(load_arm(no_steps), PRICES) == pytest.approx(1000 / 1e6)
+
+
+def test_the_runner_cli_prices_the_steps(tmp_path):
+    prices = tmp_path / "prices.yaml"
+    prices.write_text("fake-model: [1, 2]\n")
+    config = Path(__file__).parent / "fixtures" / "agent-config.yaml"
+    out = tmp_path / "o.jsonl"
+    runner.main(
+        [
+            "--config",
+            str(config),
+            "--golden",
+            str(GOLDEN),
+            "--out",
+            str(out),
+            "--prices",
+            str(prices),
+        ]
+    )
+    [r] = read_records(out)
+    assert [s["cost_usd"] for s in r["trace"]["steps"] if s["kind"] == "llm"] == [
+        pytest.approx(120 / 1e6),
+        pytest.approx(140 / 1e6),
+    ]

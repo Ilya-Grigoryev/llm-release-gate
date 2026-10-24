@@ -8,7 +8,7 @@ import json
 from types import SimpleNamespace
 
 from llm_release_gate import trace
-from llm_release_gate.pipeline import Answer, Retryable
+from llm_release_gate.pipeline import Answer, Fatal, Retryable
 
 VERSION = 1
 
@@ -97,6 +97,8 @@ class Adapter:
             reply = agent(client, world, "add 5")
         except TimeoutError as e:
             raise Retryable(str(e)) from e
+        except PermissionError as e:  # the account ran out of quota
+            raise Fatal(str(e)) from e
         t = trace.current()
         if t is not None:
             t.final_state = {"balance": world.balance}
@@ -110,3 +112,16 @@ class Adapter:
             latency_s=0.0,
             model="fake-model-2026-01-01",
         )
+
+
+def default_script():
+    return ScriptedModel(
+        [
+            completion(calls=[("c1", "add", {"amount": 5})]),
+            completion("Added 5.", tokens=(130, 5)),
+        ]
+    )
+
+
+def build(config):
+    return Adapter({"synth-001": default_script})

@@ -45,8 +45,8 @@ class Adapter:
         world = load_world(case)
         world.call = trace.wrap_tool(world.call)  # a step per tool call
         reply = my_agent(self.client, world, case)
-        t = trace.current()
-        t.final_state, t.state_change, t.stop = world.state(), world.diff(), "done"
+        if (t := trace.current()) is not None:  # None outside the runner
+            t.final_state, t.state_change, t.stop = world.state(), world.diff(), "done"
         return Answer(...)
 ```
 
@@ -54,11 +54,14 @@ Each step has a kind (`llm`, `tool`, `message`, `retrieval`) and an actor (`agen
 holds the model the API reported, tokens, cost, the finish reason and the new output; a tool step holds the name, the
 arguments, a status and the result or error. Wrap a user simulator's client with `actor="user"` to keep its cost apart from
 the agent's. Record what the wrappers cannot see with `trace.current().step(kind, actor, ...)`. Tool calls you do not wrap
-are rebuilt from the `tool` messages your agent sends back, with status `unknown`.
+are rebuilt from the `tool` messages your agent sends back, with status `unknown`. Only `chat.completions.create` is
+recorded: streamed, async and Responses API calls pass through and leave a note in the trace. The current trace
+belongs to the thread that runs the case; give `trace=` to the wrappers for calls from threads your application starts.
 
 The record gets the trace, tokens and cost per actor (`usage`) and the wall-clock time (`wall_s`). A run that fails halfway
 keeps the steps it paid for. A run the runner retries keeps every attempt's steps under `run_attempt`; checks look at the
-last attempt, the cost counts all of them. A pipeline that records nothing writes `trace: null`, as before.
+last attempt, the cost counts all of them. A run stopped by a `Fatal` error is written too when it paid for steps. `wall_s` includes the
+runner's backoff between attempts. A pipeline that records nothing writes `trace: null`, as before.
 
 ## Running a version
 

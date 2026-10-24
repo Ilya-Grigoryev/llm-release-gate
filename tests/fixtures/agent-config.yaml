@@ -1,0 +1,4 @@
+pipeline: agent_pipeline
+model: fake-model-2026-01-01
+prompt: prompt.md
+input: text
