@@ -1,0 +1,62 @@
+id: move-booking
+version: 1
+slices:
+  category: policy
+source: examples/support-agent/cases/move-booking.yaml
+input:
+  case: inputs/move-booking.yaml
+  world: inputs/world.yaml
+  simulator: inputs/simulator.yaml
+expected:
+  state_change:
+    created:
+    - member_id: M-102
+      space: desk
+      start: 2026-11-05T13:00
+      hours: 2
+    cancelled:
+    - B-205
+    credits:
+    - member_id: M-102
+      amount_eur: 10.0
+  actions:
+  - tool: cancel_booking
+    args:
+      booking_id: B-205
+  - tool: issue_credit
+    args:
+      member_id: M-102
+      amount_eur: 10
+      reason: cancelled B-205 more than 24 hours ahead
+  - tool: create_booking
+    args:
+      member_id: M-102
+      space_id: D-1
+      start: 2026-11-05T13:00
+      hours: 2
+scoring:
+  method: checks
+  aggregate: all
+  checks:
+  - id: state
+    kind: state
+    key: state_change
+  - id: acted
+    kind: active
+  - id: verified
+    kind: order
+    first: find_member
+    then:
+    - create_booking
+    - cancel_booking
+    - issue_credit
+    - escalate_to_human
+  - id: credit-limit
+    kind: not_called
+    tool: issue_credit
+    args:
+      amount_eur:
+        gt: 30
+  - id: steps
+    kind: max_steps
+    max: 15

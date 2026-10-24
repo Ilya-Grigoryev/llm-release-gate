@@ -12,6 +12,9 @@ tools, under a written policy. The test cases are this project's own, the way a 
 | `src/support_agent/world.py` | the database in memory and the eight tools |
 | `src/support_agent/agent.py` | the agent loop, the simulated member, one run of a case |
 | `src/support_agent/run.py` | runs cases against the API and prints what happened |
+| `src/support_agent/gate_adapter.py` | the gate's view: `build(config)` and `run(case)`, recording a trace |
+| `src/support_agent/golden.py` | builds `golden/solo` and `golden/chat` from `cases/` |
+| `configs/support.yaml` | the version under test for the gate |
 
 The version under test is `policy.md`, `tools.yaml`, the agent's model and parameters, its step limit and the agent
 code. The member simulator (`cases/simulator.yaml`: model, parameters, guidelines) belongs to the test set with the
@@ -62,3 +65,24 @@ whether they match. `--out runs.jsonl` keeps one line per run with the time, the
 
 The database comparison sees only the end state. An agent that skips the name check, or one whose simulated member did
 the work, can still match it; checks on the agent's own steps come with the gate's trace.
+
+## Under the gate
+
+`configs/support.yaml` is the version under test: the agent's model, `policy.md` and `tools.yaml`. Its hash changes when
+any of them does. `golden/solo` and `golden/chat` are the test sets, built from `cases/` (`python -m support_agent.golden`;
+a test checks they match). A chat case lists `cases/simulator.yaml` as an input, so the simulator belongs to the set's
+hash, not to the version.
+
+Each golden case passes only if every check does (`aggregate: all`): the database changed as the reference actions
+change it, the agent called a tool itself, it looked the member up before any write, it issued no credit above €30,
+and it used at most 15 model calls.
+
+```sh
+# 3 runs per case, alone on the ticket
+uv run --env-file ../../.env python -m llm_release_gate.runner --config configs/support.yaml \
+  --golden golden/solo -k 3 --out ../../data/runs/support-solo.jsonl --prices prices.yaml
+```
+
+The adapter wraps the model client and the world's tool function (`llm_release_gate.trace`), so every record holds the
+run's steps: who called which tool with which arguments, the model calls of the agent and of the simulated member with
+their tokens and cost, and the change to the database. The application code does not import the gate.

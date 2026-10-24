@@ -1,0 +1,13 @@
+id: room-on-basic
+category: refusal
+now: "2026-11-02T09:00"
+ticket: >
+  Tomas Horvat (tomas.horvat@example.com) wants the Small room on Thursday 5 November, 10:00 to 12:00, for a client call.
+user:
+  known: You are Tomas Horvat. Your email is tomas.horvat@example.com. You are on the Basic plan.
+  instructions: >
+    You want to book the Small room this Thursday, 5 November, from 10:00 to 12:00 for a client call. If the agent
+    cannot book a room for you, you do not want anything else.
+actions:
+  - [find_member, {email: tomas.horvat@example.com}]
+expect: {}

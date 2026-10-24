@@ -1,0 +1,15 @@
+id: book-desk
+category: happy
+now: "2026-11-02T09:00"
+ticket: >
+  Anna Berger (anna.berger@example.com) wants a desk on Wednesday 4 November from 14:00 to 16:00.
+user:
+  known: You are Anna Berger. Your email is anna.berger@example.com.
+  instructions: You want to book a desk for this Wednesday, 4 November, from 14:00 to 16:00.
+actions:
+  - [find_member, {email: anna.berger@example.com}]
+  - [list_bookings, {member_id: M-101}]
+  - [search_availability, {kind: desk, start: "2026-11-04T14:00", hours: 2}]
+  - [create_booking, {member_id: M-101, space_id: D-1, start: "2026-11-04T14:00", hours: 2}]
+expect:
+  created: [{member_id: M-101, space: desk, start: "2026-11-04T14:00", hours: 2}]

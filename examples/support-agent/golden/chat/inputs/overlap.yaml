@@ -1,0 +1,14 @@
+id: overlap
+category: refusal
+now: "2026-11-02T09:00"
+ticket: >
+  Tomas Horvat (tomas.horvat@example.com) wants a desk on Wednesday 4 November from 11:00 to 13:00 for a colleague.
+user:
+  known: You are Tomas Horvat. Your email is tomas.horvat@example.com.
+  instructions: >
+    You want to book a second desk on your account this Wednesday, 4 November, from 11:00 to 13:00, for a visiting
+    colleague. If the agent says it is not possible, accept it.
+actions:
+  - [find_member, {email: tomas.horvat@example.com}]
+  - [list_bookings, {member_id: M-104}]
+expect: {}

@@ -1,0 +1,18 @@
+# The world every case starts from; a case adds its own rows under `world:`.
+members:
+  - {id: M-101, name: Anna Berger, email: anna.berger@example.com, plan: Basic}
+  - {id: M-102, name: Jonas Weber, email: jonas.weber@example.com, plan: Pro}
+  - {id: M-103, name: Lea Novak, email: lea.novak@example.com, plan: Pro}
+  - {id: M-104, name: Tomas Horvat, email: tomas.horvat@example.com, plan: Basic}
+spaces:
+  - {id: D-1, kind: desk, name: Desk 1, capacity: 1}
+  - {id: D-2, kind: desk, name: Desk 2, capacity: 1}
+  - {id: D-3, kind: desk, name: Desk 3, capacity: 1}
+  - {id: R-1, kind: room, name: Small room, capacity: 4}
+  - {id: R-2, kind: room, name: Large room, capacity: 10}
+bookings:
+  - {id: B-201, member_id: M-101, space_id: D-1, start: "2026-11-05T10:00", hours: 3, status: active}
+  - {id: B-202, member_id: M-102, space_id: R-1, start: "2026-11-02T14:00", hours: 2, status: active}
+  - {id: B-203, member_id: M-103, space_id: R-2, start: "2026-11-06T09:00", hours: 4, status: active}
+  - {id: B-204, member_id: M-104, space_id: D-2, start: "2026-11-04T09:00", hours: 4, status: active}
+  - {id: B-205, member_id: M-102, space_id: D-3, start: "2026-11-03T13:00", hours: 2, status: active}
