@@ -47,4 +47,4 @@ Step 2 also asks for DD/MM/YYYY dates and totals with two decimals; the gate com
 
 An edit to a prompt in `prompts/` makes a new pipeline version with its own config hash. Bump `VERSION` in `pipeline.py` when you change what the code sends to the model; the two-step version includes it. In `steps.py`, bump the second number when you change what that file sends in either call.
 
-Pull requests on GitHub and merge requests on GitLab run `release-gate` on this example: see the CI section of the main README.
+Pull requests on GitHub and merge requests on GitLab run `release-gate` on this example: see the CI section in the main README.
