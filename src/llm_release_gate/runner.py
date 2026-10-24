@@ -17,7 +17,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from llm_release_gate.golden import load_cases, validate
-from llm_release_gate.metrics import hits, mean
+from llm_release_gate.metrics import aggregate, hits
 from llm_release_gate.pipeline import (
     Answer,
     Case,
@@ -154,7 +154,7 @@ def run(
             try:
                 with active(trace):  # a scorer may check the trace
                     hits = score(case, answer)
-                value = mean(hits)
+                value = aggregate(hits, case.scoring.get("aggregate", "mean"))
             except Exception as e:  # noqa: BLE001 - keep the paid answer, rescore later
                 score_error = f"{type(e).__name__}: {e}"
         record = {

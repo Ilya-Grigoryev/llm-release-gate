@@ -1,3 +1,4 @@
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -307,3 +308,32 @@ def test_field_match_cases_score_as_before():
     )
     assert old["score"] == via_checks["score"] == 0.75
     assert {f"f.{k}": v for k, v in old["per_field"].items()} == via_checks["per_field"]
+
+
+def test_the_runner_scores_a_case_as_its_aggregate_says(tmp_path):
+    from replay_pipeline import Replay
+
+    from llm_release_gate import runner
+    from llm_release_gate.golden import load_cases
+    from llm_release_gate.runner import read_records
+
+    golden = Path(__file__).parent / "fixtures" / "golden"
+    [case] = load_cases(golden)
+    strict = replace(case, scoring={**case.scoring, "aggregate": "all"})
+    out = tmp_path / "runs.jsonl"
+    wrong_date = Replay().answers[0]
+    wrong_date = replace(wrong_date, output={**wrong_date.output, "date": "02/02/2020"})
+    runner.run(
+        Replay(answers=[wrong_date]),
+        [strict],
+        1,
+        out,
+        config_hash="c" * 64,
+        set_hash="s" * 64,
+        score=metrics.hits,
+        workers=1,
+    )
+    [r] = read_records(out)
+    assert (
+        r["hits"]["date"] is False and r["score"] == 0.0
+    )  # 3 of 4 fields right, but `all`
