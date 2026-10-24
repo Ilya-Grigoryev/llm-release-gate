@@ -68,8 +68,8 @@ release-gate:
     - (cd examples/sroie && uv run python -m llm_release_gate.golden validate ../../data/golden/sroie --manifest golden/sroie.yaml)
     - git fetch --depth=1 origin "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
     - ci/gate.sh FETCH_HEAD examples/sroie "$CONFIG" data/golden/sroie out
-  after_script:  # runs after a failed script too
-    - cd examples/sroie && uv run python -m llm_release_gate.comment ../../out/comment.md
+  after_script:  # runs after a failed script too; a cancelled run leaves the comment to its successor
+    - if [ "$CI_JOB_STATUS" != canceled ]; then cd examples/sroie && uv run python -m llm_release_gate.comment ../../out/comment.md; fi
   artifacts:
     when: always
     paths:

@@ -299,3 +299,18 @@ def test_prices_cover_every_model_or_say_so(
     ]
     assert gate.main([*args, "--markdown", str(comment)]) == code
     assert (text in comment.read_text()) if text else not comment.exists()
+
+
+@pytest.mark.parametrize(
+    "outcome, icon",
+    [
+        ("pass", "✅"),
+        ("quality fail", "❌"),
+        ("inconclusive", "⚠️"),
+        ("budget fail", "❌"),
+    ],
+)
+def test_the_comment_names_every_outcome(outcome, icon):
+    v = gate.Verdict(outcome, 0, 1.0, 1.0, 0.0, 5.0, "rule", 1, [])
+    arm = gate.Arm("c" * 64, "s" * 64, "metrics/4", {})
+    assert f"**Release gate: {icon} {outcome}**" in gate.markdown(v, arm, arm)

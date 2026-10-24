@@ -125,7 +125,7 @@ def main(argv: list[str] | None = None) -> None:
     if not args.check and not args.file:
         p.error("give the Markdown file, or --check")
     if args.dry_run:
-        if not args.file.is_file():
+        if not args.file or not args.file.is_file():
             sys.exit(f"{args.file}: no such file")
         print(args.file.read_text(), end="")
         return
