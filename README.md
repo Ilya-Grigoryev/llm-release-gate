@@ -28,11 +28,43 @@ params: {temperature: 0}
 
 The gate's code imports no pipeline. Give your module a `VERSION` and bump it when your code changes what the model gets. [`examples/sroie/`](examples/sroie/) is a whole project set up this way.
 
+## Traces
+
+A tool-using agent makes many calls per case. The runner keeps a trace for each run, and your adapter records into it
+without touching your application:
+
+```python
+from llm_release_gate import trace
+
+
+class Adapter:
+    def __init__(self, config):
+        self.client = trace.openai_client(OpenAI())  # a step per model call
+
+    def run(self, case):
+        world = load_world(case)
+        world.call = trace.wrap_tool(world.call)  # a step per tool call
+        reply = my_agent(self.client, world, case)
+        t = trace.current()
+        t.final_state, t.state_change, t.stop = world.state(), world.diff(), "done"
+        return Answer(...)
+```
+
+Each step has a kind (`llm`, `tool`, `message`, `retrieval`) and an actor (`agent`, `user`, `system`, `env`). A model step
+holds the model the API reported, tokens, cost, the finish reason and the new output; a tool step holds the name, the
+arguments, a status and the result or error. Wrap a user simulator's client with `actor="user"` to keep its cost apart from
+the agent's. Record what the wrappers cannot see with `trace.current().step(kind, actor, ...)`. Tool calls you do not wrap
+are rebuilt from the `tool` messages your agent sends back, with status `unknown`.
+
+The record gets the trace, tokens and cost per actor (`usage`) and the wall-clock time (`wall_s`). A run that fails halfway
+keeps the steps it paid for. A run the runner retries keeps every attempt's steps under `run_attempt`; checks look at the
+last attempt, the cost counts all of them. A pipeline that records nothing writes `trace: null`, as before.
+
 ## Running a version
 
 Each pipeline version is a YAML file: pipeline module, model snapshot, prompt file (or named prompt files for a pipeline with several steps), input, API parameters and, optionally, `max_retries` (default 5) and `timeout_s` (default 60). Its hash covers every field, the bytes of each prompt and the module's `VERSION`; key order, YAML formatting and `0` versus `0.0` do not change it.
 
-The runner calls the pipeline K times per case of a golden set and appends one JSON record per call, stamped with the config hash, the set hash and the scorer version. A rerun pays only for what is missing. The runner retries rate limits, timeouts and server errors with backoff 1, 2, 4... s and stops when the account is out of quota.
+The runner calls the pipeline K times per case of a golden set and appends one JSON record per call, stamped with the config hash, the set hash and the scorer version. A rerun pays only for what is missing. The runner retries rate limits, timeouts and server errors with backoff 1, 2, 4... s and stops when the account is out of quota. `--prices` puts a list price on each model step of a trace; the raw provider responses go to `<out>.native.jsonl`.
 
 ```sh
 # from examples/sroie: the scan on the SROIE golden set, 3 runs per receipt
@@ -41,7 +73,7 @@ uv run --env-file ../../.env python -m llm_release_gate.runner --config configs/
 
 ## The naive gate
 
-The first gate compares one run per version: it blocks when the candidate's mean score is lower than the base's by more than a threshold, 5 points by default (`--relative` reads it as a percentage of the base mean). It pairs the two files case by case and refuses files with different set hashes, different scorer versions or cases missing from one side. `--golden` rescores both sides from their saved answers with the current scorer, without calling the model. `--prices` takes a YAML of `model: [input, output]` in USD per 1M tokens and adds what the decision cost: every successful call of both runs.
+The first gate compares one run per version: it blocks when the candidate's mean score is lower than the base's by more than a threshold, 5 points by default (`--relative` reads it as a percentage of the base mean). It pairs the two files case by case and refuses files with different set hashes, different scorer versions or cases missing from one side. `--golden` rescores both sides from their saved answers with the current scorer, without calling the model. `--prices` takes a YAML of `model: [input, output]` in USD per 1M tokens and adds what the decision cost: every successful call of both runs. For a traced record that means every model step, the user simulator's included.
 
 ```sh
 uv run python -m llm_release_gate.gate --base data/runs/base.jsonl --candidate data/runs/candidate.jsonl --markdown comment.md --json verdict.json
