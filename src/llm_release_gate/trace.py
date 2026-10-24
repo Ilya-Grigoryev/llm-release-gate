@@ -243,25 +243,26 @@ class _Client:
 
 def llm_fields(r: Any, prices: Prices) -> dict:
     """A model step from an OpenAI chat completion: what the API reported, the new output only."""
-    choice, used = r.choices[0], r.usage
+    choice, used = r.choices[0], getattr(r, "usage", None)
+    tokens_in = field(used, "prompt_tokens") or 0  # a provider may report no usage
+    tokens_out = field(used, "completion_tokens") or 0
+    finish = getattr(choice, "finish_reason", None)
     message = choice.message
     cached = field(field(used, "prompt_tokens_details"), "cached_tokens") or 0
     fields: dict[str, Any] = {
         "status": "ok",
         "model": r.model,
-        "tokens_in": used.prompt_tokens,
-        "tokens_out": used.completion_tokens,
+        "tokens_in": tokens_in,
+        "tokens_out": tokens_out,
         "tokens_cached": cached,
         "tokens_reasoning": field(
             field(used, "completion_tokens_details"), "reasoning_tokens"
         )
         or 0,
-        "cost_usd": usd(
-            r.model, used.prompt_tokens, used.completion_tokens, prices, cached
-        )
+        "cost_usd": usd(r.model, tokens_in, tokens_out, prices, cached)
         if prices
         else None,
-        "finish_reason": FINISH.get(choice.finish_reason, "other"),
+        "finish_reason": FINISH.get(finish, "other"),
         "fingerprint": getattr(r, "system_fingerprint", None),
         "request_id": getattr(r, "id", None),
         "text": message.content,
@@ -272,8 +273,8 @@ def llm_fields(r: Any, prices: Prices) -> dict:
             {"id": c.id, "name": c.function.name, "args": parse(c.function.arguments)}
             for c in calls
         ]
-    if choice.finish_reason not in FINISH:
-        fields["extra"] = {"finish_reason": choice.finish_reason}
+    if finish not in FINISH:
+        fields["extra"] = {"finish_reason": finish}
     return fields
 
 
