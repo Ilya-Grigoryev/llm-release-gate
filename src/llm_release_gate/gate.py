@@ -159,7 +159,12 @@ def markdown(
     candidate: Arm,
     costs: tuple[float | None, float | None] | None = None,
 ) -> str:
-    icon = {"pass": "✅", "quality fail": "❌"}[v.outcome]
+    icon = {
+        "pass": "✅",
+        "quality fail": "❌",
+        "inconclusive": "⚠️",
+        "budget fail": "❌",
+    }[v.outcome]
     lines = [
         f"**Release gate: {icon} {v.outcome}**",
         "",
