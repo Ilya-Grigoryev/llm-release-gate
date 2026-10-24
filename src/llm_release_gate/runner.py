@@ -1,9 +1,14 @@
-"""Run a pipeline K times per case and append one JSON record per (case, repetition)."""
+"""Run a pipeline K times per case and append one JSON record per (case, repetition).
+
+Each run gets a trace (`trace.Trace`): the pipeline records its steps into it, and the record keeps them even when
+the run fails, with the raw provider responses in `<out>.native.jsonl`.
+"""
 
 import argparse
 import json
 import sys
 import threading
+import time
 import uuid
 from collections.abc import Callable, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
@@ -23,8 +28,10 @@ from llm_release_gate.pipeline import (
     load_config,
     load_pipeline,
 )
+from llm_release_gate.prices import Prices, load_prices
+from llm_release_gate.trace import Trace, active, usage
 
-RECORD_VERSION = 2  # 2: adds scorer_version
+RECORD_VERSION = 3  # 2: adds scorer_version; 3: adds trace, usage, wall_s
 Scorer = Callable[[Case, Answer], dict[str, bool | None]]
 EMPTY_ANSWER = {f.name: None for f in fields(Answer)}
 
@@ -66,13 +73,23 @@ def end_line(path: Path) -> None:
 
 
 def call(
-    pipeline: Pipeline, case: Case, max_retries: int, wait: Callable[[float], bool]
+    pipeline: Pipeline,
+    case: Case,
+    max_retries: int,
+    wait: Callable[[float], bool],
+    trace: Trace | None = None,
 ) -> tuple[Answer | None, int, str | None]:
-    """Run one case, backing off on Retryable. `wait` returns True to stop retrying."""
+    """Run one case, backing off on Retryable. `wait` returns True to stop retrying.
+
+    The pipeline sees `trace` as the current trace; a retried run adds its steps under the next `run_attempt`.
+    """
     retries = 0
     while True:
+        if trace is not None:
+            trace.run_attempt = retries
         try:
-            return pipeline.run(case), retries, None
+            with active(trace):
+                return pipeline.run(case), retries, None
         except Retryable as e:
             reason = f"{type(e.__cause__ or e).__name__}: {e}"
             if retries >= max_retries:
@@ -98,6 +115,7 @@ def run(
     workers: int = 4,
     max_retries: int = 5,
     wait: Callable[[float], bool] | None = None,
+    prices: Prices | None = None,
 ) -> int:
     """Append the records missing from `out` and return how many were written.
 
@@ -105,7 +123,7 @@ def run(
     for the same config and set hash, so a rerun pays only for the rest.
     On Ctrl-C or a Fatal error the queued calls are dropped, backoffs are cut short and
     the calls already running finish and are written. A custom `wait` replaces the
-    stop-aware default and is not cut short.
+    stop-aware default and is not cut short. `prices` puts a list price on each model step.
     """
     if type(max_retries) is not int or max_retries < 0:
         raise ValueError(f"max_retries must be a non-negative int, got {max_retries!r}")
@@ -116,10 +134,20 @@ def run(
     wait = wait or stop.wait
     out.parent.mkdir(parents=True, exist_ok=True)
     end_line(out)
+    native = out.with_name(out.stem + ".native.jsonl")
     saved: set[Future] = set()
     written = 0
 
-    def line(job: Future, case: Case, rep: int) -> str:
+    def job(case: Case, trace: Trace) -> tuple[Answer | None, int, str | None]:
+        start = time.monotonic()
+        try:
+            return call(pipeline, case, max_retries, wait, trace)
+        finally:
+            trace.wall_s = round(time.monotonic() - start, 3)
+
+    def line(
+        job: Future, case: Case, rep: int, trace: Trace
+    ) -> tuple[str, dict | None]:
         answer, retries, error = job.result()
         hits = value = score_error = None
         if answer:
@@ -137,6 +165,8 @@ def run(
             "run_id": run_id,
             "timestamp": datetime.now(UTC).isoformat(timespec="seconds"),
             **(asdict(answer) if answer else EMPTY_ANSWER),
+            "wall_s": trace.wall_s,
+            "trace": None if trace.empty() else trace.to_dict(),
             "scorer_version": getattr(score, "version", None),
             "hits": hits,
             "score": value,
@@ -144,15 +174,30 @@ def run(
             "retries": retries,
             "error": error,
         }
+        record["usage"] = usage(record["trace"], prices) if record["trace"] else None
+        raw = None
+        if trace.native:
+            record["trace"]["native"] = native.name
+            raw = {
+                "run_id": run_id,
+                "case": case.id,
+                "rep": rep,
+                "native": trace.native,
+            }
         try:
-            return json.dumps(record) + "\n"
+            return json.dumps(record) + "\n", raw
         except (TypeError, ValueError) as e:
             record["error"] = f"record not serializable: {e}"
-            return json.dumps(record, default=repr) + "\n"
+            return json.dumps(record, default=repr) + "\n", raw
 
-    def write(job: Future, case: Case, rep: int) -> None:
+    def write(job: Future, case: Case, rep: int, trace: Trace) -> None:
         nonlocal written
-        text = line(job, case, rep)
+        text, raw = line(job, case, rep, trace)
+        if (
+            raw is not None
+        ):  # before the record: a record never points to a missing line
+            with native.open("a") as f:
+                f.write(json.dumps(raw, default=repr) + "\n")
         with out.open("a") as f:
             f.write(text)
         # mark after the write: an interrupt in between duplicates the record at worst
@@ -160,12 +205,13 @@ def run(
         written += 1
 
     pool = ThreadPoolExecutor(workers)
-    jobs: dict[Future, tuple[Case, int]] = {}
+    jobs: dict[Future, tuple[Case, int, Trace]] = {}
     try:
         for c, k in todo:
-            jobs[pool.submit(call, pipeline, c, max_retries, wait)] = (c, k)
-        for job in as_completed(jobs):
-            write(job, *jobs[job])
+            trace = Trace(prices)
+            jobs[pool.submit(job, c, trace)] = (c, k, trace)
+        for done_job in as_completed(jobs):
+            write(done_job, *jobs[done_job])
     finally:
         # cancel queued calls before setting stop
         pool.shutdown(wait=False, cancel_futures=True)
@@ -177,11 +223,16 @@ def run(
             pool.shutdown()
         finally:
             end_line(out)
-            for job, (case, rep) in jobs.items():
-                if job in saved or not job.done() or job.cancelled() or job.exception():
+            for left, (case, rep, trace) in jobs.items():
+                if (
+                    left in saved
+                    or not left.done()
+                    or left.cancelled()
+                    or left.exception()
+                ):
                     continue
                 try:
-                    write(job, case, rep)
+                    write(left, case, rep, trace)
                 except Exception as e:  # noqa: BLE001 - one bad record must not lose the others
                     print(f"{case.id}#{rep}: not written: {e}", file=sys.stderr)
     return written
@@ -196,6 +247,9 @@ def main(argv: Sequence[str] | None = None) -> None:
     p.add_argument("-k", type=int, default=1, help="repetitions per case")
     p.add_argument("--out", type=Path, required=True, help="JSONL file to append to")
     p.add_argument("--workers", type=int, default=4, help="parallel calls")
+    p.add_argument(
+        "--prices", type=Path, help="YAML `model: [input, output]`, USD per 1M tokens"
+    )
     args = p.parse_args(argv)
     if args.k < 1 or args.workers < 1:
         p.error("-k and --workers must be at least 1")
@@ -208,7 +262,11 @@ def main(argv: Sequence[str] | None = None) -> None:
         config = load_config(args.config)
         hashes = {"config_hash": config_hash(config), "set_hash": set_hash}
         pipeline = load_pipeline(config)
-    except (ValueError, OSError) as e:  # a bad config, a missing prompt file
+        prices = load_prices(args.prices) if args.prices else None
+    except (
+        ValueError,
+        OSError,
+    ) as e:  # a bad config, a missing prompt file, a bad price table
         sys.exit(str(e))
     cases = load_cases(args.golden)
     try:
@@ -220,6 +278,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             score=hits,
             workers=args.workers,
             max_retries=config.max_retries,
+            prices=prices,
             **hashes,
         )
     except Fatal as e:

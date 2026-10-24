@@ -10,11 +10,11 @@ from dataclasses import asdict, dataclass, replace
 from fractions import Fraction
 from pathlib import Path
 
-import yaml
-
 from llm_release_gate.compare import Arm, Mismatch, load_arm, pair
 from llm_release_gate.golden import load_cases, validate
 from llm_release_gate.metrics import VERSION, score
+from llm_release_gate.prices import Prices, load_prices, usd
+from llm_release_gate.trace import usage
 
 # Exit codes. 1 and 2 stay with Python and argparse, so a crash is never read as a verdict.
 PASS, QUALITY_FAIL, INCONCLUSIVE, BUDGET_FAIL, INFRA_ERROR = 0, 10, 11, 12, 20
@@ -121,35 +121,26 @@ def first_run(records: list[dict]) -> float:
     return r["score"]
 
 
-def load_prices(path: Path) -> dict[str, tuple[float, float]]:
-    """Model name prefix -> USD per 1M input tokens and per 1M output tokens."""
-    raw = yaml.safe_load(Path(path).read_text())
-    ok = isinstance(raw, dict) and all(
-        isinstance(k, str)
-        and isinstance(v, list)
-        and len(v) == 2
-        and all(type(x) in (int, float) and x >= 0 for x in v)
-        for k, v in raw.items()
-    )
-    if not ok:
-        raise ValueError(
-            f"{path}: expected `model: [input, output]` in USD per 1M tokens"
-        )
-    return {k: (float(v[0]), float(v[1])) for k, v in raw.items()}
+def cost(arm: Arm, prices: Prices) -> float | None:
+    """USD for the arm's recorded calls; None if a model has no price.
 
-
-def cost(arm: Arm, prices: dict[str, tuple[float, float]]) -> float | None:
-    """USD for the arm's recorded calls; None if a model has no price. The longest matching prefix wins."""
+    A record with a trace costs what its model steps cost, the user simulator's included: the price of the decision.
+    """
     total = 0.0
     for r in arm.records.values():
-        model = str(r.get("model") or "")
-        key = max((k for k in prices if model.startswith(k)), key=len, default=None)
-        if key is None:
+        if r.get("trace"):
+            per_actor = usage(r["trace"], prices).values()
+            spent = [u["cost_usd"] for u in per_actor]
+            if None in spent:
+                return None
+            total += sum(spent)
+            continue
+        spent = usd(
+            r.get("model"), r.get("input_tokens"), r.get("output_tokens"), prices
+        )
+        if spent is None:
             return None
-        p_in, p_out = prices[key]
-        total += (
-            (r.get("input_tokens") or 0) * p_in + (r.get("output_tokens") or 0) * p_out
-        ) / 1e6
+        total += spent
     return total
 
 
