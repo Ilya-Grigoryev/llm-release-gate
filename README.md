@@ -28,8 +28,8 @@ params: {temperature: 0}
 
 Prefer a dated snapshot. A name without a date (`gpt-6-luna`) works, but the provider may change the model behind it,
 so the gate takes three precautions: every record keeps the requested model next to the one the provider reports and the
-time, the gate's comment warns about it, and the gate refuses to compare two versions whose runs are more than an hour
-apart.
+time, the gate's comment warns about it, and the gate refuses to compare two versions whose runs, taken together, have a
+pause longer than an hour, or for which the provider reported different models.
 
 The gate's code imports no pipeline. Give your module a `VERSION` and bump it when your code changes what the model gets. [`examples/sroie/`](examples/sroie/) is a whole project set up this way.
 
@@ -71,7 +71,7 @@ runner's backoff between attempts. A pipeline that records nothing writes `trace
 
 ## Running a version
 
-Each pipeline version is a YAML file: pipeline module, model snapshot, prompt file (or named prompt files for a pipeline with several steps), input, API parameters and, optionally, `max_retries` (default 5) and `timeout_s` (default 60). Its hash covers every field, the bytes of each prompt and the module's `VERSION`; key order, YAML formatting and `0` versus `0.0` do not change it.
+Each pipeline version is a YAML file: pipeline module, model (a dated snapshot if there is one), prompt file (or named prompt files for a pipeline with several steps), input, API parameters and, optionally, `max_retries` (default 5) and `timeout_s` (default 60). Its hash covers every field, the bytes of each prompt and the module's `VERSION`; key order, YAML formatting and `0` versus `0.0` do not change it.
 
 The runner calls the pipeline K times per case of a golden set and appends one JSON record per call, stamped with the config hash, the set hash and the scorer version. A rerun pays only for what is missing. The runner retries rate limits, timeouts and server errors with backoff 1, 2, 4... s and stops when the account is out of quota. `--prices` puts a list price on each model step of a trace; the raw provider responses go to `<out>.native.jsonl`.
 

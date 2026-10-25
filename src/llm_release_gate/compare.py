@@ -2,7 +2,8 @@
 
 from collections import defaultdict
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
+from itertools import pairwise
 from pathlib import Path
 
 from llm_release_gate.pipeline import is_alias
@@ -27,14 +28,15 @@ class Arm:
         default_factory=frozenset
     )  # requested models without a date
 
-    def span(self) -> tuple[datetime, datetime] | None:
-        """When the arm's records were written."""
-        times = [
-            datetime.fromisoformat(r["timestamp"])
-            for r in self.records.values()
-            if r.get("timestamp")
-        ]
-        return (min(times), max(times)) if times else None
+    def times(self) -> list[datetime] | None:
+        """When each record was written, in UTC; None if a record has no time."""
+        out = []
+        for r in self.records.values():
+            if not r.get("timestamp"):
+                return None
+            t = datetime.fromisoformat(r["timestamp"])
+            out.append(t if t.tzinfo else t.replace(tzinfo=UTC))
+        return out
 
 
 def load_arm(path: Path) -> Arm:
@@ -82,17 +84,24 @@ def pair(base: Arm, candidate: Arm) -> dict[str, tuple[list[dict], list[dict]]]:
         )
     aliases = base.aliases | candidate.aliases
     if aliases:
-        spans = base.span(), candidate.span()
-        if None in spans:
-            raise Mismatch(
-                f"model {', '.join(sorted(aliases))} has no date and the runs no time"
-            )
-        (b0, b1), (c0, c1) = spans
-        gap = max(b0, c0) - min(b1, c1)
+        names = ", ".join(sorted(aliases))
+        times = base.times(), candidate.times()
+        if None in times:
+            raise Mismatch(f"model {names} has no date and some runs no time")
+        timeline = sorted(times[0] + times[1])
+        gap = max((b - a for a, b in pairwise(timeline)), default=timedelta(0))
         if gap > ALIAS_WINDOW:
             raise Mismatch(
-                f"model {', '.join(sorted(aliases))} has no date, so the provider may have changed it between "
-                f"the arms, which ran {gap} apart; run both arms together"
+                f"model {names} has no date, so the provider may have changed it while these runs were made: "
+                f"they have a pause of {gap}; run both versions together"
+            )
+        reported = [
+            {r.get("model") for r in arm.records.values()} for arm in (base, candidate)
+        ]
+        if reported[0] != reported[1]:
+            raise Mismatch(
+                f"model {names}: the provider reported {sorted(map(str, reported[0]))} for the base "
+                f"and {sorted(map(str, reported[1]))} for the candidate"
             )
     b, c = by_case(base), by_case(candidate)
     one_sided = sorted(b.keys() ^ c.keys())

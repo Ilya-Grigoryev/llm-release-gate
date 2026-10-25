@@ -99,6 +99,78 @@ def alias_arm(model, hour, set_hash="s" * 64):
     return Arm("c" * 64, set_hash, "metrics/5", records, aliases)
 
 
+def test_a_resumed_arm_with_old_records_is_refused():
+    old_and_new = Arm(
+        "c" * 64,
+        "s" * 64,
+        "metrics/5",
+        {
+            ("x", 0): {
+                "case": "x",
+                "rep": 0,
+                "requested_model": "gpt-6-luna",
+                "timestamp": "2026-10-22T10:00:00+00:00",
+            },
+            ("y", 0): {
+                "case": "y",
+                "rep": 0,
+                "requested_model": "gpt-6-luna",
+                "timestamp": "2026-10-25T10:00:00+00:00",
+            },
+        },
+        frozenset({"gpt-6-luna"}),
+    )
+    new = Arm(
+        "c" * 64,
+        "s" * 64,
+        "metrics/5",
+        {
+            ("x", 0): {
+                "case": "x",
+                "rep": 0,
+                "requested_model": "gpt-6-luna",
+                "timestamp": "2026-10-25T10:00:00+00:00",
+            },
+            ("y", 0): {
+                "case": "y",
+                "rep": 0,
+                "requested_model": "gpt-6-luna",
+                "timestamp": "2026-10-25T10:05:00+00:00",
+            },
+        },
+        frozenset({"gpt-6-luna"}),
+    )
+    with pytest.raises(Mismatch, match="pause"):
+        pair(old_and_new, new)
+
+
+def test_an_alias_whose_reported_model_changed_is_refused():
+    a, b = alias_arm("gpt-6-luna", 10), alias_arm("gpt-6-luna", 10)
+    b.records[("case-1", 0)]["model"] = "gpt-6-luna-2027"
+    with pytest.raises(Mismatch, match="reported"):
+        pair(a, b)
+
+
+def test_load_arm_finds_the_aliases(tmp_path):
+    record = {
+        "case": "c",
+        "rep": 0,
+        "config_hash": "c" * 64,
+        "set_hash": "s" * 64,
+        "scorer_version": "metrics/5",
+        "requested_model": "gpt-6-luna",
+        "timestamp": "2026-10-25T10:00:00+00:00",
+        "error": None,
+    }
+    f = tmp_path / "runs.jsonl"
+    f.write_text(json.dumps(record) + "\n")
+    assert load_arm(f).aliases == frozenset({"gpt-6-luna"})
+    record.pop("timestamp")
+    f.write_text(json.dumps(record) + "\n")
+    with pytest.raises(Mismatch, match="no time"):
+        pair(load_arm(f), load_arm(f))
+
+
 def test_an_alias_needs_both_arms_run_together():
     pair(alias_arm("gpt-6-luna", 10), alias_arm("gpt-6-luna", 10))
     with pytest.raises(Mismatch, match="no date"):
