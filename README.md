@@ -10,7 +10,7 @@ The gate runs each case several times and compares the two versions case by case
 
 ## Status
 
-Work in progress. The naive gate works: it compares one run per version against a fixed threshold. The statistical rule, the cost and latency budgets and the merge request job come next. [`examples/sroie/`](examples/sroie/) holds the pipeline under test: it extracts company, address, date and total from receipts in [SROIE](https://rrc.cvc.uab.es/?ch=13) (ICDAR 2019), from the OCR text or from the scan. [`examples/support-agent/`](examples/support-agent/) is a tool-using support agent over a mock database, with its own test cases; the gate does not run it yet.
+Work in progress. Built: the naive gate (one run per version against a fixed threshold) with a comment on every pull or merge request, traces of agent runs, checks over the answer and the trace, and any program as a pipeline. The statistical rules and the cost and latency budgets come next. [`examples/sroie/`](examples/sroie/) extracts company, address, date and total from receipts in [SROIE](https://rrc.cvc.uab.es/?ch=13) (ICDAR 2019), from the OCR text or from the scan. [`examples/support-agent/`](examples/support-agent/) is a tool-using support agent over a mock database, with its own test cases, under the gate alone on a ticket or in a chat with a simulated user.
 
 [`docs/design.md`](docs/design.md) describes the parts, the flow of a merge request and the record of a run.
 

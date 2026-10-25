@@ -9,140 +9,175 @@ target architecture.
 
 | Component | Module | Responsibility | Status |
 |---|---|---|---|
-| Pipeline interface | `pipeline.py` | what the gate knows about an application: cases in, answers out, one YAML config per version | built |
-| Golden set | `golden.py`, `case.schema.json` | test cases on disk, validated, hashed | built |
-| Runner | `runner.py` | runs a version K times per case, in parallel, with retries and resume; writes one record per run | built |
+| Pipeline interface | `pipeline.py`, `command.py` | what the gate knows about an application: cases in, answers out, one YAML config per version; any program as a pipeline | built |
+| Golden set | `golden.py`, `case.schema.json`, `hashing.py` | test cases on disk, validated, hashed | built |
+| Runner | `runner.py` | runs a version K times per case, in parallel, with retries and resume | built |
+| Store | `runner.py` (`read_records`, `results`) | append-only JSONL records, raw provider responses next to them | built |
 | Trace | `trace.py` | the steps inside one run: model calls, tool calls, messages, final state | built |
 | Scoring | `metrics.py`, `checks.py` | turns an answer and its trace into per-check results and a case score | built |
 | Prices | `prices.py` | list prices per model prefix, cached input included | built |
 | Comparison | `compare.py` | pairs the records of two versions case by case, refuses what cannot be compared | built |
-| Criterion | `gate.py` | the verdict: pass, quality fail, inconclusive, budget fail, infra error | built (naive rule); planned (statistical rules) |
-| Budget | `gate.py` | cost of the decision from the records; cost and latency limits | built (cost report); planned (limits) |
+| Criterion | `gate.py` | the verdict and its exit code | built (naive rule: pass, quality fail); planned (statistical rules, inconclusive) |
+| Budget | `gate.py` | cost of the decision; cost and latency limits | built (cost report); planned (limits, budget fail) |
 | Report and comment | `gate.py`, `comment.py` | Markdown and JSON verdict; one comment on the pull or merge request, edited on later pushes | built |
 | CI adapter | `ci/gate.sh`, `.github/workflows/ci.yml`, `.gitlab-ci.yml` | runs both versions of a request and posts the verdict | built (this repository); planned (reusable action and template) |
 | Dashboard | — | history of merge requests, base against candidate down to a trace step | planned |
 
+Two example projects use the gate the way another project would, with the gate as a dependency: `examples/sroie`
+(receipt extraction from OCR text or a scan, in one model call or two) and `examples/support-agent` (a tool-using agent
+over a mock database, alone on a ticket or in a chat with a simulated user).
+
 ### Pipeline interface (built)
 
-- A **case** (`Case`): `id`, `inputs` (name → file path), `expected` values and a `scoring` block.
-- An **answer** (`Answer`): the parsed `output`, the `raw` text, input and output tokens, latency, the model the provider
-  reported, fingerprint, reasoning tokens, finish reason, request id.
-- A **pipeline** is any module with `build(config) -> obj` where `obj.run(case) -> Answer`. It raises `Retryable` when the
-  same call may succeed later and `Fatal` when no call can. The gate's code imports no pipeline; the config names it by
+- **Case** (`Case`): `id`, `inputs` (name → file path), `expected` values, `scoring` block.
+- **Answer** (`Answer`): `output` (parsed), `raw`, `input_tokens`, `output_tokens`, `latency_s`, `model` (as the provider
+  reported it), `fingerprint`, `reasoning_tokens`, `finish_reason`, `request_id`.
+- **Pipeline**: a module with `build(config) -> obj`, where `obj.run(case) -> Answer`. It raises `Retryable` when the same
+  call may succeed later and `Fatal` when no call can. The gate's code imports no pipeline; the config names it by
   import path.
-- A **version** is a YAML config (`PipelineConfig`): pipeline module, model, prompt file or named prompt files, input,
-  API parameters, `max_retries`, `timeout_s`. Its **config hash** covers every field, the bytes of each prompt file and the
-  module's `VERSION`.
-- A model is a dated snapshot when there is one. A name without a date is accepted (`is_alias`) with three precautions:
-  the record keeps the requested and the reported model and the time, the report warns, and comparison refuses runs with
-  a pause longer than an hour, or runs that asked for the same model and got different ones.
+- **Version** (`PipelineConfig`, `load_config(path)`): `pipeline`, `model`, `prompt` (a file or named files), `input`,
+  `params`, `max_retries`, `timeout_s`, and `command` for `pipeline: command`. `config_hash(config)` covers every field,
+  the bytes of each prompt file and the module's `VERSION`.
+- **Any program** (`pipeline: command`, `command: [program, args]`): one JSON request on stdin (case id, input paths, the
+  version; never the expected values), one JSON answer on stdout (`output`, optionally tokens, model and a trace). Exit 75
+  retries, 78 stops the run, any other non-zero code or a timeout fails the run (a timeout is retried).
+- **Model names.** A dated snapshot when there is one. A name without a date is accepted (`is_alias(model)`) with three
+  precautions: the record keeps the requested and the reported model and the time, the report warns, and comparison
+  refuses runs with a pause longer than an hour, or runs that asked for the same model and got different ones.
 
 ### Golden set (built)
 
-One YAML file per case, inputs referenced by path relative to it. `validate(directory)` checks the schema, unique ids,
-that inputs exist inside the set, and each scoring block (`metrics.problems`, which checks a `checks` configuration
-against the case's expected values without running it). The **set hash** covers each case's parsed content and the bytes
-of each input: reformatting keeps it, editing an expectation or an input changes it.
+One YAML file per case, inputs referenced by path relative to it. `validate(directory) -> (set_hash | None, errors)`
+checks the schema, unique ids, that inputs exist inside the set, and each scoring block (`metrics.problems(expected,
+scoring)`, which checks a `checks` configuration against the case's expected values without running it).
+`load_cases(directory) -> list[Case]`. The **set hash** (`hashing.canonical_hash`, `file_hash`) covers each case's parsed
+content and the bytes of each input: reformatting keeps it, editing an expectation or an input changes it.
+`python -m llm_release_gate.golden validate DIR [--manifest FILE]` also checks the ids and the hash against a manifest.
 
 ### Runner (built)
 
-`run(pipeline, cases, repetitions, out, config_hash, set_hash, score, workers, max_retries, wait, prices, model)`:
+`run(pipeline, cases, repetitions, out, *, config_hash, set_hash, score, workers=4, max_retries=5, wait=None,
+prices=None, model=None) -> records written`; CLI: `python -m llm_release_gate.runner --config FILE --golden DIR -k K
+--out FILE [--workers N] [--prices FILE]`.
 
-- runs the missing (case, repetition) pairs on a thread pool; a pair with an error-free record for the same config and set
-  hash counts as done, so a rerun pays only for the rest;
-- retries `Retryable` with backoff 1, 2, 4… s up to `max_retries`, stops the run on `Fatal`, records any other exception
-  as an error of that run;
-- keeps one `Trace` per pair, current while the pipeline runs (a context variable, one per worker thread); a retried run
-  adds its steps under the next `run_attempt`; a failed run keeps the steps it paid for;
-- scores each answer with the case's scoring block and the run's trace, and appends one JSON record per run to `out`; raw
-  provider responses go to `<out>.native.jsonl`.
+- It runs the missing (case, repetition) pairs on a thread pool.
+- It retries `Retryable` with backoff 1, 2, 4… s (at most 60 s) up to `max_retries`, stops the run on `Fatal`, and records
+  any other exception as an error of that run.
+- It keeps one `Trace` per pair, current while the pipeline runs (a context variable, one per worker thread). A retried
+  run adds its steps under the next `run_attempt`; a failed run keeps the steps it paid for (a `Fatal` one too, when it
+  paid for any).
+- It scores each answer with the case's scoring block and the run's trace (as JSON brings it back, so rescoring later
+  gives the same result) and appends one record per run.
+
+### Store (built)
+
+Records are JSON lines appended to `out`; raw provider responses go to `<stem>.native.jsonl` next to it (`runs.jsonl` →
+`runs.native.jsonl`), written before the record that points to them. `read_records(path)` skips a line cut off by a
+crash; `results(path, config_hash, set_hash)` gives the last error-free record per (case, repetition), which is what
+makes a rerun pay only for the rest.
 
 ### Trace (built)
 
 An adapter records into the current trace without touching the application:
 
-- `openai_client(client, actor)` wraps `chat.completions.create`: one model step per call; tool steps are rebuilt from the
-  `tool` messages the application sends back (status `unknown`); a failed call is a step with `status: error`; a streamed
-  call leaves a note;
-- `wrap_tool(call, actor)` wraps a tool function `call(name, args)`: one tool step per call with status, result or error
-  and timing;
-- `Trace.step(kind, actor, **fields)` records anything else; the adapter sets `final_state`, `state_change` and `stop`.
-
-`usage(trace, prices)` sums calls, tokens and cost per actor over every answered call, abandoned attempts included;
-`last_attempt(trace)` gives the steps that checks look at.
+- `current() -> Trace | None` is the trace of the run in progress on this thread (None outside the runner); the adapter
+  sets `final_state`, `state_change` and `stop` on it.
+- `openai_client(client, actor="agent", trace=None)` wraps `chat.completions.create`: one model step per call; tool steps
+  are rebuilt from the `tool` messages the application sends back (status `unknown`); a failed call is a step with
+  `status: error`; a streamed call leaves a note. Other methods (Responses API, `parse`) pass through unrecorded.
+- `wrap_tool(call, actor="agent", trace=None)` wraps a tool function `call(name, args)`: one tool step per call with
+  status, result or error and timing.
+- `Trace.step(kind, actor, **fields)` records anything else and refuses a step that breaks the format.
+- `usage(trace, prices, reprice=False)` sums calls, tokens and cost per actor over every answered call, abandoned attempts
+  included; `last_attempt(trace)` gives the steps of the final attempt, which checks look at.
 
 ### Scoring (built)
 
-The case's `scoring.method` picks the scorer, and `aggregate` (`mean` or `all`) turns per-check results into the case
-score; the record keeps every result.
+`score(expected, actual, scoring, trace=None) -> {"score": float | None, "per_field": {id: bool | float | None}}`; the
+runner's scorer is `hits(case, answer)` (the run's trace taken from the runner), with `hits.version` stored in each record.
 
-- `field_match`: each expected field against the answer; dates and numbers by value, strings after normalisers; a field
-  expected as `null` is not scored.
-- `checks`: a list of checks over the answer (`field_match`, `exact`, `contains`, `regex`, `number`, `json_schema`,
-  `refusal`) and over the trace (`called`, `not_called`, `order`, `max_steps`, `active`, `actions`, `state`, `doc_found`),
-  plus `function` (`module:function`). Trace checks look at the runner's last attempt and one actor, and fail without a
-  trace.
-
-Records carry the scorer version; runs scored by different versions are compared only after rescoring from their saved
-answers (`gate --golden`).
+- `scoring.method` picks the scorer: `field_match` (each expected field against the answer; dates and numbers by value,
+  strings after normalisers; a field expected as `null` is not scored) or `checks` (a list of checks).
+- Checks over the answer: `field_match`, `exact`, `contains`, `regex`, `number`, `json_schema`, `refusal`. Over the trace:
+  `called`, `not_called`, `order`, `max_steps`, `active`, `actions`, `state`, `doc_found`. Plus `function`
+  (`module:function`). Trace checks look at the last attempt and one actor, and fail without a trace.
+- `aggregate` turns per-check results into the case score: `mean` (default) or `all` (1 only if every scored result is
+  full). The record keeps every result.
+- Runs scored by different scorer versions are compared only after rescoring from their saved answers (`gate --golden`).
 
 ### Comparison and criterion
 
-`load_arm(path)` reads one version's runs (one config, one set, one scorer; the last error-free record per pair).
-`pair(base, candidate)` refuses different sets or scorers, cases on one side only, and, for a model without a date, runs
-that are not close in time.
-
-- **Built — naive rule.** One run per case and version (the earliest repetition): block when the candidate's mean score
-  is lower than the base's by more than a threshold (5 points by default, absolute or relative). Means are compared as
-  exact fractions.
+- `load_arm(path) -> Arm` reads one version's runs: one config, one set, one scorer, the last error-free record per pair;
+  `Arm` holds `config_hash`, `set_hash`, `scorer_version`, `records`, `aliases`.
+- `pair(base, candidate) -> {case: (base records, candidate records)}` refuses different sets or scorers, cases on one side
+  only, and, for a model without a date, runs that are not close in time.
+- **Built — naive rule.** `naive(base, candidate, threshold_pp, relative=False) -> Verdict`, a pure function over one
+  score per case and version (the earliest repetition): block when the candidate's mean is lower than the base's by more
+  than the threshold (5 points by default, absolute or relative). Means are compared as exact fractions. `Verdict` holds
+  `outcome`, `exit_code`, `base_mean`, `candidate_mean`, `diff_pp`, `limit_pp`, `rule`, `cases` and the cases that got
+  worse. It gives `pass` (0) or `quality fail` (10); `inconclusive` (11) and `budget fail` (12) are reserved for the
+  planned rules; `infra error` (20) is any failure to compare.
 - **Planned — statistical rules.** A paired test on the mean with a margin δ and three outcomes (pass, block, buy more
   runs and leave it to a human); a per-check test that blocks a check that breaks consistently, with a correction for
   multiple comparisons; a second comparison against an anchor version, so that many small losses cannot add up unseen;
-  an adaptive runner that pays for repeated runs only where the versions disagree.
+  an adaptive runner that pays for repeated runs only where the versions disagree. Each takes a seed as an argument and
+  reports it in the verdict.
 
 ### Budget, report and comment
 
-- **Built.** `cost(arm, prices)`: a traced record costs what its model steps cost at the gate's prices (the user
-  simulator's included: it is the price of the decision); a record without a trace is priced from its tokens.
-  `markdown()` writes the verdict, the two means, the rule, the cases, the configs, the set, the cost and the cases that
-  got worse; the JSON report holds the same plus the thresholds and the models without a date. `comment.py` posts the
-  Markdown as one comment on a GitHub pull request or GitLab merge request and edits it on later pushes.
-- **Planned.** Cost and latency limits that give `budget fail`; a latency quantile with an interval.
+- **Built.** `cost(arm, prices) -> float | None`: a traced record costs what its model steps cost at the gate's prices (the
+  user simulator's included: it is the price of the decision); a record without a trace is priced from its tokens.
+  `markdown(verdict, base, candidate, costs)` writes the verdict, the two means, the rule, the cases, the configs, the
+  set, the cost, the warning about models without a date and the cases that got worse; the JSON report holds the same
+  plus the thresholds and `models_without_date`. CLI: `python -m llm_release_gate.gate --base FILE --candidate FILE
+  [--threshold PP] [--relative] [--golden DIR] [--prices FILE] [--markdown FILE] [--json FILE]`; the exit code is the
+  verdict's. `comment.py` posts the Markdown as one comment on a GitHub pull request or GitLab merge request, edits it on
+  later pushes, and posts an infra-error comment when the job stopped before a verdict.
+- **Planned.** Cost and latency limits that give `budget fail`; a latency quantile with an interval; a JUnit report.
 
 ### CI adapter (built for this repository)
 
-`ci/gate.sh BASE_REV EXAMPLE_DIR CONFIG GOLDEN_DIR OUT_DIR` checks out the target branch in a worktree, runs both versions
-in parallel, each with its own code, runs the gate and writes `comment.md` and `verdict.json`. It exits with the gate's
-code: 0 pass, 10 quality fail, 11 inconclusive, 12 budget fail, 20 infra error. The job advises until the check is made
-required.
+The job checks that it can comment, downloads the golden set (a GitHub release or a GitLab package) and validates it
+against its manifest, then runs `ci/gate.sh BASE_REV EXAMPLE_DIR CONFIG GOLDEN_DIR OUT_DIR`: it checks out the target
+branch in a worktree, runs both versions in parallel, each with its own code (one run per case: the runner's default `-k
+1`), runs the gate and writes `comment.md` and `verdict.json`. If a version cannot run, it writes an infra-error comment
+and exits 20; otherwise it exits with the gate's code. The job posts the comment and keeps the records as artifacts. It
+advises until the check is made required.
 
 ```mermaid
 flowchart LR
     subgraph app[Application project]
         config[version config<br/>model, prompts, params]
-        adapter[adapter<br/>build / run]
+        adapter[adapter: build / run<br/>or any program]
         cases[golden set]
     end
     subgraph gate[llm-release-gate]
+        validate[golden validate]
         runner[runner]
         trace[trace]
         scoring[scoring<br/>field_match, checks]
-        records[(records JSONL<br/>+ raw responses)]
+        store[(store: records JSONL<br/>+ raw responses)]
         compare[compare]
         criterion[criterion<br/>naive rule]
-        report[report + comment]
+        prices[prices]
+        report[report]
+    end
+    subgraph ci[CI adapter]
+        gatesh[ci/gate.sh]
+        comment[comment.py]
     end
     provider[(model provider)]
+    cases --> validate --> runner
     config --> runner
-    cases --> runner
     runner -->|run case| adapter
     adapter -->|wrapped client| provider
-    adapter -->|steps| trace
-    trace --> runner
-    runner --> scoring
-    scoring --> records
-    runner --> records
-    records --> compare --> criterion --> report
+    adapter -->|steps| trace --> runner
+    runner --> scoring --> store
+    store --> compare --> criterion --> report
+    prices --> report
+    gatesh --> runner
+    gatesh --> criterion
+    report --> comment
 ```
 
 ## Merge request flow
@@ -150,27 +185,31 @@ flowchart LR
 ```mermaid
 sequenceDiagram
     participant CI as CI job
+    participant C as comment.py
     participant SH as ci/gate.sh
     participant RB as runner (base, target branch)
     participant RC as runner (candidate, this request)
     participant AD as adapter + model
     participant G as gate
-    participant C as comment.py
+    CI->>C: --check: can comment
+    CI->>CI: download and validate the golden set
     CI->>SH: base revision, example, config, golden set
     SH->>SH: worktree of the target branch
-    par both versions, each with its own code
-        SH->>RB: K runs per case
+    par base, with the target branch's code
+        SH->>RB: one run per case
         RB->>AD: run(case), trace current
         AD-->>RB: Answer + steps
-        SH->>RC: K runs per case
+    and candidate, with this request's code
+        SH->>RC: one run per case
         RC->>AD: run(case), trace current
         AD-->>RC: Answer + steps
     end
     SH->>G: base.jsonl, candidate.jsonl, --golden, --prices
-    G->>G: load and pair arms, rescore, verdict, cost
+    G->>G: load arms, rescore, pair, verdict, cost
     G-->>SH: comment.md, verdict.json, exit code
     CI->>C: comment.md
     C->>C: create or edit the one gate comment
+    CI->>CI: keep records and logs as artifacts
 ```
 
 ## The record of a run
@@ -186,7 +225,7 @@ One JSON line per (case, repetition), record version 4:
 | `output`, `raw`, `input_tokens`, `output_tokens`, `latency_s`, `model`, `fingerprint`, `reasoning_tokens`, `finish_reason`, `request_id` | the pipeline's `Answer`; `model` is what the provider reported |
 | `wall_s` | clock time of the run, backoff between attempts included |
 | `trace` | the steps of the run, or `null` for a pipeline that records none |
-| `usage` | calls, tokens and cost per actor (`agent`, `user`) from the trace |
+| `usage` | calls, tokens and cost per actor (`agent`, `user`) from the trace; `usage_error` if a step could not be summed |
 | `scorer_version`, `hits`, `score`, `score_error` | per-check results, the case score, a scoring failure |
 | `retries`, `error` | backoffs used; why the run produced no answer (`null` when it did) |
 
@@ -195,20 +234,25 @@ The trace:
 | Field | Meaning |
 |---|---|
 | `v` | format of the trace |
-| `steps` | ordered steps: `seq`, `kind` (`llm`, `tool`, `message`, `retrieval`), `actor` (`agent`, `user`, `system`, `env`), `ts`, `run_attempt`; a model step adds `status`, `model`, `tokens_in`, `tokens_out`, `tokens_cached`, `tokens_reasoning`, `cost_usd`, `finish_reason`, `text`, `tool_calls`; a tool step adds `name`, `args`, `status` (`ok`, `error`, `unknown`), `result` or `error`, `call_id`, `latency_ms` |
+| `steps` | ordered steps, each with `seq`, `kind` (`llm`, `tool`, `message`, `retrieval`), `actor` (`agent`, `user`, `system`, `env`), `ts`, `run_attempt` |
+| — model step | `status`; when `ok`: `model`, `tokens_in`, `tokens_out`, `tokens_cached`, `tokens_reasoning`, `cost_usd`, `finish_reason`, `fingerprint`, `request_id`, `text`, `tool_calls` (`id`, `name`, `args`), `latency_ms`, `purpose` (e.g. `compaction`, not counted by `max_steps`); when `error`: `error`, `attempt` |
+| — tool step | `name`, `args`, `status` (`ok`, `error`, `unknown`), `result` or `error`, `call_id`, `latency_ms` |
+| — retrieval step | `docs` with `id` (what `doc_found` reads) |
 | `final_state`, `state_change` | the world after the run and what changed, as the adapter reports them |
 | `stop` | why the run ended: `done`, `user_stop`, `max_steps`, `max_turns`, `error`, `aborted` |
-| `last_attempt` | the runner's final attempt: the steps checks look at |
+| `last_attempt` | the number of the runner's final attempt; checks look at its steps |
 | `notes` | calls that went unrecorded, and why |
 | `native` | the file with the raw provider responses |
 
-Only new model output is stored, not the full prompt of each call: the system prompt and the tools are part of the version
-(and its hash), and full prompts would grow the records about 25-fold for a long dialog.
+Any step may carry `extra` for what the format does not name. Only new model output is stored, not the full prompt of each
+call: the system prompt and the tools are part of the version (and its hash), and full prompts would grow the records
+about 25-fold for a long dialog.
 
 ## Invariants
 
 - A pipeline stays behind its interface; changing it does not touch the gate's code.
-- Criteria and budget checks are pure functions: arrays of results in, a verdict out; no network, files, clock or logs.
+- Criteria and budget checks are pure functions: arrays of results in, a verdict out; no network, files, clock or logs. A
+  seed comes in as an argument and goes into the verdict.
 - Every record carries the config hash and the set hash; runs on different sets are not compared.
 - The runner resumes after a crash and runs cases in parallel with a limit and backoff.
 - "Quality failed" and "tool crashed" are different exit codes.
@@ -217,7 +261,9 @@ Only new model output is stored, not the full prompt of each call: the system pr
 
 - **Statistical gate** (see Criterion), interleaved arms in the runner, latency budgets, the anchor comparison.
 - **Adoption**: a `gate.yaml` at the root of an application project, a `pr` command that runs only the versions whose
-  config hash changed, a reusable GitHub Action and GitLab template.
-- **Adapters**: any command speaking JSON on stdin and stdout (applications in other languages, a harness agent in a
-  container), a benchmark adapter (τ²-bench telecom), import of OpenTelemetry traces.
-- **Dashboard**: a server with the history of merge requests and the base against the candidate down to a trace step.
+  config hash changed, a reusable GitHub Action and GitLab template, a JUnit report.
+- **Adapters**: a benchmark adapter (τ²-bench telecom), a harness agent in a container through `pipeline: command`,
+  retrieval-augmented generation (to be decided), import of OpenTelemetry traces.
+- **Dashboard**: `llm-release-gate serve` (FastAPI and SQLite, in a Docker image): the history of merge requests and of the
+  main branch's mean with the anchor line, the base against the candidate down to a trace step, noise per case and check,
+  cost and time against the budget; results arrive from CI.
