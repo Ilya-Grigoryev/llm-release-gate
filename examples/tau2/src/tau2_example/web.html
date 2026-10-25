@@ -433,7 +433,7 @@ main { display: grid; grid-template-columns: minmax(340px, 1fr) 360px minmax(300
       "<dt>tau2's reference</dt><dd>" + (r.expected.length ? r.expected.map(function (a) { return "<b>" + esc(a.name) + "</b> by the " + esc(a.by); }).join(", ") : "no actions listed") + "</dd></dl>" +
       (endOnly
         ? "<p><b>What this reward does not say:</b> tau2 scores this task on the end state only, not on who fixed it. A customer who fixes the phone without the agent's help gets the same reward. The release gate adds a check that the agent acted at all" + (agentExpected ? " and " + agentExpected + " expected tool call" + (agentExpected > 1 ? "s" : "") + " of the agent" : "; this task lists no tool calls for the agent") + ".</p>"
-        : "<p>This task's reward counts the end state and the actions tau2 expects, so it fails when an expected action is missing even if the phone works.</p>") +
+        : "<p>This task's reward counts the end state and the actions tau2 expects, so it fails when an expected action is missing, even if the end state is as expected.</p>") +
       "<p>Ended by: " + esc(String(r.termination).replace(/_/g, " ")) + ".</p>";
   }
   function renderControls(s) {

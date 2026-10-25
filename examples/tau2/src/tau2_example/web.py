@@ -322,7 +322,7 @@ def handler(session: Session):
                 self.send(200, list(session.tasks))
             elif url.path == "/api/state":
                 since = parse_qs(url.query).get("since", ["0"])[0]
-                if not since.isdigit():
+                if not (since.isascii() and since.isdigit()):
                     return self.send(400, {"error": "since must be a whole number"})
                 self.send(200, session.snapshot(int(since)))
             else:
@@ -330,10 +330,10 @@ def handler(session: Session):
 
         def do_POST(self):
             try:
-                body = json.loads(
-                    self.rfile.read(int(self.headers.get("Content-Length") or 0))
-                    or b"{}"
-                )
+                size = int(self.headers.get("Content-Length") or 0)
+                if size < 0:
+                    raise ValueError("Content-Length must not be negative")
+                body = json.loads(self.rfile.read(size) or b"{}")
                 if not isinstance(body, dict):
                     raise TypeError("send a JSON object")
                 path = urlparse(self.path).path
