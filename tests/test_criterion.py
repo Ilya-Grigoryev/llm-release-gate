@@ -93,21 +93,45 @@ def test_noisy_checks_raise_the_correction():
     assert v.m > 1 and v.testable <= v.m
 
 
+def test_tarone_with_two_noisy_checks_can_turn_a_block_into_a_pass():
+    base, cand = (
+        {("a", "x"): runs(5, 5)},
+        {("a", "x"): runs(1, 5)},
+    )  # p = 1/42, blocks alone
+    assert per_check(base, cand).outcome == "block"
+    for case in ("b", "c"):
+        base[case, "x"], cand[case, "x"] = runs(5, 10), runs(5, 10)
+    v = per_check(base, cand)
+    assert (v.m, v.outcome) == (
+        2,
+        "pass",
+    )  # 1/42 > 0.025 / 2: the noisy checks raised the correction
+
+
+def test_checks_scored_in_one_version_only_are_named():
+    v = per_check(
+        {("a", "x"): [True], ("b", "x"): [True]},
+        {("a", "x"): [True], ("b", "x"): [None]},
+    )
+    assert v.one_sided == [("b", "x")]
+
+
+def test_alpha_may_be_any_number():
+    v = per_check(
+        {("c", "x"): runs(3, 3)}, {("c", "x"): runs(0, 3)}, alpha=Fraction(1, 20)
+    )
+    assert v.outcome == "block"
+
+
 def test_false_blocks_stay_under_alpha_when_nothing_changed():
-    rng, blocks, sims = random.Random(0), 0, 400
-    probs = (
-        [1.0] * 12 + [0.0] * 9 + [rng.uniform(0.2, 0.8) for _ in range(9)]
-    )  # 30 checks, as in the D-015 model
+    """A smoke test near the boundary (true rate ~1 %); the full null tests are T-25's."""
+    rng, blocks, sims = random.Random(0), 0, 2000
     for _ in range(sims):
         base = {
-            (f"c{i}", "x"): [rng.random() < p for _ in range(5)]
-            for i, p in enumerate(probs)
+            (f"c{i}", "x"): [rng.random() < 0.5 for _ in range(5)] for i in range(10)
         }
         cand = {
-            (f"c{i}", "x"): [rng.random() < p for _ in range(5)]
-            for i, p in enumerate(probs)
+            (f"c{i}", "x"): [rng.random() < 0.5 for _ in range(5)] for i in range(10)
         }
         blocks += per_check(base, cand).outcome == "block"
-    assert (
-        blocks / sims <= 0.025 + 0.02
-    )  # Bonferroni over Tarone's set controls the chance of any false block
+    assert blocks / sims <= 0.025

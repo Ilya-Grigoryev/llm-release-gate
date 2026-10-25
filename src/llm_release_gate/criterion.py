@@ -3,10 +3,12 @@
 Pure functions: the outcomes of each (case, check) over the repetitions of both versions in, a verdict out. A check is
 tested with Fisher's exact test on k of K passes in each version; Tarone's correction counts only the checks that could
 reach significance at all (Tarone 1990), and Bonferroni over those controls the chance of any false block. The
-sidedness and alpha are D-003's open choice (M-12); the default, one-sided at 0.025, spends the same false-block budget
-as the two-sided test at 0.05 that experiment E-002 measured.
+correction, the sidedness and alpha are D-003's open choices (M-12), and a list by a discrete BH is not built; the
+default, one-sided at 0.025, spends the same false-block budget as the two-sided test at 0.05 that experiment E-002
+measured.
 """
 
+import bisect
 import math
 from dataclasses import dataclass
 from fractions import Fraction
@@ -32,9 +34,10 @@ class CheckVerdict:
     alpha: float
     sides: int
     m: int  # Tarone's number of tests
-    testable: int
+    testable: int  # 0: with these run counts the rule cannot block at all, and the report must say so (D-015)
     broken: list[Unit]  # worse beyond the corrected threshold, smallest p first
     units: list[Unit]  # every check both versions scored, smallest p first
+    one_sided: list[Key]  # checks scored in one version only: left out of the test
 
 
 def passed(value: Any, threshold: float) -> bool | None:
@@ -78,8 +81,9 @@ def per_check(
 ) -> CheckVerdict:
     """Test every (case, check) that both versions scored; block if one is significantly worse after the correction.
 
-    The lists hold one result per repetition: True / False, a share in [0, 1] (passes at `threshold`) or None (not
-    scored, left out). A two-sided test blocks only on a check that got worse.
+    The lists hold one result per repetition: True / False, a share in [0, 1] (passes at `threshold`, one for the whole
+    call: a case with its own threshold turns its shares into True / False first) or None (not scored, left out). A
+    two-sided test blocks only on a check that got worse.
     """
     if base.keys() != candidate.keys() or not base:
         raise ValueError(
@@ -89,22 +93,23 @@ def per_check(
         raise ValueError(
             "alpha must lie in (0, 1), sides be 1 or 2, mode block or report"
         )
-    units, exact = [], {}
-    a = Fraction(repr(alpha))  # 0.025 as 1/40, not the float next to it
+    units, exact, one_sided = [], {}, []
+    a = Fraction(str(alpha))  # 0.025 as 1/40, not the float next to it
     for key in sorted(base):
         b = [v for v in (passed(x, threshold) for x in base[key]) if v is not None]
         c = [v for v in (passed(x, threshold) for x in candidate[key]) if v is not None]
         if not b or not c:
+            if b or c:
+                one_sided.append(key)
             continue
         x, y = sum(b), sum(c)
         p, p_min = fisher(x, len(b), y, len(c), sides)
         unit = Unit(key[0], key[1], (x, len(b)), (y, len(c)), float(p), float(p_min))
         units.append(unit)
         exact[key] = p, p_min
-    m = 1
-    while (
-        sum(pm <= a / m for _, pm in exact.values()) > m
-    ):  # Tarone: the smallest m with at most m testable checks
+    p_mins = sorted(pm for _, pm in exact.values())
+    m = 1  # Tarone: the smallest m with at most m checks whose smallest p can reach alpha / m
+    while bisect.bisect_right(p_mins, a / m) > m:
         m += 1
     testable = [u for u in units if exact[u.case, u.check][1] <= a / m]
     broken = [
@@ -124,4 +129,5 @@ def per_check(
         len(testable),
         broken,
         sorted(units, key=lambda u: u.p),
+        one_sided,
     )
