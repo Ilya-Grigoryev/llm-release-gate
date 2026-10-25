@@ -182,6 +182,7 @@ def candidate_budget(
         costs,
         latencies,
         sum(1 for r in runs if r.get("retries")),
+        runs=len(runs),
         cost_limit=args.max_cost_per_run,
         latency_limit=args.max_latency,
         latency_q=args.latency_quantile,
@@ -240,7 +241,11 @@ def markdown(
                 f"latency p{100 * spend.latency_q:g} {spend.latency_s:.2f} s "
                 f"(interval {lo}–{hi} s; limit {spend.latency_limit:g} s)"
             )
-        verdict = "over: " + "; ".join(spend.over) if spend.over else "within"
+        verdict = (
+            "over: " + "; ".join(spend.over)
+            if spend.over
+            else "not shown over its limits"
+        )
         if spend.unchecked:
             verdict += " (not checked: " + "; ".join(spend.unchecked) + ")"
         retried = (

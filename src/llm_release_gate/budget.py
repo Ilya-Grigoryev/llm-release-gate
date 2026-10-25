@@ -67,12 +67,14 @@ def check(
     latencies: list[float],
     retried: int,
     *,
+    runs: int | None = None,
     cost_limit: float | None = None,
     latency_limit: float | None = None,
     latency_q: float = 0.95,
     level: float = 0.95,
 ) -> Budget:
-    """The candidate's budget verdict. `costs` and `latencies` are per run; a limit left out is not checked."""
+    """The candidate's budget verdict. `costs` and `latencies` are per run, `runs` how many there were (`retried` counts
+    among them); a limit left out is not checked."""
     for name, limit in (("cost", cost_limit), ("latency", latency_limit)):
         if limit is not None and (not math.isfinite(limit) or limit < 0):
             raise ValueError(f"{name} limit must be a finite number >= 0, got {limit}")
@@ -99,7 +101,7 @@ def check(
         "over" if over else "within",
         over,
         unchecked,
-        max(len(costs), len(latencies)),
+        runs if runs is not None else max(len(costs), len(latencies)),
         retried,
         cost,
         cost_limit,

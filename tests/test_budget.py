@@ -100,7 +100,7 @@ def test_the_gate_fails_a_budget_only_when_quality_passed(
         gate.main([*args, "--candidate", str(same), "--max-cost-per-run", str(one * 2)])
         == gate.PASS
     )
-    assert "Budget of the candidate within" in comment.read_text()
+    assert "Budget of the candidate not shown over its limits" in comment.read_text()
     # quality comes first: a broken candidate is a quality fail even when over budget too
     assert (
         gate.main(
