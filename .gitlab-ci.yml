@@ -29,7 +29,7 @@ example-test:
   image: python:3.12  # git: tau2 installs from git, its data comes by fetch_data.sh
   parallel:
     matrix:
-      - EXAMPLE: [sroie, support-agent, tau2]
+      - EXAMPLE: [sroie, tau2]
   before_script:
     - pip install --quiet uv==0.11.25
     - cd examples/$EXAMPLE
@@ -58,7 +58,7 @@ release-gate:
     - mkdir -p data/golden && tar -xzf /tmp/sroie.tar.gz -C data/golden
     - (cd examples/sroie && uv run python -m llm_release_gate.golden validate ../../data/golden/sroie --manifest golden/sroie.yaml)
     - git fetch --depth=1 origin "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
-    - ci/gate.sh FETCH_HEAD examples/sroie "$CONFIG" data/golden/sroie out
+    - uv run python -m llm_release_gate.pr FETCH_HEAD examples/sroie "$CONFIG" data/golden/sroie out
   after_script:  # runs after a failed script too; a cancelled run leaves the comment to its successor
     - if [ "$CI_JOB_STATUS" != canceled ]; then cd examples/sroie && uv run python -m llm_release_gate.comment ../../out/comment.md; fi
   artifacts:

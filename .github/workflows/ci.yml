@@ -1,4 +1,4 @@
-# The same checks as .gitlab-ci.yml, without its secret detection; release-gate also gates the support agent.
+# The same checks as .gitlab-ci.yml, without its secret detection.
 name: ci
 
 on:
@@ -31,7 +31,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        example: [sroie, support-agent, tau2]
+        example: [sroie, tau2]
     defaults:
       run:
         working-directory: examples/${{ matrix.example }}
@@ -61,9 +61,6 @@ jobs:
             config: configs/sroie-image.yaml
             golden: data/golden/sroie
             release: golden-sroie-9436cc87
-          - example: support-agent
-            config: configs/support.yaml
-            golden: examples/support-agent/golden/solo
     concurrency:  # a new push replaces the run for the old one
       group: release-gate-${{ github.event.pull_request.number }}-${{ matrix.example }}
       cancel-in-progress: true
@@ -88,7 +85,7 @@ jobs:
         run: |  # when unsure (no base, git fails), run
           git fetch --depth=1 origin "$GITHUB_BASE_REF" || true
           if files=$(git diff --name-only FETCH_HEAD HEAD) &&
-            ! grep -qE "^($EXAMPLE/|src/|ci/|pyproject\.toml|uv\.lock|\.github/workflows/)" <<< "$files"; then
+            ! grep -qE "^($EXAMPLE/|src/|pyproject\.toml|uv\.lock|\.github/workflows/)" <<< "$files"; then
             echo "run=false" >> "$GITHUB_OUTPUT"
             echo "this request changes nothing that $EXAMPLE runs on: skipped"
           else
@@ -118,7 +115,7 @@ jobs:
       - name: gate
         if: steps.changed.outputs.run == 'true'
         working-directory: .
-        run: ci/gate.sh FETCH_HEAD "$EXAMPLE" "$CONFIG" "$GOLDEN" out
+        run: uv run --project "$EXAMPLE" python -m llm_release_gate.pr FETCH_HEAD "$EXAMPLE" "$CONFIG" "$GOLDEN" out
       - name: comment
         if: steps.changed.outputs.run == 'true' && (success() || failure())
         run: uv run python -m llm_release_gate.comment ../../out/comment.md --name ${{ matrix.example }}

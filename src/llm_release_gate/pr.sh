@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # Gate a pull or merge request: run the base version (from BASE_REV) and the candidate (this
-# checkout) on the golden set, compare them and write OUT_DIR/comment.md.
-# Usage: ci/gate.sh BASE_REV EXAMPLE_DIR CONFIG GOLDEN_DIR OUT_DIR   (CONFIG relative to EXAMPLE_DIR)
+# checkout) on the golden set, compare them and write OUT_DIR/comment.md. Run it through
+# `python -m llm_release_gate.pr BASE_REV PROJECT_DIR CONFIG GOLDEN_DIR OUT_DIR` from the root of the
+# repository; PROJECT_DIR is the project's directory in it (`.` for the root), CONFIG is relative to it.
 # Exits with the gate's code: 0 pass, 10 quality fail, 11 inconclusive, 12 budget fail, 20 infra error.
 set -uo pipefail
+unset VIRTUAL_ENV  # each tree syncs and runs its own environment
 base_rev=$1 example=$2 config=$3
 golden=$(cd "$4" && pwd)
 mkdir -p "$5" && out=$(cd "$5" && pwd)
