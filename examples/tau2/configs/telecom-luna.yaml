@@ -1,0 +1,13 @@
+# configs/telecom.yaml with gpt-6-luna, a model name without a date (D-018 option B): the gate keeps the model the
+# provider reports and refuses to compare runs far apart in time. litellm drops reasoning_effort for this model unless
+# it travels in extra_body.
+pipeline: tau2_example.gate_adapter
+model: gpt-6-luna
+prompt:
+  main: ../../../data/tau2-bench/data/tau2/domains/telecom/main_policy.md
+  main_solo: ../../../data/tau2-bench/data/tau2/domains/telecom/main_policy_solo.md
+  tech_support: ../../../data/tau2-bench/data/tau2/domains/telecom/tech_support_manual.md
+input: task
+params: {temperature: 0, extra_body: {reasoning_effort: none}}
+max_retries: 3
+timeout_s: 600
