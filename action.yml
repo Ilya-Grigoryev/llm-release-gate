@@ -19,6 +19,17 @@ inputs:
   github-token:
     description: Writes the comment; needs pull-requests write.
     default: ${{ github.token }}
+  cases:
+    description: Upload the golden set's case files and their text inputs as a second artifact, for a dashboard to show.
+    default: "true"
+  inputs-url:
+    description: >-
+      Where a reader finds the set's other files (images, say), which the artifact leaves out: a URL with `{path}`, the
+      file's path in the set, or `{name}`, its file name. A dashboard links to it.
+    default: ""
+  cases-retention-days:
+    description: Days GitHub keeps that artifact.
+    default: "30"
 runs:
   using: composite
   steps:
@@ -66,3 +77,20 @@ runs:
           ${{ runner.temp }}/llm-release-gate${{ inputs.name != '' && format('-{0}', inputs.name) || '' }}/*.json
           ${{ runner.temp }}/llm-release-gate${{ inputs.name != '' && format('-{0}', inputs.name) || '' }}/*.md
           ${{ runner.temp }}/llm-release-gate${{ inputs.name != '' && format('-{0}', inputs.name) || '' }}/*.log
+    - name: cases
+      if: ${{ !cancelled() && inputs.cases == 'true' }}
+      shell: bash
+      env:
+        INPUTS_URL: ${{ inputs.inputs-url }}
+        OUT: ${{ runner.temp }}/llm-release-gate${{ inputs.name != '' && format('-{0}', inputs.name) || '' }}
+      run: |
+        [ -d "$OUT/cases" ] || exit 0
+        find "$OUT/cases" -type f ! \( -name '*.yaml' -o -name '*.yml' -o -name '*.json' -o -name '*.txt' -o -name '*.md' -o -name '*.csv' \) -delete
+        if [ -n "$INPUTS_URL" ]; then printf '%s\n' "$INPUTS_URL" > "$OUT/cases/inputs-url.txt"; fi
+    - uses: actions/upload-artifact@v7
+      if: ${{ !cancelled() && inputs.cases == 'true' }}
+      with:
+        name: release-gate${{ inputs.name != '' && format('-{0}', inputs.name) || '' }}-${{ github.run_attempt }}-cases
+        path: ${{ runner.temp }}/llm-release-gate${{ inputs.name != '' && format('-{0}', inputs.name) || '' }}/cases/
+        retention-days: ${{ inputs.cases-retention-days }}
+        if-no-files-found: ignore

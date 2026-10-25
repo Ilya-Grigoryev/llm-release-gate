@@ -164,7 +164,10 @@ it, then runs `python -m llm_release_gate.pr BASE_REV PROJECT_DIR CONFIG GOLDEN_
 root: it checks out the target
 branch in a worktree, runs both versions in parallel, each with its own code (one run per case: the runner's default `-k
 1`), runs the gate and writes `comment.md` and `verdict.json`. If a version cannot run, it writes an infra-error comment
-and exits 20; otherwise it exits with the gate's code. The job posts the comment and keeps the records as artifacts. It
+and exits 20; otherwise it exits with the gate's code. It copies the golden set to `OUT_DIR/cases` first, so even a run
+without a verdict shows what it was given. The job posts the comment and keeps the records as an artifact, and the
+golden set's text files as a second one (`release-gate[-NAME]-ATTEMPT-cases`, 30 days), with `inputs-url` for the
+files it leaves out. It
 advises: on GitHub until the check is made required, on GitLab while the job has `allow_failure: true`.
 
 ```mermaid

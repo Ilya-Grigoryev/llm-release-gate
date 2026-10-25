@@ -1,4 +1,5 @@
 import re
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -26,3 +27,22 @@ def test_the_gate_action_runs_the_packaged_commands():
         'comment "$OUT/comment.md"',
     ):
         assert f"llm_release_gate.{module}" in text
+
+
+def _step(name):
+    action = yaml.safe_load((ROOT / "action.yml").read_text())
+    return next(s for s in action["runs"]["steps"] if s.get("name") == name)
+
+
+@pytest.mark.parametrize("url", ["", "https://example.com/files/{name}"])
+def test_the_cases_step_keeps_text_and_says_where_the_rest_is(tmp_path, url):
+    for f in ("a.yaml", "inputs/a.txt", "inputs/a.jpg"):
+        (tmp_path / "cases" / f).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / "cases" / f).write_text("x")
+    env = {"INPUTS_URL": url, "OUT": str(tmp_path), "PATH": "/usr/bin:/bin"}
+    subprocess.run(["bash", "-c", _step("cases")["run"]], env=env, check=True)
+    cases = tmp_path / "cases"
+    left = {str(p.relative_to(cases)) for p in cases.rglob("*") if p.is_file()}
+    assert left == {"a.yaml", "inputs/a.txt"} | ({"inputs-url.txt"} if url else set())
+    if url:
+        assert (cases / "inputs-url.txt").read_text() == url + "\n"

@@ -228,7 +228,9 @@ A check compares against its own `value` or against the case's expected value at
 `setup` installs Python, uv and the project's locked environment. The gate action checks that it can comment, validates
 the golden set (against a `manifest` if given), runs the version from the target branch and the one from the request on
 it, in parallel and each with its own code, compares them and posts the verdict as one comment, edited on later pushes
-(one per `name` when a request gates several pipelines). It keeps the records as an artifact and fails the job with the
+(one per `name` when a request gates several pipelines). It keeps the records as an artifact, and the golden set's case
+files and text inputs as a second one for 30 days (`cases: false` leaves it out), so the [dashboard](#dashboard) can
+show what each case asked; `inputs-url` tells it where the other files are, such as images, to link to them. It fails the job with the
 gate's verdict; the job only advises until it is made a required check. A golden set that stays out of git is fetched or
 built in a step between the two; if that step fails, the gate does not run and the request gets no comment.
 

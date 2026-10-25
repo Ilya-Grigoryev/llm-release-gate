@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Gate a pull or merge request: run the base version (from BASE_REV) and the candidate (this
-# checkout) on the golden set, compare them and write OUT_DIR/comment.md. Run it through
+# checkout) on the golden set, compare them and write OUT_DIR/comment.md; OUT_DIR/cases is a copy of the
+# golden set, for whoever reads the results. Run it through
 # `python -m llm_release_gate.pr BASE_REV PROJECT_DIR CONFIG GOLDEN_DIR OUT_DIR` from the root of the
 # repository; PROJECT_DIR is the project's directory in it (`.` for the root), CONFIG is relative to it.
 # Exits with the gate's code: 0 pass, 10 quality fail, 11 inconclusive, 12 budget fail, 20 infra error.
@@ -10,6 +11,7 @@ base_rev=$1 example=$2 config=$3
 golden=$(cd "$4" && pwd)
 mkdir -p "$5" && out=$(cd "$5" && pwd)
 root=$(pwd)
+rm -rf "$out/cases" && cp -R "$golden" "$out/cases"
 
 infra() {  # MESSAGE [LOG]: a comment for a run that could not decide
   {
