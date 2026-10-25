@@ -199,7 +199,7 @@ A check compares against its own `value` or against the case's expected value at
 
 A project gates its own pull requests with two commands, the gate installed as a dependency. `python -m llm_release_gate.pr BASE_REV PROJECT_DIR CONFIG GOLDEN_DIR OUT_DIR`, run from the repository's root, runs the version from the target branch and the one from the request on the golden set, in parallel and each with its own code, then the gate. `python -m llm_release_gate.comment` posts the verdict as one comment (one per name with `--name`) and edits it on later pushes; `--check` tells beforehand whether the job can comment. The job only advises until it is a required check. The three projects above do this on GitHub Actions, for about $0.06 (receipt-intake), $0.04 (workbench-support) and $0.20 (telecom-support) a pull request; their `.github/workflows/ci.yml` shows the steps.
 
-The job needs the provider's key (`OPENAI_API_KEY`) as a secret and, on GitLab, `GITLAB_TOKEN`, a project access token with the `api` scope, to write the comment. `python -m llm_release_gate.comment comment.md --dry-run` prints the comment and posts nothing.
+The job needs the provider's key (`OPENAI_API_KEY`) as a secret, read access to this repository while it is private (the three projects use a read-only deploy key) and, on GitLab, `GITLAB_TOKEN`, a project access token with the `api` scope, to write the comment. `python -m llm_release_gate.comment comment.md --dry-run` prints the comment and posts nothing.
 
 ## License
 

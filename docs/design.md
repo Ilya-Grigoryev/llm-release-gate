@@ -147,7 +147,7 @@ runner's scorer is `hits(case, answer, trace=None)` (by default the run's trace,
   [--max-cost-per-run USD] [--max-latency S] [--latency-quantile Q] [--markdown FILE] [--json FILE]`; the exit code is
   the verdict's. `comment.py` posts the Markdown as one comment on a GitHub pull request or GitLab merge request, edits it on
   later pushes, and posts an infra-error comment when the job stopped before a verdict. CLI: `python -m
-  llm_release_gate.comment [FILE] [--check] [--dry-run]`; it needs `GITHUB_TOKEN` with `pull-requests: write` or
+  llm_release_gate.comment [FILE] [--name NAME] [--check] [--dry-run]`; it needs `GITHUB_TOKEN` with `pull-requests: write` or
   `GITLAB_TOKEN` with scope `api`.
 - **Built — budgets.** `budget.check(costs, latencies, retried, cost_limit, latency_limit, latency_q, level) -> Budget`, a
   pure function over the candidate's runs: the mean cost per run against its limit; a latency quantile with a
