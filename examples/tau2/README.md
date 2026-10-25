@@ -68,4 +68,18 @@ retries are the only ones and are counted. tau2 sets `litellm.drop_params`, whic
 models without a word; pass it in `extra_body` (`configs/telecom-luna.yaml`). tau2 needs Python 3.12 (it imports
 `audioop`).
 
+## In the browser
+
+```sh
+uv run --env-file ../../.env python -m tau2_example.web   # then open http://127.0.0.1:8766
+```
+
+You are the customer of a task from the chat set: you write to tau2's agent and work the phone yourself, through its
+quick settings and actions, which call tau2's own user tools. The page shows the agent's tool calls, the phone as tau2's
+environment holds it, and the customer's line at the carrier, where the agent's changes stay marked. **End the chat**
+sends tau2's `###STOP###`, and tau2's evaluator scores the conversation as it scores a simulated one. **Let the simulated
+customer play** runs the task with the set's simulator instead. Only the customer differs from a gate run: the agent,
+its policy (`configs/telecom.yaml`), the environment, the run limits and the evaluator are the same. Model calls keep
+tau2's own retries here, since no runner counts them. One chat at a time, on 127.0.0.1 only.
+
 tau2-bench is MIT-licensed (Sierra Research); its data stays out of this repository.

@@ -1,0 +1,507 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Carrier support on tau2-bench</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fira+Mono:wght@400;500&family=Sora:wght@400;500;600;700&display=swap">
+<style>
+/*
+  Carrier support on tau2-bench telecom: a mobile carrier's tech-support chat answered by tau2's own agent, while the
+  customer holds a phone that only the customer can operate.
+  Job: let a person be that customer, talk to the agent and fix the phone with their own hands, then get tau2's verdict.
+
+  Color   mist #eceff4 page, paper #ffffff panels, ink #11161f, signal #4b35c9 carrier and active settings,
+          device #191c22 phone body, flare #13a9bb what just changed, good #1d8a4e, bad #c4372d
+  Type    Sora for everything (700 for the few headings, 400 text); Fira Mono only for tool calls and their results.
+          Scale 12 / 13.5 / 15 / 18 / 26.
+  Layout  header; the conversation at left, the customer's phone in the middle, the carrier's records and tau2's
+          verdict at right. Below 1240px the records go under the phone; below 860px everything stacks.
+  Bold    the phone: its status bar and quick settings change as you or the agent act, and tapping a tile runs tau2's
+          own user tool. The rest stays plain.
+*/
+:root {
+  --mist: #eceff4;
+  --paper: #ffffff;
+  --ink: #11161f;
+  --ink-soft: #545d6c;
+  --ink-faint: #8b93a1;
+  --line: #d6dbe3;
+  --signal: #4b35c9;
+  --signal-tint: #e9e5fb;
+  --on-signal: #ffffff;
+  --device: #191c22;
+  --screen: #f6f7fa;
+  --flare: #13a9bb;
+  --flare-tint: #d8f3f6;
+  --good: #1d8a4e;
+  --bad: #c4372d;
+  --bad-tint: #f8e2df;
+  --f-text: "Sora", "Helvetica Neue", Arial, sans-serif;
+  --f-code: "Fira Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --mist: #12151b; --paper: #1a1e26; --ink: #e7eaf0; --ink-soft: #a3abb8; --ink-faint: #707887; --line: #2b313c;
+    --signal: #8f7cff; --signal-tint: #262043; --on-signal: #120d2b; --device: #050608; --screen: #20252e; --flare: #3cc8d8; --flare-tint: #12343a;
+    --good: #5cc98a; --bad: #ec7b70; --bad-tint: #3b1c1a; color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body { margin: 0; background: var(--mist); color: var(--ink); font: 15px/1.5 var(--f-text); }
+button, select, textarea, input { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
+
+.top { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 20px; padding: 12px 24px; background: var(--paper); border-bottom: 1px solid var(--line); }
+.brand { display: flex; align-items: center; gap: 10px; margin-right: auto; }
+.brand svg { width: 28px; height: 28px; color: var(--signal); flex: none; }
+.brand b { font-size: 18px; font-weight: 700; letter-spacing: -0.02em; }
+.brand span { color: var(--ink-soft); font-size: 13.5px; }
+.controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.controls label { color: var(--ink-soft); font-size: 13.5px; }
+select { background: var(--mist); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; max-width: 340px; }
+.btn { border: 1px solid var(--line); background: var(--paper); border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+.btn:hover:not(:disabled) { border-color: var(--ink-faint); }
+.btn.primary { background: var(--signal); border-color: var(--signal); color: var(--on-signal); font-weight: 600; }
+.btn:disabled { opacity: 0.45; cursor: default; }
+.honest { flex-basis: 100%; margin: 0; color: var(--ink-soft); font-size: 13.5px; }
+
+main { display: grid; grid-template-columns: minmax(340px, 1fr) 360px minmax(300px, 0.85fr); height: calc(100% - var(--top, 96px)); }
+.zone { min-width: 0; min-height: 0; }
+.talk { display: flex; flex-direction: column; border-right: 1px solid var(--line); }
+.hand { overflow: auto; padding: 22px 24px 32px; display: grid; justify-items: center; align-content: start; gap: 14px; }
+.records { overflow: auto; padding: 22px 24px 32px; border-left: 1px solid var(--line); display: grid; grid-auto-rows: max-content; gap: 22px; }
+@media (max-width: 1240px) {
+  main { grid-template-columns: minmax(340px, 1fr) 380px; }
+  .records { grid-column: 2; border-left: 0; border-top: 1px solid var(--line); }
+  .hand { grid-row: 1; grid-column: 2; }
+  .talk { grid-row: 1 / span 2; }
+  main { grid-template-rows: auto 1fr; }
+}
+@media (max-width: 860px) {
+  main { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; height: auto; }
+  .talk, .hand, .records { grid-column: 1; grid-row: auto; }
+  .talk { border-right: 0; border-bottom: 1px solid var(--line); }
+  .chat { max-height: 70vh; }
+}
+
+/* your part */
+.part { padding: 14px 20px; background: var(--paper); border-bottom: 1px solid var(--line); display: grid; gap: 6px; }
+.part h2 { margin: 0; font-size: 15px; font-weight: 600; display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }
+.part p { margin: 0; font-size: 13.5px; color: var(--ink-soft); max-width: 66ch; }
+.part .who { color: var(--ink); font-size: 15px; }
+.part details { font-size: 13.5px; color: var(--ink-soft); }
+.part summary { cursor: pointer; color: var(--signal); }
+.part details p { margin-top: 6px; white-space: pre-wrap; }
+.tag { font-size: 12px; font-weight: 500; border-radius: 999px; padding: 1px 9px; background: var(--signal-tint); color: var(--signal); }
+
+/* chat */
+.chat { flex: 1; overflow: auto; padding: 16px 20px; display: flex; flex-direction: column; gap: 9px; }
+.msg { max-width: 84%; display: grid; gap: 2px; }
+.msg .by { font-size: 12px; color: var(--ink-faint); }
+.msg .text { white-space: pre-wrap; overflow-wrap: anywhere; padding: 8px 12px; }
+.msg.agent .text { background: var(--paper); border: 1px solid var(--line); border-radius: 12px 12px 12px 3px; }
+.msg.user { align-self: flex-end; }
+.msg.user .by { text-align: right; }
+.msg.user .text { background: var(--signal); color: var(--on-signal); border-radius: 12px 12px 3px 12px; }
+.msg .ended { font-size: 12px; color: var(--ink-faint); text-align: right; }
+.call { font: 12.5px/1.45 var(--f-code); overflow-wrap: anywhere; padding: 1px 0 1px 12px; }
+.call.agent { border-left: 2px solid var(--line); margin-left: 8px; color: var(--ink-soft); }
+.call.user { border-right: 2px solid var(--signal); margin-right: 8px; padding: 1px 12px 1px 0; text-align: right; color: var(--ink-soft); align-self: flex-end; max-width: 84%; }
+.call b { color: var(--ink); font-weight: 500; }
+.call .res { display: block; color: var(--ink-faint); white-space: pre-wrap; }
+.call .res.err { color: var(--bad); }
+.chat.quiet .call.agent { display: none; }
+.working { color: var(--ink-faint); font-size: 13.5px; display: flex; gap: 8px; align-items: center; }
+.dots { display: inline-flex; gap: 3px; }
+.dots i { width: 5px; height: 5px; border-radius: 50%; background: currentColor; display: block; }
+@media (prefers-reduced-motion: no-preference) {
+  .dots i { animation: blink 1.2s infinite; }
+  .dots i:nth-child(2) { animation-delay: 0.2s; }
+  .dots i:nth-child(3) { animation-delay: 0.4s; }
+}
+@keyframes blink { 0%, 80%, 100% { opacity: 0.25; } 40% { opacity: 1; } }
+.error { background: var(--bad-tint); color: var(--bad); border-radius: 8px; padding: 8px 12px; font-size: 13.5px; }
+.composer { border-top: 1px solid var(--line); background: var(--paper); padding: 12px 20px 14px; display: grid; gap: 8px; }
+.composer textarea { width: 100%; resize: none; min-height: 60px; border: 1px solid var(--line); border-radius: 10px; padding: 9px 12px; background: var(--mist); }
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.row .grow { margin-right: auto; }
+.hint { color: var(--ink-faint); font-size: 12px; }
+.switch { display: inline-flex; gap: 6px; align-items: center; font-size: 13.5px; color: var(--ink-soft); cursor: pointer; }
+
+/* the phone */
+.turn { font-size: 13.5px; color: var(--ink-soft); text-align: center; min-height: 21px; }
+.turn.yours { color: var(--signal); font-weight: 600; }
+.phone { width: 312px; max-width: 100%; background: var(--device); border-radius: 42px; padding: 12px; box-shadow: 0 18px 40px -18px rgb(17 22 31 / 0.55); }
+.screen { background: var(--screen); border-radius: 31px; min-height: 600px; padding: 10px 16px 18px; display: grid; gap: 12px; align-content: start; position: relative; overflow: hidden; }
+.bar { display: flex; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 600; padding: 4px 6px 0; font-variant-numeric: tabular-nums; }
+.bar .clock { margin-right: auto; }
+.bar svg { height: 12px; width: auto; display: block; }
+.bar .r { font-size: 10px; border: 1.5px solid currentColor; border-radius: 3px; padding: 0 2px; line-height: 12px; }
+.bar .flag { font-size: 10px; background: var(--ink); color: var(--screen); border-radius: 3px; padding: 0 3px; line-height: 13px; }
+.where { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; margin-top: 8px; }
+.where span { font-size: 12px; background: var(--paper); border: 1px solid var(--line); border-radius: 999px; padding: 1px 9px; }
+.where span.warn { border-color: var(--bad); color: var(--bad); }
+.net { text-align: center; padding: 6px 0 2px; }
+.net b { display: block; font-size: 26px; font-weight: 700; letter-spacing: -0.03em; line-height: 1.15; }
+.net.ok b { color: var(--good); }
+.net.no b { color: var(--bad); }
+.net small { color: var(--ink-soft); font-size: 12px; }
+.tiles { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+.tile { border: 0; border-radius: 16px; padding: 10px 12px; text-align: left; background: var(--paper); cursor: pointer; display: grid; gap: 1px; box-shadow: inset 0 0 0 1px var(--line); }
+.tile b { font-size: 13.5px; font-weight: 600; }
+.tile small { font-size: 12px; color: var(--ink-soft); }
+.tile.on { background: var(--signal); box-shadow: none; }
+.tile.on b, .tile.on small { color: var(--on-signal); }
+.tile:disabled { cursor: default; }
+.tile.flash { box-shadow: 0 0 0 3px var(--flare); }
+.acts { display: grid; gap: 1px; background: var(--line); border-radius: 14px; overflow: hidden; }
+.acts button { border: 0; background: var(--paper); padding: 9px 12px; text-align: left; font-size: 13.5px; cursor: pointer; }
+.acts button:disabled { cursor: default; color: var(--ink-faint); }
+.toast { font: 12px/1.4 var(--f-code); background: var(--ink); color: var(--screen); border-radius: 12px; padding: 8px 10px; white-space: pre-wrap; max-height: 120px; overflow: auto; }
+.settings { font-size: 12px; color: var(--ink-soft); display: grid; gap: 2px; }
+.settings div { display: flex; justify-content: space-between; gap: 10px; }
+.settings b { font-weight: 500; color: var(--ink); text-align: right; }
+.other { display: flex; gap: 6px; width: 312px; max-width: 100%; }
+.other input { flex: 1; min-width: 0; border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; background: var(--paper); font: 12.5px var(--f-code); }
+
+/* records */
+.records h2 { margin: 0 0 4px; font-size: 18px; font-weight: 700; letter-spacing: -0.02em; }
+.records .sub { margin: 0; color: var(--ink-soft); font-size: 13.5px; }
+.facts { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; font-size: 13.5px; margin: 0; }
+.facts dt { color: var(--ink-soft); }
+.facts dd { margin: 0; font-variant-numeric: tabular-nums; }
+.facts dd.changed { background: var(--flare-tint); box-shadow: 0 0 0 3px var(--flare-tint); border-radius: 2px; }
+.facts dd.changed::after { content: " changed by the agent"; color: var(--flare); font-size: 12px; }
+.bad-text { color: var(--bad); }
+.verdict { border-top: 3px dashed var(--line); padding-top: 14px; display: grid; gap: 8px; font-size: 13.5px; }
+.verdict.pass { border-top: 3px solid var(--good); }
+.verdict.fail { border-top: 3px solid var(--bad); }
+.verdict .big { font-size: 18px; font-weight: 700; letter-spacing: -0.02em; }
+.verdict.pass .big { color: var(--good); }
+.verdict.fail .big { color: var(--bad); }
+.verdict ul { margin: 0; padding-left: 0; list-style: none; display: grid; gap: 3px; }
+.verdict li { font-family: var(--f-code); font-size: 12.5px; }
+.verdict p { margin: 0; color: var(--ink-soft); max-width: 60ch; }
+.usage { color: var(--ink-faint); font-size: 12px; }
+</style>
+</head>
+<body>
+<header class="top" id="top">
+  <div class="brand">
+    <svg viewBox="0 0 28 28" aria-hidden="true"><rect x="3" y="17" width="4" height="7" rx="1.2" fill="currentColor"/><rect x="9" y="12" width="4" height="12" rx="1.2" fill="currentColor"/><rect x="15" y="8" width="4" height="16" rx="1.2" fill="currentColor"/><rect x="21" y="3" width="4" height="21" rx="1.2" fill="currentColor" opacity="0.45"/></svg>
+    <b>Carrier support</b><span>tau2-bench telecom, v1.0.1</span>
+  </div>
+  <div class="controls">
+    <label for="task">Problem</label>
+    <select id="task"></select>
+    <button class="btn" id="restart" type="button">Restart</button>
+    <button class="btn" id="simulate" type="button">Let the simulated customer play</button>
+  </div>
+  <p class="honest" id="honest">tau2's own agent, phone and carrier database, run by tau2's orchestrator. The carrier, the customers and their phones are tau2's mock data.</p>
+</header>
+
+<main>
+  <section class="zone talk" aria-label="The conversation">
+    <div class="part" id="part"></div>
+    <div class="chat" id="chat" aria-live="polite"></div>
+    <form class="composer" id="composer">
+      <div class="row"><label for="text" class="hint grow">Enter sends, Shift+Enter adds a line</label><span class="usage" id="usage"></span></div>
+      <textarea id="text" rows="2"></textarea>
+      <div class="row">
+        <label class="switch grow"><input type="checkbox" id="show-tools" checked> Show the agent's tool calls</label>
+        <button class="btn" id="end" type="button">End the chat</button>
+        <button class="btn primary" id="send" type="submit">Send</button>
+      </div>
+    </form>
+  </section>
+
+  <section class="zone hand" aria-label="Your phone">
+    <div class="turn" id="turn"></div>
+    <div class="phone"><div class="screen" id="screen"></div></div>
+    <form class="other" id="other">
+      <input id="action" list="action-names" placeholder='set_network_mode_preference(mode="4g_5g_preferred")' aria-label="Another phone action">
+      <datalist id="action-names"></datalist>
+      <button class="btn" type="submit">Run</button>
+    </form>
+  </section>
+
+  <section class="zone records" aria-label="The carrier's records">
+    <div>
+      <h2>At the carrier</h2>
+      <p class="sub">The agent sees and changes these records through its tools. You cannot.</p>
+    </div>
+    <dl class="facts" id="facts"></dl>
+    <div class="verdict" id="verdict"></div>
+  </section>
+</main>
+
+<script>
+(function () {
+  "use strict";
+  var $ = function (id) { return document.getElementById(id); };
+  var shown = 0, polling = false, snap = null, lastToast = "";
+
+  function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+  async function api(path, body) {
+    var r = await fetch(path, body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    var data = await r.json();
+    if (!r.ok) throw new Error(data.error || ("HTTP " + r.status));
+    return data;
+  }
+  function title(id) {
+    var m = /^\[(\w+)\](.+?)\[PERSONA:(\w+)\]$/.exec(id);
+    if (!m) return id;
+    var area = { mms_issue: "MMS", mobile_data_issue: "Mobile data", service_issue: "No service" }[m[1]] || m[1];
+    return area + ": " + m[2].replace(/_/g, " ") + (m[3] !== "None" ? " (" + m[3].toLowerCase() + " customer)" : "");
+  }
+
+  /* ---- the conversation ---- */
+  var TILE_NAMES = { toggle_airplane_mode: "Airplane mode", toggle_data: "Mobile data", toggle_roaming: "Data roaming", toggle_wifi: "Wi-Fi",
+    toggle_data_saver_mode: "Data saver", connect_vpn: "VPN on", disconnect_vpn: "VPN off", toggle_wifi_calling: "Wi-Fi calling",
+    run_speed_test: "Speed test", reboot_device: "Restart", reseat_sim_card: "Reseat SIM card", reset_apn_settings: "Reset APN settings", make_payment: "Pay the bill" };
+  function argText(a) { return Object.keys(a || {}).map(function (k) { return k + "=" + JSON.stringify(a[k]); }).join(", "); }
+  function clip(t) { t = String(t == null ? "" : t); return t.length > 200 ? t.slice(0, 198) + "…" : t; }
+  var pending = [];  // tool calls whose results have not arrived; tau2 returns them in call order
+  function addEvent(e, s) {
+    var chat = $("chat"), el;
+    if (e.role === "result") {
+      var r = document.createElement("span");
+      r.className = "res" + (e.error ? " err" : "");
+      r.textContent = clip(e.text);
+      r.title = e.text || "";
+      el = pending.shift();
+      if (!el) { el = document.createElement("div"); el.className = "call " + e.for; chat.appendChild(el); }
+      el.appendChild(r);
+      return;
+    }
+    el = document.createElement("div");
+    if (e.tool) {
+      el.className = "call " + e.role;
+      el.innerHTML = (e.role === "user" ? "you: " : "") + "<b>" + esc(e.tool) + "</b>(" + esc(argText(e.args)) + ")";
+      pending.push(el);
+    } else if (e.role === "agent") {
+      el.className = "msg agent";
+      el.innerHTML = '<span class="by">Carrier agent (tau2)</span><span class="text">' + esc(e.text).replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>") + "</span>";
+    } else {
+      var stop = /###(STOP|TRANSFER|OUT-OF-SCOPE)###/.exec(e.text), text = e.text.replace(/###(STOP|TRANSFER|OUT-OF-SCOPE)###/g, "").trim();
+      el.className = "msg user";
+      el.innerHTML = '<span class="by">' + (s.mode === "you" ? "You" : "Simulated customer") + "</span>" + (text ? '<span class="text">' + esc(text) + "</span>" : "") + (stop ? '<span class="ended">ended the chat (' + esc(stop[1].toLowerCase()) + ")</span>" : "");
+    }
+    chat.appendChild(el);
+  }
+  function renderChat(s, all) {
+    var chat = $("chat");
+    if (all) { chat.innerHTML = ""; pending = []; }
+    chat.querySelectorAll(".working, .error.live").forEach(function (n) { n.remove(); });
+    s.events.forEach(function (e) { addEvent(e, s); });
+    shown = s.count;
+    if (s.busy) {
+      var w = document.createElement("div");
+      w.className = "working";
+      w.innerHTML = '<span class="dots"><i></i><i></i><i></i></span> ' + (s.mode === "you" ? "The agent is working" : "The agent and the simulated customer are talking");
+      chat.appendChild(w);
+    }
+    if (s.error) {
+      var er = document.createElement("div");
+      er.className = "error live";
+      er.textContent = "The model call failed: " + s.error;
+      chat.appendChild(er);
+    }
+    chat.scrollTop = chat.scrollHeight;
+  }
+  function renderPart(s) {
+    var t = s.task, mine = s.mode === "you";
+    $("part").innerHTML = "<h2>" + (mine ? "Your part" : "The simulator's part") + ' <span class="tag">' + esc(title(t.id).split(":")[0]) + "</span></h2>" +
+      '<p class="who">' + esc(t.known || "") + "</p><p>" + esc(t.reason || "") + "</p>" +
+      (t.unknown ? "<p>You do not know: " + esc(t.unknown) + "</p>" : "") +
+      (mine ? "<p>To see what the agent can do, change the phone only when the agent asks you to: tau2 scores the end state, not who fixed it.</p>" : "") +
+      "<details><summary>How tau2's simulated customer is told to behave</summary><p>" + esc(t.instructions || "") + "</p></details>";
+  }
+
+  /* ---- the phone ---- */
+  var BARS = { none: 0, poor: 1, fair: 2, good: 3, excellent: 4 };
+  function bars(n) {
+    var out = '<svg viewBox="0 0 20 12" aria-label="signal ' + n + ' of 4">';
+    for (var i = 0; i < 4; i++) out += '<rect x="' + (i * 5) + '" y="' + (9 - i * 3) + '" width="3.4" height="' + (3 + i * 3) + '" rx="0.8" fill="currentColor" opacity="' + (i < n ? 1 : 0.22) + '"/>';
+    return out + "</svg>";
+  }
+  function lastPhoneResult(s) {
+    var evs = s.events, out = null;
+    for (var i = 0; i < evs.length; i++) if (evs[i].role === "result" && evs[i].for === "user") out = evs[i].text;
+    return out;
+  }
+  function renderPhone(s) {
+    var d = s.phone.device, w = s.phone.surroundings, canTap = s.mode === "you" && s.your_turn && !s.done;
+    var tech = d.airplane_mode || d.network_connection_status === "no_service" ? "" : String(d.network_technology_connected || "").replace("none", "");
+    var bar = '<div class="bar"><span class="clock">9:41</span>' +
+      (d.airplane_mode ? '<span class="flag">✈︎</span>' : bars(BARS[d.network_signal_strength] || 0) + (tech ? "<span>" + esc(tech.toUpperCase()) + "</span>" : "") + (w.is_abroad && d.roaming_enabled ? '<span class="r">R</span>' : "")) +
+      (d.wifi_connected ? "<span>Wi-Fi</span>" : "") + (d.vpn_connected ? '<span class="flag">VPN</span>' : "") + (d.data_saver_mode ? '<span class="flag">saver</span>' : "") +
+      "<span>" + esc(d.battery_level) + "%</span></div>";
+    var chips = [];
+    if (w.name) chips.push("<span>" + esc(w.name) + "</span>");
+    if (w.phone_number) chips.push("<span>" + esc(w.phone_number) + "</span>");
+    chips.push("<span>" + (w.is_abroad ? "Abroad" : "At home") + "</span>");
+    if (d.sim_card_missing || d.sim_card_status !== "active") chips.push('<span class="warn">SIM ' + esc(d.sim_card_missing ? "missing" : String(d.sim_card_status).replace(/_/g, " ")) + "</span>");
+    if (!w.line_active) chips.push('<span class="warn">Line suspended</span>');
+    var works = s.phone.data_works;
+    var net = '<div class="net ' + (works ? "ok" : "no") + '"><b>' + (works ? "Mobile data works" : "No mobile data") + "</b><small>" + (d.wifi_connected ? "Wi-Fi is connected too" : "No Wi-Fi") + "</small></div>";
+    var tiles = [
+      ["toggle_airplane_mode", "Airplane mode", d.airplane_mode],
+      ["toggle_data", "Mobile data", d.data_enabled],
+      ["toggle_roaming", "Data roaming", d.roaming_enabled],
+      ["toggle_wifi", "Wi-Fi", d.wifi_enabled],
+      ["toggle_data_saver_mode", "Data saver", d.data_saver_mode],
+      [d.vpn_connected ? "disconnect_vpn" : "connect_vpn", "VPN", d.vpn_connected],
+      ["toggle_wifi_calling", "Wi-Fi calling", d.wifi_calling_enabled]
+    ].filter(function (t) { return s.actions.indexOf(t[0]) >= 0; });
+    var html = bar + '<div class="where">' + chips.join("") + "</div>" + net + '<div class="tiles">';
+    tiles.forEach(function (t) {
+      html += '<button type="button" class="tile' + (t[2] ? " on" : "") + '" data-action="' + t[0] + '()"' + (canTap ? "" : " disabled") + "><b>" + esc(t[1]) + "</b><small>" + (t[2] ? "On" : "Off") + "</small></button>";
+    });
+    html += '</div><div class="acts">';
+    ["run_speed_test", "reboot_device", "reseat_sim_card", "reset_apn_settings", "make_payment"].forEach(function (a) {
+      if (s.actions.indexOf(a) >= 0) html += '<button type="button" data-action="' + a + '()"' + (canTap ? "" : " disabled") + ">" + esc(TILE_NAMES[a]) + "</button>";
+    });
+    html += "</div>";
+    var toast = lastPhoneResult(s) || lastToast;
+    if (toast) { lastToast = toast; html += '<div class="toast" aria-live="polite">' + esc(clip(toast)) + "</div>"; }
+    var apps = Object.keys(d.app_statuses || {}).map(function (k) {
+      var p = d.app_statuses[k].permissions || {}, on = Object.keys(p).filter(function (x) { return p[x]; });
+      return "<div><span>" + esc(k) + "</span><b>" + esc(on.length ? on.join(", ") : "no permissions") + "</b></div>";
+    }).join("");
+    html += '<div class="settings">' +
+      "<div><span>Network mode</span><b>" + esc(String(d.network_mode_preference).replace(/_/g, " ")) + "</b></div>" +
+      "<div><span>APN</span><b>" + esc(d.active_apn_settings && d.active_apn_settings.apn_name) + (d.active_apn_settings && d.active_apn_settings.mmsc_url ? ", MMS set" : ", no MMS server") + "</b></div>" +
+      "<div><span>Wi-Fi calling</span><b>" + (d.wifi_calling_enabled ? "on" : "off") + "</b></div>" + apps + "</div>";
+    $("screen").innerHTML = html;
+    $("screen").querySelectorAll("[data-action]").forEach(function (b) { b.addEventListener("click", function () { tap(b.getAttribute("data-action")); }); });
+    $("turn").className = "turn" + (canTap ? " yours" : "");
+    $("turn").textContent = s.done ? "The chat is over" : s.mode !== "you" ? "The simulated customer holds the phone" : canTap ? "Your turn: write to the agent or use the phone" : "The agent is working";
+    $("action").disabled = !canTap;
+    $("other").querySelector("button").disabled = !canTap;
+    $("action-names").innerHTML = s.actions.map(function (a) { return '<option value="' + esc(a) + '()">'; }).join("");
+  }
+
+  /* ---- records ---- */
+  function renderFacts(s) {
+    var L = s.line, I = s.initial_line;
+    if (!L) { $("facts").innerHTML = "<dt>Line</dt><dd>not set up yet</dd>"; return; }
+    var l = L.line, i0 = I ? I.line : {}, p = L.plan || {};
+    var row = function (label, value, key) {
+      var changed = key && I && JSON.stringify(l[key]) !== JSON.stringify(i0[key]);
+      return "<dt>" + label + '</dt><dd class="' + (changed ? "changed" : "") + '">' + value + "</dd>";
+    };
+    var html = "<dt>Customer</dt><dd>" + esc(L.customer ? L.customer.name + ", " + L.customer.id : "unknown") + "</dd>" +
+      row("Line", esc(l.line_id + ", " + l.phone_number)) +
+      row("Status", '<span class="' + (l.status === "Active" ? "" : "bad-text") + '">' + esc(l.status) + "</span>", "status") +
+      row("Plan", esc(p.name ? p.name + ", " + p.data_limit_gb + " GB a month" : l.plan_id), "plan_id") +
+      row("Data used", esc(l.data_used_gb + " GB"), "data_used_gb") +
+      row("Data refuelled", esc(l.data_refueling_gb + " GB"), "data_refueling_gb") +
+      row("Roaming on the line", l.roaming_enabled ? "allowed" : '<span class="bad-text">not allowed</span>', "roaming_enabled") +
+      row("Contract ends", esc(l.contract_end_date || "no end date"), "contract_end_date") +
+      (l.suspension_start_date ? row("Suspended since", esc(l.suspension_start_date), "suspension_start_date") : "");
+    var due = (L.bills || []).filter(function (b) { return ["Paid", "Draft"].indexOf(b.status) < 0; });
+    html += "<dt>Open bills</dt><dd>" + (due.length ? due.map(function (b) { return esc(b.bill_id + ": $" + b.total_due + ", " + b.status.toLowerCase() + ", due " + b.due_date); }).join("<br>") : "none") + "</dd>";
+    $("facts").innerHTML = html;
+  }
+  function renderVerdict(s) {
+    var el = $("verdict"), r = s.result;
+    if (!r) {
+      el.className = "verdict";
+      el.innerHTML = "<p>When the chat ends, tau2's evaluator checks the phone and the carrier's records against what this task expects. No language model judges it.</p>";
+      return;
+    }
+    var pass = r.reward >= 1, who = s.mode === "you" ? "You" : "The simulated customer";
+    var list = function (xs) { return xs.length ? xs.map(function (x) { return "<b>" + esc(x) + "</b>"; }).join(", ") : "nothing"; };
+    var endOnly = r.basis.length && r.basis.every(function (b) { return b === "ENV_ASSERTION" || b === "DB"; });
+    var agentExpected = r.expected.filter(function (a) { return a.by === "agent"; }).length;
+    el.className = "verdict " + (pass ? "pass" : "fail");
+    el.innerHTML = '<div class="big">tau2 reward ' + esc(r.reward) + "</div>" +
+      "<p>" + (pass ? "The phone and the records ended as the task expects." : "The phone or the records did not end as the task expects.") + "</p><ul>" +
+      r.assertions.map(function (a) { return "<li>" + (a.met ? "✓ " : "✗ ") + esc(a.name) + "</li>"; }).join("") + "</ul>" +
+      '<dl class="facts">' +
+      "<dt>" + esc(who) + " changed</dt><dd>" + list(r.customer_changes) + "</dd>" +
+      "<dt>The agent changed</dt><dd>" + list(r.agent_changes) + " (and looked up " + esc(r.agent_lookups) + " records)</dd>" +
+      "<dt>tau2's reference</dt><dd>" + (r.expected.length ? r.expected.map(function (a) { return "<b>" + esc(a.name) + "</b> by the " + esc(a.by); }).join(", ") : "no actions listed") + "</dd></dl>" +
+      (endOnly ? "<p><b>What this reward does not say:</b> tau2 scores this task on the end state only, not on who fixed it. A customer who fixes the phone without the agent's help gets the same reward. The release gate adds a check that the agent acted at all" + (agentExpected ? " and " + agentExpected + " expected tool call" + (agentExpected > 1 ? "s" : "") + " of the agent" : "; this task lists no tool calls for the agent") + ".</p>" : "") +
+      "<p>Ended by: " + esc(String(r.termination).replace(/_/g, " ")) + ".</p>";
+  }
+  function renderControls(s) {
+    var mine = s.mode === "you" && s.your_turn && !s.done;
+    $("text").disabled = !mine;
+    $("send").disabled = !mine;
+    $("end").disabled = !mine;
+    $("restart").disabled = s.busy;
+    $("simulate").disabled = s.busy;
+    $("task").disabled = s.busy;
+    $("task").value = s.task.id;
+    $("text").placeholder = s.done ? "This chat is over. Restart the problem to try again." : s.mode !== "you" ? "The simulated customer is writing" : mine ? "Write to the agent as the customer" : "Wait for the agent";
+    $("honest").textContent = "tau2's own agent (" + s.model + "), phone and carrier database, run by tau2's orchestrator. The carrier, the customers and their phones are tau2's mock data.";
+    $("usage").textContent = s.count + " messages and tool calls";
+  }
+  function render(s, all) {
+    snap = s;
+    if (all) lastToast = "";
+    renderPart(s);
+    renderChat(s, all);
+    renderPhone(s);
+    renderFacts(s);
+    renderVerdict(s);
+    renderControls(s);
+    document.documentElement.style.setProperty("--top", $("top").offsetHeight + "px");
+    if (s.busy) poll();
+  }
+  async function poll() {
+    if (polling) return;
+    polling = true;
+    try {
+      while (true) {
+        await new Promise(function (r) { setTimeout(r, 500); });
+        var s = await api("/api/state?since=" + shown), all = false;
+        if (s.count < shown) { s = await api("/api/state?since=0"); all = true; }
+        render(s, all);
+        if (!s.busy) break;
+      }
+    } catch (e) { showError(e); }
+    polling = false;
+  }
+  function showError(e) {
+    var el = document.createElement("div");
+    el.className = "error";
+    el.textContent = e.message;
+    $("chat").appendChild(el);
+    $("chat").scrollTop = $("chat").scrollHeight;
+  }
+  async function act(path, body) { try { render(await api(path, body), true); } catch (e) { showError(e); } }
+  function tap(action) { act("/api/tap", { action: action }); }
+
+  $("composer").addEventListener("submit", function (ev) {
+    ev.preventDefault();
+    var text = $("text").value.trim();
+    if (!text) return;
+    $("text").value = "";
+    act("/api/say", { text: text });
+  });
+  $("text").addEventListener("keydown", function (ev) { if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); $("composer").requestSubmit(); } });
+  $("end").addEventListener("click", function () { act("/api/end", {}); });
+  $("other").addEventListener("submit", function (ev) { ev.preventDefault(); var a = $("action").value.trim(); if (a) { $("action").value = ""; tap(a); } });
+  $("simulate").addEventListener("click", function () { act("/api/start", { task: $("task").value, mode: "simulator" }); });
+  $("restart").addEventListener("click", function () { act("/api/start", { task: $("task").value, mode: "you" }); });
+  $("task").addEventListener("change", function () { act("/api/start", { task: $("task").value, mode: "you" }); });
+  $("show-tools").addEventListener("change", function () { $("chat").classList.toggle("quiet", !this.checked); });
+
+  (async function init() {
+    try {
+      var tasks = await api("/api/tasks");
+      $("task").innerHTML = tasks.map(function (id) { return '<option value="' + esc(id) + '">' + esc(title(id)) + "</option>"; }).join("");
+      render(await api("/api/state?since=0"), true);
+    } catch (e) { showError(e); }
+  })();
+})();
+</script>
+</body>
+</html>
