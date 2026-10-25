@@ -139,3 +139,60 @@ def test_the_runner_stamps_the_hash_of_its_price_table(tmp_path, monkeypatch):
     assert json.loads(out.read_text().splitlines()[0])["prices_hash"] == canonical_hash(
         {"gpt-4.1-mini": [0.40, 1.60]}
     )
+
+
+def exact_ranks(n, q, tail):
+    """The interval's ranks from exact binomial sums in fractions: the reference for the float version."""
+    from fractions import Fraction
+    from math import comb
+
+    q = Fraction(q)
+    cdf = [
+        sum(comb(n, i) * q**i * (1 - q) ** (n - i) for i in range(k + 1))
+        for k in range(n + 1)
+    ]
+    lo = max((r for r in range(1, n + 1) if cdf[r - 1] <= tail), default=None)
+    hi = min((r for r in range(1, n + 1) if 1 - cdf[r - 1] <= tail), default=None)
+    return lo, hi
+
+
+def test_the_ranks_match_exact_arithmetic():
+    from fractions import Fraction
+
+    for n in range(1, 61):
+        for q in ("0.5", "0.9", "0.95"):
+            _, lo, hi = budget.quantile_ci(
+                [float(x) for x in range(1, n + 1)], float(q)
+            )
+            assert (lo, hi) == exact_ranks(n, Fraction(q), Fraction(1, 40)), (n, q)
+
+
+def test_a_pool_sized_sample_is_fast_and_does_not_overflow():
+    import time
+
+    start = time.perf_counter()
+    est, lo, hi = budget.quantile_ci([float(x) for x in range(1, 5001)], 0.95)
+    assert time.perf_counter() - start < 2 and lo < est < hi
+
+
+def test_a_limit_the_runs_cannot_decide_says_so(tmp_path, monkeypatch, capsys):
+    b = budget.check([], [12.0], 0, latency_limit=1.0)
+    assert b.unchecked == ["latency: too few runs for a lower end"]
+    assert budget.check([], [], 0, latency_limit=1.0).unchecked == ["latency: no runs"]
+    base = runs(tmp_path, monkeypatch, "base", 0, Fixed())
+    cand = runs(tmp_path, monkeypatch, "cand", 1, Fixed())
+    comment = tmp_path / "c.md"
+    args = [
+        "--base",
+        str(base),
+        "--candidate",
+        str(cand),
+        "--max-latency",
+        "0.1",
+        "--markdown",
+        str(comment),
+    ]
+    assert (
+        gate.main(args) == gate.PASS
+    )  # one run of 0.5 s cannot show the 95th percentile above 0.1 s
+    assert "not checked: latency: too few runs for a lower end" in comment.read_text()

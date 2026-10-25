@@ -138,9 +138,12 @@ The first gate compares one run per version: it blocks when the candidate's mean
 Budgets check the candidate: `--max-cost-per-run USD` against its mean cost per run at the gate's prices (it needs
 `--prices`), `--max-latency S` against a latency quantile (`--latency-quantile`, 0.95 by default). A run's latency is the
 time of the attempt that answered: backoff and failed attempts are left out, and the comment counts the runs that needed
-retries. The quantile comes with a 95 % interval from order statistics, which assumes nothing about the distribution;
-latency blocks only when the whole interval lies above the limit, so a few slow runs out of many do not. A budget turns
-a pass into `budget fail` (exit 12); a quality fail stays a quality fail. The runner stamps each record with the hash of
+retries. A run that timed out on every attempt has no latency and is not counted: it shows up as an error, not in the
+budget. The quantile comes with a 95 % interval from order statistics, which assumes independent runs and nothing about
+their distribution (K repetitions of one case are not independent, so with K > 1 the interval is optimistic); latency
+blocks only when the whole interval lies above the limit, so a few slow runs out of many do not, and the comment says
+when there are too few runs to decide. The cost per run includes the user simulator's calls. A budget turns a pass into
+`budget fail` (exit 12); a quality fail stays a quality fail. The runner stamps each record with the hash of
 the price table it used (`prices_hash`), and the JSON report carries the hash of the gate's.
 
 ```sh

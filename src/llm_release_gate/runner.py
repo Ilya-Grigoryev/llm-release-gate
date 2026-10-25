@@ -32,9 +32,8 @@ from llm_release_gate.pipeline import (
 from llm_release_gate.prices import Prices, load_prices
 from llm_release_gate.trace import Trace, active, usage
 
-RECORD_VERSION = (
-    5  # 2: scorer_version; 3: trace, usage, wall_s; 4: requested_model; 5: prices_hash
-)
+# 2: scorer_version; 3: trace, usage, wall_s; 4: requested_model; 5: prices_hash
+RECORD_VERSION = 5
 Scorer = Callable[[Case, Answer], dict[str, bool | float | None]]
 EMPTY_ANSWER = {f.name: None for f in fields(Answer)}
 
@@ -181,9 +180,8 @@ def run(
             "run_id": run_id,
             "timestamp": datetime.now(UTC).isoformat(timespec="seconds"),
             "requested_model": model,
-            "prices_hash": canonical_hash(prices)
-            if prices
-            else None,  # the table `usage` used
+            # the price table `usage` was computed with
+            "prices_hash": canonical_hash(prices) if prices else None,
             **(asdict(answer) if answer else EMPTY_ANSWER),
             "wall_s": trace.wall_s,
             "trace": None if trace.empty() else trace.to_dict(),

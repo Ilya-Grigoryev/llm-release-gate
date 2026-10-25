@@ -230,21 +230,19 @@ def markdown(
         )
     if spend:
         parts = []
-        if spend.cost_limit is not None:
+        if spend.cost_limit is not None and spend.cost_per_run is not None:
             parts.append(
                 f"cost ${spend.cost_per_run:.4f} per run (limit ${spend.cost_limit:g})"
             )
         if spend.latency_limit is not None and spend.latency_s is not None:
-            lo, hi = spend.latency_ci
-            ci = (
-                f"{lo:.2f}–{hi:.2f} s"
-                if lo is not None and hi is not None
-                else "interval needs more runs"
-            )
+            lo, hi = (f"{x:.2f}" if x is not None else "?" for x in spend.latency_ci)
             parts.append(
-                f"latency p{100 * spend.latency_q:g} {spend.latency_s:.2f} s ({ci}; limit {spend.latency_limit:g} s)"
+                f"latency p{100 * spend.latency_q:g} {spend.latency_s:.2f} s "
+                f"(interval {lo}–{hi} s; limit {spend.latency_limit:g} s)"
             )
         verdict = "over: " + "; ".join(spend.over) if spend.over else "within"
+        if spend.unchecked:
+            verdict += " (not checked: " + "; ".join(spend.unchecked) + ")"
         retried = (
             f", {spend.retried} of {spend.runs} runs needed retries"
             if spend.retried
