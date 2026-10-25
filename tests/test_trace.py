@@ -533,3 +533,24 @@ def test_the_runner_cli_prices_the_steps(tmp_path):
         pytest.approx(120 / 1e6),
         pytest.approx(140 / 1e6),
     ]
+
+
+def test_values_json_cannot_hold_never_break_the_record(tmp_path):
+    from datetime import date
+
+    t = trace.Trace()
+    t.final_state = {"when": date(2026, 11, 2)}
+    t.step("message", "agent", text="hi", extra={"at": date(2026, 11, 2)})
+    json.dumps(t.to_dict())
+    assert t.to_dict()["final_state"] == {"when": "datetime.date(2026, 11, 2)"}
+
+
+def test_a_call_without_usage_leaves_a_note():
+    reply = completion("ok")
+    del reply.usage
+    t = trace.Trace()
+    trace.openai_client(ScriptedModel([reply]), trace=t).chat.completions.create(
+        model="m", messages=[]
+    )
+    assert t.steps[0]["tokens_in"] == 0 and "no usage" in t.notes[0]
+    assert trace.Trace().empty()

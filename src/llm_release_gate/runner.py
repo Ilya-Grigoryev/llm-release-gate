@@ -275,7 +275,9 @@ def main(argv: Sequence[str] | None = None) -> None:
     p.add_argument("--out", type=Path, required=True, help="JSONL file to append to")
     p.add_argument("--workers", type=int, default=4, help="parallel calls")
     p.add_argument(
-        "--prices", type=Path, help="YAML `model: [input, output]`, USD per 1M tokens"
+        "--prices",
+        type=Path,
+        help="YAML `model: [input, output]` or `[input, output, cached input]`, USD per 1M tokens",
     )
     args = p.parse_args(argv)
     if args.k < 1 or args.workers < 1:

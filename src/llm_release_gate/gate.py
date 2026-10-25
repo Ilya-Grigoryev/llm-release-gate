@@ -232,7 +232,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="rescore both versions from their saved answers against this set",
     )
     p.add_argument(
-        "--prices", type=Path, help="YAML `model: [input, output]`, USD per 1M tokens"
+        "--prices",
+        type=Path,
+        help="YAML `model: [input, output]` or `[input, output, cached input]`, USD per 1M tokens",
     )
     p.add_argument("--json", type=Path, help="write the verdict as JSON")
     p.add_argument("--markdown", type=Path, help="write the merge request comment")

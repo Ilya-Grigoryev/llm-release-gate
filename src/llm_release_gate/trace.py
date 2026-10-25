@@ -9,7 +9,7 @@ halfway still leaves the steps it paid for. An adapter records into it without t
         t.final_state = world.state()
 
 Outside the runner `current()` is None and both wrappers just pass calls through. Only `chat.completions.create` is
-recorded; streamed, async and Responses API calls pass through and leave a note. The current trace belongs to the
+recorded; a streamed call leaves a note, and other methods (Responses API, `parse`, raw responses) pass through unrecorded. The current trace belongs to the
 thread that runs the case: a call from a thread the application starts is recorded only with an explicit `trace=`.
 """
 
@@ -127,6 +127,9 @@ class Trace:
             found = problems(step)
             if found:
                 raise ValueError(f"bad {kind} step: {'; '.join(found)}")
+            step = plain(
+                step
+            )  # what JSON cannot hold becomes its repr, so the record always writes
             self.steps.append(step)
             return step
 
@@ -146,18 +149,17 @@ class Trace:
 
     def empty(self) -> bool:
         return (
-            not self.steps
+            not (self.steps or self.notes or self.stop)
             and self.final_state is None
             and self.state_change is None
-            and self.stop is None
         )
 
     def to_dict(self) -> dict:
         out = {
             "v": VERSION,
             "steps": self.steps,
-            "final_state": self.final_state,
-            "state_change": self.state_change,
+            "final_state": plain(self.final_state),
+            "state_change": plain(self.state_change),
             "stop": self.stop,
             "last_attempt": self.run_attempt,
         }
@@ -264,12 +266,16 @@ class _Completions:
             raise
         try:
             fields = llm_fields(r, t.prices)
+            t.step("llm", self.actor, ts=ts, latency_ms=ms(start), **fields)
         except Exception as e:  # noqa: BLE001 - an odd response must not break the application
             t.notes.append(
                 f"{self.actor}: a call is not recorded ({type(e).__name__}: {e})"
             )
             return r
-        t.step("llm", self.actor, ts=ts, latency_ms=ms(start), **fields)
+        if getattr(r, "usage", None) is None:
+            t.notes.append(
+                f"{self.actor}: a call reported no usage; its tokens and cost count as 0"
+            )
         dump = getattr(r, "model_dump", None)
         if callable(dump):
             t.native.append(dump(mode="json"))
