@@ -12,6 +12,8 @@ The gate runs each case several times and compares the two versions case by case
 
 Work in progress. The naive gate works: it compares one run per version against a fixed threshold. The statistical rule, the cost and latency budgets and the merge request job come next. [`examples/sroie/`](examples/sroie/) holds the pipeline under test: it extracts company, address, date and total from receipts in [SROIE](https://rrc.cvc.uab.es/?ch=13) (ICDAR 2019), from the OCR text or from the scan. [`examples/support-agent/`](examples/support-agent/) is a tool-using support agent over a mock database, with its own test cases; the gate does not run it yet.
 
+[`docs/design.md`](docs/design.md) describes the parts, the flow of a merge request and the record of a run.
+
 ## Your pipeline
 
 The gate runs any Python module with a `build(config)` function. `build` returns an object whose `run(case)` gives back an `Answer` (`src/llm_release_gate/pipeline.py`): the parsed output, the raw text, tokens, latency and the model the provider reported. Raise `Retryable` when the same call may succeed later (rate limit, timeout) and `Fatal` when no call can (out of quota, wrong key).
