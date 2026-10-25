@@ -47,20 +47,40 @@ prompt: prompts/system.md
 input: text
 ```
 
-For each run the gate writes one JSON request to the program's stdin: the case id, the absolute paths of its inputs and
-the version (model, prompt paths, input, params); never the expected values. The program writes one JSON answer to
-stdout: `output`, and optionally `raw`, `input_tokens`, `output_tokens`, `model` and a `trace` with `steps`,
-`final_state`, `state_change` and `stop` (the format below). The exit code decides the rest:
+For each run the gate starts the program in the runner's working directory (relative paths in `command` resolve from
+there) and writes one JSON request to its stdin:
+
+```json
+{"case": {"id": "synth-001", "inputs": {"text": "/abs/path/synth-001.txt"}},
+ "config": {"model": "gpt-5.4-mini-2026-03-17", "prompt": "/abs/path/system.md", "input": "text", "params": {}}}
+```
+
+`prompt` is a path, or a map of paths when the config names several prompts. The program never gets the expected
+values. It writes one JSON object to stdout and its logs to stderr:
+
+```json
+{"output": {"total": "12.50"}, "raw": "...", "input_tokens": 0, "output_tokens": 0, "model": "...",
+ "trace": {"steps": [], "final_state": null, "state_change": null, "stop": "done"}}
+```
+
+Only `output` (an object or `null`) is required. `raw` defaults to `output` as JSON. Report `model` as the provider
+returned it; a run with neither `model` nor model steps in its trace stays unpriced. The trace uses the format below; the
+runner numbers its steps. The exit code decides the rest:
 
 | Exit | Meaning |
 |---|---|
 | 0 | the answer |
 | 75 | try again later (rate limit, upstream timeout): the runner backs off and retries |
-| 78 | stop the whole run (no quota, wrong key) |
-| other, or no answer within `timeout_s` | this run fails; a timeout is retried |
+| 78, 126, 127 | stop the whole run (no quota, wrong key, program not found) |
+| any other | this run fails |
 
-`command` is part of the version and its hash. [`tests/fixtures/command/agent.sh`](tests/fixtures/command/agent.sh) is a
-small example in shell.
+The gate keeps a trace the program printed before a failed exit, so paid steps count. `timeout_s` bounds the whole
+program; on timeout the gate kills it with everything it started (it runs in its own process group), loses that
+attempt's trace and retries.
+
+`command` is part of the version and its hash; the program's code is not. When you change the code in a way that
+changes what the model gets, bump a number in `params` (`params: {version: 2}`), as a Python module bumps `VERSION`.
+[`tests/fixtures/command/agent.sh`](tests/fixtures/command/agent.sh) is a small example in shell.
 
 ## Traces
 
@@ -102,7 +122,7 @@ runner's backoff between attempts. A pipeline that records nothing writes `trace
 
 Each pipeline version is a YAML file: pipeline module, model (a dated snapshot if there is one), prompt file (or named prompt files for a pipeline with several steps), input, API parameters and, optionally, `max_retries` (default 5) and `timeout_s` (default 60). Its hash covers every field, the bytes of each prompt and the module's `VERSION`; key order, YAML formatting and `0` versus `0.0` do not change it.
 
-The runner calls the pipeline K times per case of a golden set and appends one JSON record per call, stamped with the config hash, the set hash and the scorer version. A rerun pays only for what is missing. The runner retries rate limits, timeouts and server errors with backoff 1, 2, 4... s and stops when the account is out of quota. `--prices` puts a list price on each model step of a trace; the raw provider responses go to `<out>.native.jsonl`.
+The runner calls the pipeline K times per case of a golden set and appends one JSON record per call, stamped with the config hash, the set hash and the scorer version. A rerun pays only for what is missing. The runner retries rate limits, timeouts and server errors with backoff 1, 2, 4... s and stops when the account is out of quota. `--prices` puts a list price on each model step of a trace; the raw provider responses go to `<stem>.native.jsonl`.
 
 ```sh
 # from examples/sroie: the scan on the SROIE golden set, 3 runs per receipt

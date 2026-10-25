@@ -30,7 +30,7 @@ class Answer:
     input_tokens: int
     output_tokens: int
     latency_s: float
-    model: str  # what the provider reports
+    model: str | None  # what the provider reports
     fingerprint: str | None = None
     reasoning_tokens: int = 0
     finish_reason: str | None = None

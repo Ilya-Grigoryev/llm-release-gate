@@ -69,6 +69,8 @@ def problems(step: dict) -> list[str]:
     kind, status = step.get("kind"), step.get("status")
     if kind not in KINDS:
         found.append(f"kind must be one of {KINDS}")
+    if not isinstance(step.get("ts"), str | None):
+        found.append("ts must be a string or null")
     if step.get("actor") not in ACTORS:
         found.append(f"actor must be one of {ACTORS}")
     need = ["seq", "kind", "actor"]
@@ -114,7 +116,7 @@ class Trace:
         self.prices = prices or {}
         self.lock = threading.RLock()
 
-    def step(self, kind: str, actor: str, **fields: Any) -> dict:
+    def step(self, kind: str, actor: str, /, **fields: Any) -> dict:
         """Add a step (the manual path). Raises ValueError if it breaks the format."""
         with self.lock:
             step = {"ts": now(), **fields}
