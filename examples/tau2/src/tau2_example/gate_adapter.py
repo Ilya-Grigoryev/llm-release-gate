@@ -95,6 +95,10 @@ class Adapter:
             )
         user = harness.get("user")  # none: the agent works the ticket alone
         solo = user is None
+        if "pinned" not in harness:
+            raise Fatal(
+                "the golden set predates pinned tau2 files: rebuild it from its manifest"
+            )
         for name, digest in harness["pinned"].items():
             if sha256(PINNED[name]) != digest:
                 raise Fatal(f"{PINNED[name]} differs from the golden set's")

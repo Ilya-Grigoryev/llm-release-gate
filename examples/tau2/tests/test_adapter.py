@@ -68,6 +68,17 @@ class Script:
         return reply
 
 
+@pytest.fixture(autouse=True)
+def offline(monkeypatch):
+    """tau2 loads ../../.env on import: no test may reach the provider, even when a check it relies on breaks."""
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    def refuse(**request):
+        raise AssertionError("a test called the model without a script")
+
+    monkeypatch.setattr("tau2.utils.llm_utils.completion", refuse)
+
+
 @pytest.fixture
 def script(monkeypatch):
     def install(replies):
@@ -173,6 +184,9 @@ def test_the_policy_comes_from_the_config(tmp_path, script):
     system = s.requests[0]["messages"][0]
     assert system["role"] == "system" and "MARKER-FROM-THE-PR" in system["content"]
     assert s.requests[0]["num_retries"] == 0  # the runner retries, not litellm
+    assert (
+        "seed" not in s.requests[0]
+    )  # one seed in every repetition would understate the noise
 
 
 def test_a_chat_records_the_simulated_user_as_its_own_actor(tmp_path, script):

@@ -26,7 +26,7 @@ validate:
 # Each example installs the gate the way another project would.
 example-test:
   extends: .python
-  image: python:3.12  # git, for tau2's fetch_data.sh
+  image: python:3.12  # git: tau2 installs from git, its data comes by fetch_data.sh
   parallel:
     matrix:
       - EXAMPLE: [sroie, support-agent, tau2]
