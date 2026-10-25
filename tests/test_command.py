@@ -1,11 +1,11 @@
 import json
-import os
+import subprocess
 import time
 from pathlib import Path
 
 import pytest
 
-from llm_release_gate import runner, trace
+from llm_release_gate import command, runner, trace
 from llm_release_gate.golden import load_cases, validate
 from llm_release_gate.metrics import hits
 from llm_release_gate.pipeline import (
@@ -75,6 +75,11 @@ def test_a_program_answers_and_the_record_keeps_its_trace(tmp_path):
         r["trace"]["final_state"] == {"done": True}
         and r["usage"]["agent"]["tokens_in"] == 12
     )
+    assert (r["input_tokens"], r["output_tokens"], r["model"]) == (
+        12,
+        3,
+        "fake-model-2026-01-01",
+    )
 
 
 def test_the_program_gets_the_case_and_the_version_but_not_the_expected_values(
@@ -105,6 +110,7 @@ def test_the_program_gets_the_case_and_the_version_but_not_the_expected_values(
     [
         ("retry", Retryable, "rate limited"),
         ("stop", Fatal, "exit 78: no quota"),
+        ("silentstop", Fatal, "^exit 78$"),
         ("notfound", Fatal, "exit 127: sh: agent: not found"),
         ("fail", RuntimeError, "exit 3: agent crashed"),
         ("garbage", ValueError, "not JSON"),
@@ -141,10 +147,32 @@ def test_a_broken_trace_after_a_failed_exit_leaves_a_note_and_keeps_the_exit_err
 
 
 def test_a_slow_program_is_retried(tmp_path):
-    start = time.perf_counter()
     with pytest.raises(Retryable, match="no answer within 1 s"):
         run_case(config(tmp_path, "slow", timeout=1))
-    assert time.perf_counter() - start < 4  # its `sleep 5` was killed too
+
+
+def test_an_interrupt_kills_the_program(tmp_path, monkeypatch):
+    killed, kill = [], command.kill
+
+    def interrupted(self, *args, **kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(command.subprocess.Popen, "communicate", interrupted)
+    monkeypatch.setattr(command, "kill", lambda p: (killed.append(p.pid), kill(p)))
+    with pytest.raises(KeyboardInterrupt):
+        run_case(config(tmp_path, "slow"))
+    assert killed
+
+
+def gone(pid):
+    """Dead, or a zombie waiting for init (a container may have no init to reap it)."""
+    ps = subprocess.run(
+        ["ps", "-o", "stat=", "-p", str(pid)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return ps.stdout.strip()[:1] in ("", "Z")
 
 
 def test_a_timeout_kills_what_the_program_started(tmp_path):
@@ -154,10 +182,8 @@ def test_a_timeout_kills_what_the_program_started(tmp_path):
             config(tmp_path, timeout=1, command=["sh", str(WRAPPER), str(pid_file)])
         )
     child = int(pid_file.read_text())
-    for _ in range(100):  # the orphan is reaped by init shortly after the kill
-        try:
-            os.kill(child, 0)
-        except ProcessLookupError:
+    for _ in range(100):
+        if gone(child):
             return
         time.sleep(0.05)
     pytest.fail(f"child {child} still runs")
@@ -265,3 +291,11 @@ def test_bad_command_configs_are_refused(tmp_path, extra, match):
     path.write_text(extra + "model: m-2026-01-01\nprompt: p.md\ninput: text\n")
     with pytest.raises(ValueError, match=match):
         load_config(path)
+
+
+def test_a_retry_does_not_keep_the_failed_attempts_state(tmp_path):
+    t = trace.Trace()
+    t.final_state, t.stop = {"half": True}, "error"  # left by a failed attempt
+    with trace.active(t):
+        run_case(config(tmp_path, "bare"))
+    assert t.final_state is None and t.stop is None

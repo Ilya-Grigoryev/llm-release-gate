@@ -91,6 +91,7 @@ def alias_arm(model, hour, set_hash="s" * 64):
             "case": "case-1",
             "rep": 0,
             "requested_model": model,
+            "model": model,
             "score": 1.0,
             "timestamp": f"2026-10-25T{hour:02}:00:00+00:00",
         },
@@ -148,6 +149,14 @@ def test_an_alias_whose_reported_model_changed_is_refused():
     a, b = alias_arm("gpt-6-luna", 10), alias_arm("gpt-6-luna", 10)
     b.records[("case-1", 0)]["model"] = "gpt-6-luna-2027"
     with pytest.raises(Mismatch, match="reported"):
+        pair(a, b)
+
+
+def test_an_alias_without_a_reported_model_is_refused():
+    a, b = alias_arm("gpt-6-luna", 10), alias_arm("gpt-6-luna", 10)
+    for arm in (a, b):  # None on both sides must not read as "the same model"
+        arm.records[("case-1", 0)]["model"] = None
+    with pytest.raises(Mismatch, match="do not say which model"):
         pair(a, b)
 
 

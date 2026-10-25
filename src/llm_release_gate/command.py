@@ -44,6 +44,8 @@ def kill(p: subprocess.Popen) -> None:
         os.killpg(p.pid, signal.SIGKILL)
     except ProcessLookupError:
         pass
+    except OSError:  # macOS: EPERM when only a zombie leader is left in the group
+        p.kill()
     p.wait()
     for pipe in (p.stdin, p.stdout, p.stderr):
         pipe.close()
@@ -77,6 +79,10 @@ class Command:
     def run(self, case: Case) -> Answer:
         start = time.perf_counter()
         sent = json.dumps(self.request(case))
+        if (
+            t := trace.current()
+        ) is not None:  # the record keeps the last attempt's state
+            t.final_state = t.state_change = t.stop = None
         try:
             p = subprocess.Popen(
                 list(self.config.command),
@@ -94,19 +100,20 @@ class Command:
         except subprocess.TimeoutExpired:
             kill(p)
             raise Retryable(f"no answer within {self.config.timeout_s:g} s") from None
-        except (
-            BaseException
-        ):  # Ctrl+C included: the group does not get the terminal's signal
+        # Ctrl+C in the main thread: the program's group does not get the terminal's signal
+        except BaseException:
             kill(p)
             raise
-        said = err.strip()[-500:]
+        said = f"exit {p.returncode}" + (
+            f": {err.strip()[-500:]}" if err.strip() else ""
+        )
         if p.returncode != 0:
             keep_trace(out)
             if p.returncode == RETRY:
-                raise Retryable(said or f"exit {RETRY}")
+                raise Retryable(said)
             if p.returncode in STOP:
-                raise Fatal(f"exit {p.returncode}: {said}")
-            raise RuntimeError(f"exit {p.returncode}: {said}")
+                raise Fatal(said)
+            raise RuntimeError(said)
         try:
             reply = json.loads(out)
         except json.JSONDecodeError:

@@ -5,6 +5,7 @@ request=$(cat)
 step='{"kind": "llm", "actor": "agent", "status": "ok", "model": "fake-model-2026-01-01", "tokens_in": 12, "tokens_out": 3, "cost_usd": null}'
 case "$request" in
   *'"mode": "retry"'*) echo "{\"trace\": {\"steps\": [$step]}}"; echo "rate limited upstream" >&2; exit 75 ;;
+  *'"mode": "silentstop"'*) exit 78 ;;
   *'"mode": "stop"'*) echo "{\"trace\": {\"steps\": [$step]}}"; echo "no quota left" >&2; exit 78 ;;
   *'"mode": "fail"'*) echo "{\"trace\": {\"steps\": [$step], \"stop\": \"error\"}}"; echo "agent crashed" >&2; exit 3 ;;
   *'"mode": "failbadtrace"'*) echo '{"trace": {"steps": [{"kind": "llm", "actor": "robot"}]}}'; exit 3 ;;

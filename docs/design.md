@@ -41,10 +41,12 @@ over a mock database, alone on a ticket or in a chat with a simulated user).
 - **Any program** (`pipeline: command`, `command: [program, args]`): one JSON request on stdin (case id, input paths, the
   version; never the expected values), one JSON answer on stdout (`output`, optionally tokens, model and a trace). Exit 75
   and a timeout retry; 78, 126, 127 and a program that cannot start stop the run; any other non-zero code fails the run.
-  A trace printed before a failed exit is kept. On timeout the gate kills the program's process group.
+  A trace printed before a failed exit is kept. On timeout the gate kills the program's process group (POSIX) and that
+  attempt's trace is lost.
 - **Model names.** A dated snapshot when there is one. A name without a date is accepted (`is_alias(model)`) with three
   precautions: the record keeps the requested and the reported model and the time, the report warns, and comparison
-  refuses runs with a pause longer than an hour, or runs that asked for the same model and got different ones.
+  refuses runs with a pause longer than an hour, or runs that asked for the same model and got different ones or did not
+  say which one they got.
 
 ### Golden set (built)
 

@@ -106,6 +106,11 @@ def pair(base: Arm, candidate: Arm) -> dict[str, tuple[list[dict], list[dict]]]:
                 }
                 for arm in (base, candidate)
             ]
+            if None in reported[0] | reported[1]:
+                raise Mismatch(
+                    f"model {alias} has no date and some runs do not say which model the provider used: "
+                    "the pipeline must report it"
+                )
             if reported[0] != reported[1]:
                 raise Mismatch(
                     f"model {alias}: the provider reported {sorted(map(str, reported[0]))} for the base "

@@ -31,7 +31,8 @@ params: {temperature: 0}
 Prefer a dated snapshot. A name without a date (`gpt-6-luna`) works, but the provider may change the model behind it,
 so the gate takes three precautions: every record keeps the requested model next to the one the provider reports and the
 time, the gate's comment warns about it, and the gate refuses to compare two versions whose runs, taken together, have a
-pause longer than an hour, or that asked for the same model and got different ones from the provider.
+pause longer than an hour, or that asked for the same model and got different ones from the provider (or runs that do
+not say which one they got: report `model`).
 
 The gate's code imports no pipeline. Give your module a `VERSION` and bump it when your code changes what the model gets. [`examples/sroie/`](examples/sroie/) is a whole project set up this way.
 
@@ -75,8 +76,9 @@ runner numbers its steps. The exit code decides the rest:
 | any other | this run fails |
 
 The gate keeps a trace the program printed before a failed exit, so paid steps count. `timeout_s` bounds the whole
-program; on timeout the gate kills it with everything it started (it runs in its own process group), loses that
-attempt's trace and retries.
+program. The program runs in its own process group (POSIX only); on timeout the gate kills the group, loses that
+attempt's trace and retries. A child that leaves the group (`setsid`, a container started with `docker run`) survives
+the kill: stop it in the program.
 
 `command` is part of the version and its hash; the program's code is not. When you change the code in a way that
 changes what the model gets, bump a number in `params` (`params: {version: 2}`), as a Python module bumps `VERSION`.
