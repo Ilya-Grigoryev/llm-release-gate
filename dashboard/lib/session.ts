@@ -56,7 +56,7 @@ export function safeNext(next: string | null): string {
   if (!next?.startsWith("/")) return "/";
   try {
     const url = new URL(next, HERE);
-    return url.origin === HERE ? url.pathname + url.search + url.hash : "/";
+    return url.origin === HERE && !url.pathname.startsWith("//") ? url.pathname + url.search + url.hash : "/";
   } catch {
     return "/";
   }

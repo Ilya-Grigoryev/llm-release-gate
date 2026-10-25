@@ -5,7 +5,7 @@ import { backfill } from "@/lib/ingest";
 
 export const maxDuration = 300;
 
-/** The "Read runs from GitHub" button of a project page: stores the gate runs GitHub still has for one repository. */
+/** The "Read runs from GitHub" button of a project page: stores the gate runs among one repository's newest artifacts. */
 export async function POST(req: NextRequest) {
   const origin = req.headers.get("origin");
   if (origin && origin !== req.nextUrl.origin) return new NextResponse("cross-site request", { status: 403 });

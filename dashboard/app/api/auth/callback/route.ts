@@ -6,7 +6,11 @@ export async function GET(req: NextRequest) {
   const secret = env("SESSION_SECRET");
   const pending = unseal<{ state: string; next: string }>(req.cookies.get(OAUTH)?.value ?? "", secret);
   const code = req.nextUrl.searchParams.get("code");
-  if (req.nextUrl.searchParams.get("error")) return new NextResponse("Sign-in was cancelled on GitHub.", { status: 400 });
+  if (req.nextUrl.searchParams.get("error")) {
+    const res = new NextResponse("Sign-in was cancelled on GitHub.", { status: 400 });
+    res.cookies.delete(OAUTH);
+    return res;
+  }
   if (!pending || !code || req.nextUrl.searchParams.get("state") !== pending.state) {
     return new NextResponse("Sign-in expired or came from another tab. Go back and sign in again.", { status: 400 });
   }

@@ -1,4 +1,5 @@
 -- One row per artifact of the gate action: what the gate decided on one run of one pull request.
+-- scripts/migrate.mjs splits statements at a semicolon that ends a line: keep semicolons out of line ends in comments.
 create table if not exists runs (
   artifact_id    bigint primary key,
   repo_id        bigint not null,

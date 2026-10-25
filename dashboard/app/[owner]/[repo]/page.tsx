@@ -56,8 +56,8 @@ export default async function Project(props: PageProps<"/[owner]/[repo]">) {
 
       {runs.length === 0 ? (
         <div className="mt-8 rounded-lg border border-dashed border-line bg-panel p-8 text-ink-2">
-          No gate runs stored yet. They arrive when a pull request&apos;s workflow finishes; runs GitHub still keeps (90 days by
-          default) come in with <b>Read runs from GitHub</b>.
+          No gate runs stored yet. They arrive when a pull request&apos;s workflow finishes; <b>Read runs from GitHub</b> brings in
+          the gate runs among the repository&apos;s 1,000 newest artifacts.
         </div>
       ) : (
         <>
