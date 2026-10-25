@@ -158,11 +158,13 @@ runner's scorer is `hits(case, answer, trace=None)` (by default the run's trace,
 
 ### CI adapter (built for this repository)
 
-The job checks that it can comment, downloads the golden set (a GitHub release or a GitLab package) and validates it
-against its manifest, then runs `ci/gate.sh BASE_REV EXAMPLE_DIR CONFIG GOLDEN_DIR OUT_DIR`: it checks out the target
+On GitHub the job runs once per example (SROIE, the support agent) and skips an example when `git diff` against the
+target branch shows no change to the example, the gate's code or the CI files; when the diff fails, it runs. The job
+checks that it can comment, gets the golden set (from the repository, a GitHub release or a GitLab package) and validates
+it, then runs `ci/gate.sh BASE_REV EXAMPLE_DIR CONFIG GOLDEN_DIR OUT_DIR`: it checks out the target
 branch in a worktree, runs both versions in parallel, each with its own code (one run per case: the runner's default `-k
 1`), runs the gate and writes `comment.md` and `verdict.json`. If a version cannot run, it writes an infra-error comment
-and exits 20; otherwise it exits with the gate's code. The job posts the comment and keeps the records as artifacts. It
+and exits 20; otherwise it exits with the gate's code. The job posts the comment, one per example, and keeps the records as artifacts. It
 advises: on GitHub until the check is made required, on GitLab while the job has `allow_failure: true`.
 
 ```mermaid
