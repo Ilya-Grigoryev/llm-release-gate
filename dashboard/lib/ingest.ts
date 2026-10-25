@@ -50,11 +50,12 @@ export async function ingestRun(token: string, repo: RepoRef, run: WorkflowRun):
   return stored;
 }
 
-/** The case files of a run, if its gate uploaded them; a problem with them never costs the run itself. */
+/** The case files of a run, if its gate uploaded them; files that cannot be read never cost the run itself. */
 async function readCases(token: string, repo: RepoRef, artifact?: Artifact) {
   if (!artifact || (artifact.size_in_bytes ?? 0) > 20 * 1024 * 1024) return null;
+  const zip = await download(`/repos/${repo.full_name}/actions/artifacts/${artifact.id}/zip`, token); // a failed download retries the run
   try {
-    return parseCases(await download(`/repos/${repo.full_name}/actions/artifacts/${artifact.id}/zip`, token));
+    return parseCases(zip);
   } catch (e) {
     console.error(`cases of ${repo.full_name} artifact ${artifact.id} unreadable`, e);
     return null;

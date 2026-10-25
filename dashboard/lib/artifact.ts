@@ -236,7 +236,7 @@ export function parseCases(zip: Uint8Array): Record<string, CaseFile> {
 
 function structured(path: string, body: string): unknown {
   try {
-    // YAML 1.1, as the gate reads it (PyYAML): `yes`, `012` and `1e3` mean the same on both sides.
+    // YAML 1.1, as the gate reads it (PyYAML), so values like `yes` and `012` mean the same on both sides.
     return /\.json$/i.test(path) ? JSON.parse(body) : /\.ya?ml$/i.test(path) ? parseYaml(body, { version: "1.1" }) : undefined;
   } catch {
     return undefined;
