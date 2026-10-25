@@ -1,6 +1,0 @@
-{
-    "company": "KEDAI RUNCIT MAJU SDN BHD",
-    "date": "03/10/2018",
-    "address": "NO 12, JALAN MERANTI 3, TAMAN UNIVERSITI, 81300 SKUDAI, JOHOR.",
-    "total": "18.40"
-}

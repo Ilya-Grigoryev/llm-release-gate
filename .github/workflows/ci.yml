@@ -3,11 +3,9 @@ name: ci
 
 on:
   push:
-  pull_request:  # runs release-gate only
 
 jobs:
   gate:
-    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -24,105 +22,3 @@ jobs:
         run: uv run pytest
       - name: validate
         run: uv run python -m llm_release_gate.golden validate tests/fixtures/golden
-
-  # Each example installs the gate the way another project would.
-  example-test:
-    if: github.event_name != 'pull_request'
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        example: [sroie]
-    defaults:
-      run:
-        working-directory: examples/${{ matrix.example }}
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.12"
-      - run: pip install --quiet uv==0.11.25
-      - run: uv sync --locked
-      - run: uv run pytest
-
-  # Base version (the target branch) against the candidate (this pull request merged into it) on
-  # each example's golden set, if the request touches the example or the gate; one comment per
-  # example with the verdict. Advisory: make it a required check to block merges.
-  release-gate:
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - example: sroie
-            config: configs/sroie-image.yaml
-            golden: data/golden/sroie
-            release: golden-sroie-9436cc87
-    concurrency:  # a new push replaces the run for the old one
-      group: release-gate-${{ github.event.pull_request.number }}-${{ matrix.example }}
-      cancel-in-progress: true
-    permissions:
-      contents: read
-      pull-requests: write
-    env:
-      EXAMPLE: examples/${{ matrix.example }}
-      CONFIG: ${{ matrix.config }}
-      GOLDEN: ${{ matrix.golden }}
-      GH_TOKEN: ${{ github.token }}
-      GITHUB_TOKEN: ${{ github.token }}
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-    defaults:
-      run:
-        working-directory: examples/${{ matrix.example }}
-    steps:
-      - uses: actions/checkout@v7
-      - name: changed
-        id: changed
-        working-directory: .
-        run: |  # when unsure (no base, git fails), run
-          git fetch --depth=1 origin "$GITHUB_BASE_REF" || true
-          if files=$(git diff --name-only FETCH_HEAD HEAD) &&
-            ! grep -qE "^($EXAMPLE/|src/|pyproject\.toml|uv\.lock|\.github/workflows/)" <<< "$files"; then
-            echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "this request changes nothing that $EXAMPLE runs on: skipped"
-          else
-            echo "run=true" >> "$GITHUB_OUTPUT"
-          fi
-      - uses: actions/setup-python@v7
-        if: steps.changed.outputs.run == 'true'
-        with:
-          python-version: "3.12"
-      - if: steps.changed.outputs.run == 'true'
-        run: pip install --quiet uv==0.11.25
-      - name: can comment
-        if: steps.changed.outputs.run == 'true'
-        run: |
-          uv sync --locked
-          uv run python -m llm_release_gate.comment --check
-      - name: golden set
-        if: steps.changed.outputs.run == 'true'
-        run: |
-          if [ -n "${{ matrix.release }}" ]; then
-            gh release download "${{ matrix.release }}" -p sroie.tar.gz -D /tmp
-            mkdir -p ../../data/golden && tar -xzf /tmp/sroie.tar.gz -C ../../data/golden
-            uv run python -m llm_release_gate.golden validate ../../$GOLDEN --manifest golden/sroie.yaml
-          else
-            uv run python -m llm_release_gate.golden validate ../../$GOLDEN
-          fi
-      - name: gate
-        if: steps.changed.outputs.run == 'true'
-        working-directory: .
-        run: uv run --project "$EXAMPLE" python -m llm_release_gate.pr FETCH_HEAD "$EXAMPLE" "$CONFIG" "$GOLDEN" out
-      - name: comment
-        if: steps.changed.outputs.run == 'true' && (success() || failure())
-        run: uv run python -m llm_release_gate.comment ../../out/comment.md --name ${{ matrix.example }}
-      - uses: actions/upload-artifact@v7
-        if: steps.changed.outputs.run == 'true' && (success() || failure())
-        with:
-          name: release-gate-${{ matrix.example }}-${{ github.run_attempt }}
-          path: |
-            out/*.jsonl
-            out/*.json
-            out/*.md
-            out/*.log

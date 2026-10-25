@@ -20,14 +20,13 @@ target architecture.
 | Criterion | `gate.py`, `criterion.py` | the verdict and its exit code | built (naive rule; the rule on checks as a library function); planned (the rule on the mean, inconclusive, the rule on checks in the gate's verdict) |
 | Budget | `budget.py`, `gate.py` | cost of the decision; cost and latency limits | built |
 | Report and comment | `gate.py`, `comment.py` | Markdown and JSON verdict; one comment on the pull or merge request, edited on later pushes | built |
-| CI adapter | `pr.py` + `pr.sh`, `.github/workflows/ci.yml`, `.gitlab-ci.yml` | runs both versions of a request and posts the verdict | built (any repository); planned (reusable action and template) |
+| CI adapter | `pr.py` + `pr.sh`, `comment.py` | runs both versions of a request and posts the verdict | built (any repository); planned (reusable action and template) |
 | Dashboard | — | history of merge requests, base against candidate down to a trace step | planned |
 
-Projects use the gate as a dependency: `examples/sroie` (receipt extraction from OCR text or a scan, in one model call or
-two) in this repository, and two in their own: [workbench-support](https://github.com/Ilya-Grigoryev/workbench-support) (a tool-using agent
-over a booking system, alone on a ticket or in a chat with a simulated user) and
-[telecom-support](https://github.com/Ilya-Grigoryev/telecom-support) (tau2-bench's telecom agent, tools, tasks and
-evaluator, unchanged).
+Projects use the gate as a dependency, each in its own repository: [receipt-intake](https://github.com/Ilya-Grigoryev/receipt-intake) (receipt
+extraction from OCR text or a scan, in one model call or two), [workbench-support](https://github.com/Ilya-Grigoryev/workbench-support) (a tool-using
+agent over a booking system, alone on a ticket or in a chat with a simulated user) and
+[telecom-support](https://github.com/Ilya-Grigoryev/telecom-support) (tau2-bench's telecom agent, tools, tasks and evaluator, unchanged).
 
 ### Pipeline interface (built)
 
@@ -160,9 +159,7 @@ runner's scorer is `hits(case, answer, trace=None)` (by default the run's trace,
 
 ### CI adapter (built)
 
-In this repository the job gates SROIE and, on GitHub, skips it when `git diff` against the target branch shows no
-change to the example, the gate's code or the CI files; when the diff fails, it runs. The job
-checks that it can comment, gets the golden set (from the repository, a GitHub release or a GitLab package) and validates
+A project's pull request job checks that it can comment, gets the golden set (from the repository, a GitHub release or a GitLab package) and validates
 it, then runs `python -m llm_release_gate.pr BASE_REV PROJECT_DIR CONFIG GOLDEN_DIR OUT_DIR` from the repository's
 root: it checks out the target
 branch in a worktree, runs both versions in parallel, each with its own code (one run per case: the runner's default `-k

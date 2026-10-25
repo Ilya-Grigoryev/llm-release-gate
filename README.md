@@ -10,7 +10,7 @@ The gate runs each case several times and compares the two versions case by case
 
 ## Status
 
-Work in progress. Built: the naive gate (one run per version against a fixed threshold) with a comment on every pull or merge request, cost and latency budgets, traces of agent runs, checks over the answer and the trace, and any program as a pipeline. The statistical rules come next. [`examples/sroie/`](examples/sroie/) extracts company, address, date and total from receipts in [SROIE](https://rrc.cvc.uab.es/?ch=13) (ICDAR 2019), from the OCR text or from the scan. [workbench-support](https://github.com/Ilya-Grigoryev/workbench-support), in its own repository, is the support agent of a coworking space, with tools on its booking system and its own test cases, under the gate alone on a ticket or in a chat with a simulated user. [telecom-support](https://github.com/Ilya-Grigoryev/telecom-support), also in its own repository, is a mobile carrier's support agent built on the telecom domain of [tau2-bench](https://github.com/sierra-research/tau2-bench): tau2's agent, tools, tasks and evaluator, unchanged.
+Work in progress. Built: the naive gate (one run per version against a fixed threshold) with a comment on every pull or merge request, cost and latency budgets, traces of agent runs, checks over the answer and the trace, and any program as a pipeline. The statistical rules come next. Three projects use the gate, each in its own repository: [receipt-intake](https://github.com/Ilya-Grigoryev/receipt-intake) reads seller, date, address and total from receipt scans for a bookkeeping team (test receipts from [SROIE](https://rrc.cvc.uab.es/?ch=13), ICDAR 2019), from the OCR text or from the scan; [workbench-support](https://github.com/Ilya-Grigoryev/workbench-support) is the support agent of a coworking space, with tools on its booking system and its own test cases, alone on a ticket or in a chat with a simulated user; [telecom-support](https://github.com/Ilya-Grigoryev/telecom-support) is a mobile carrier's support agent built on the telecom domain of [tau2-bench](https://github.com/sierra-research/tau2-bench): tau2's agent, tools, tasks and evaluator, unchanged.
 
 [`docs/design.md`](docs/design.md) describes the parts, the flow of a merge request and the record of a run.
 
@@ -34,7 +34,7 @@ time, the gate's comment warns about it, and the gate refuses to compare two ver
 pause longer than an hour, or that asked for the same model and got different ones from the provider (or runs that do
 not say which one they got: report `model`).
 
-The gate's code imports no pipeline. Give your module a `VERSION` and bump it when your code changes what the model gets. [`examples/sroie/`](examples/sroie/) is a whole project set up this way.
+The gate's code imports no pipeline. Give your module a `VERSION` and bump it when your code changes what the model gets. [receipt-intake](https://github.com/Ilya-Grigoryev/receipt-intake) is a whole project set up this way.
 
 ### Any program
 
@@ -127,8 +127,8 @@ Each pipeline version is a YAML file: pipeline module, model (a dated snapshot i
 The runner calls the pipeline K times per case of a golden set and appends one JSON record per call, stamped with the config hash, the set hash and the scorer version. A rerun pays only for what is missing. The runner retries rate limits, timeouts and server errors with backoff 1, 2, 4... s and stops when the account is out of quota. `--prices` puts a list price on each model step of a trace; the raw provider responses go to `<stem>.native.jsonl`.
 
 ```sh
-# from examples/sroie: the scan on the SROIE golden set, 3 runs per receipt
-uv run --env-file ../../.env python -m llm_release_gate.runner --config configs/sroie-image.yaml --golden ../../data/golden/sroie -k 3 --out ../../data/runs/image.jsonl
+# in receipt-intake: the scan version on its golden set, 3 runs per receipt
+uv run --env-file .env python -m llm_release_gate.runner --config configs/sroie-image.yaml --golden data/golden/sroie -k 3 --out runs/image.jsonl
 ```
 
 ## The naive gate
@@ -168,7 +168,7 @@ Each case is a YAML file with its inputs next to it; `src/llm_release_gate/case.
 uv run python -m llm_release_gate.golden validate tests/fixtures/golden
 ```
 
-`validate` checks the schema, unique ids and that every input exists inside the set, then prints a sha256 over the parsed cases and the input bytes. Reformatting a case keeps the hash. Editing an expectation or an input changes it. With `--manifest` it also fails unless the ids and the hash match. The SROIE set stays out of git; [`examples/sroie/`](examples/sroie/) rebuilds it from a manifest of receipt ids.
+`validate` checks the schema, unique ids and that every input exists inside the set, then prints a sha256 over the parsed cases and the input bytes. Reformatting a case keeps the hash. Editing an expectation or an input changes it. With `--manifest` it also fails unless the ids and the hash match. A set that may not go into git (receipt scans in [receipt-intake](https://github.com/Ilya-Grigoryev/receipt-intake)) is rebuilt from a manifest of ids.
 
 ## Scoring
 
@@ -195,23 +195,15 @@ A check compares against its own `value` or against the case's expected value at
 
 ## CI
 
-`.gitlab-ci.yml` and `.github/workflows/ci.yml` run the same checks on every push: lint, the tests of the gate and of each example, and a validation of the test golden set.
+`.gitlab-ci.yml` and `.github/workflows/ci.yml` run the same checks on every push: lint, the tests and a validation of the test golden set.
 
-On a pull or merge request, `release-gate` gates the SROIE example; on GitHub it skips a request that touches neither the example, the gate's code nor the CI files. `python -m llm_release_gate.pr BASE_REV PROJECT_DIR CONFIG GOLDEN_DIR OUT_DIR`, run from the repository's root, runs the version from the target branch and the one from the request on the golden set, in parallel and each with its own code, then the gate. `python -m llm_release_gate.comment` posts the verdict as one comment (one per name with `--name`) and edits it on later pushes. The job only advises until you make it a required check (GitHub) or drop `allow_failure` (GitLab). A run costs about $0.06 for SROIE (30 scans per version).
+A project gates its own pull requests with two commands, the gate installed as a dependency. `python -m llm_release_gate.pr BASE_REV PROJECT_DIR CONFIG GOLDEN_DIR OUT_DIR`, run from the repository's root, runs the version from the target branch and the one from the request on the golden set, in parallel and each with its own code, then the gate. `python -m llm_release_gate.comment` posts the verdict as one comment (one per name with `--name`) and edits it on later pushes; `--check` tells beforehand whether the job can comment. The job only advises until it is a required check. The three projects above do this on GitHub Actions, for about $0.06 (receipt-intake), $0.04 (workbench-support) and $0.20 (telecom-support) a pull request; their `.github/workflows/ci.yml` shows the steps.
 
-A project in its own repository uses the same two commands: [workbench-support](https://github.com/Ilya-Grigoryev/workbench-support), a support agent of a coworking space, installs the gate from git and gates every pull request for about $0.04.
-
-It needs:
-
-- `OPENAI_API_KEY` as a GitHub secret or a masked GitLab CI/CD variable;
-- the golden set archive, `sroie.tar.gz` of `data/golden/sroie`: the release `golden-sroie-9436cc87` on GitHub, the generic package `golden-sroie/9436cc87` on GitLab; the job checks it against `examples/sroie/golden/sroie.yaml`;
-- on GitLab, `GITLAB_TOKEN`: a project access token with the `api` scope, to write the comment.
-
-`python -m llm_release_gate.comment comment.md --dry-run` prints the comment and posts nothing.
+The job needs the provider's key (`OPENAI_API_KEY`) as a secret and, on GitLab, `GITLAB_TOKEN`, a project access token with the `api` scope, to write the comment. `python -m llm_release_gate.comment comment.md --dry-run` prints the comment and posts nothing.
 
 ## License
 
-MIT, see [`LICENSE`](LICENSE). The SROIE data is not part of this repository and keeps its own terms.
+MIT, see [`LICENSE`](LICENSE).
 
 ## Context
 
