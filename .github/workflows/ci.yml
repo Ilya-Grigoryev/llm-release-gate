@@ -31,7 +31,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        example: [sroie, support-agent]
+        example: [sroie, support-agent, tau2]
     defaults:
       run:
         working-directory: examples/${{ matrix.example }}
@@ -42,6 +42,8 @@ jobs:
           python-version: "3.12"
       - run: pip install --quiet uv==0.11.25
       - run: uv sync --locked
+      - if: matrix.example == 'tau2'
+        run: sh fetch_data.sh
       - run: uv run pytest
 
   # Base version (the target branch) against the candidate (this pull request merged into it) on

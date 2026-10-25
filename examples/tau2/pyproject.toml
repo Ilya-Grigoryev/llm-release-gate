@@ -1,0 +1,30 @@
+[project]
+name = "tau2-example"
+version = "0.1.0"
+description = "The telecom domain of tau2-bench v1.0.1 behind the gate: tau2's own agent, user simulator and evaluator"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"  # tau2 imports audioop, gone in 3.13
+dependencies = [
+    "llm-release-gate",
+    "pyyaml>=6.0.3",
+    "tau2",
+]
+
+[tool.uv.sources]
+llm-release-gate = { path = "../..", editable = true }
+tau2 = { git = "https://github.com/sierra-research/tau2-bench", tag = "v1.0.1" }
+
+[build-system]
+requires = ["uv_build>=0.11.25,<0.12.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "tau2_example"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

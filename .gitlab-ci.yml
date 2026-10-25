@@ -28,12 +28,13 @@ example-test:
   extends: .python
   parallel:
     matrix:
-      - EXAMPLE: [sroie, support-agent]
+      - EXAMPLE: [sroie, support-agent, tau2]
   before_script:
     - pip install --quiet uv==0.11.25
     - cd examples/$EXAMPLE
     - uv sync --locked
   script:
+    - if [ "$EXAMPLE" = tau2 ]; then sh fetch_data.sh; fi
     - uv run pytest
 
 # Base version (the target branch) against the candidate (this merge request) on the golden set from
