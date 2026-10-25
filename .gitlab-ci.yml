@@ -22,3 +22,13 @@ validate:
   extends: .python
   script:
     - uv run python -m llm_release_gate.golden validate tests/fixtures/golden
+
+dashboard:
+  image: node:22-slim
+  script:
+    - cd dashboard
+    - npm ci
+    - npm run lint
+    - npm run typecheck
+    - npm test
+    - npm run build

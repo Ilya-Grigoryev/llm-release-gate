@@ -21,7 +21,7 @@ target architecture.
 | Budget | `budget.py`, `gate.py` | cost of the decision; cost and latency limits | built |
 | Report and comment | `gate.py`, `comment.py` | Markdown and JSON verdict; one comment on the pull or merge request, edited on later pushes | built |
 | CI adapter | `action.yml`, `setup/action.yml`, `pr.py` + `pr.sh`, `comment.py` | runs both versions of a request and posts the verdict | built (a GitHub Action; the commands for any CI) |
-| Dashboard | — | history of merge requests, base against candidate down to a trace step | planned |
+| Dashboard | `dashboard/` (Next.js) | the gate's runs per repository: history of pull requests, a run's cases, a case's answers, checks and steps on both sides | built (first version) |
 
 Projects use the gate as a dependency, each in its own repository: [receipt-intake](https://github.com/Ilya-Grigoryev/receipt-intake) (receipt
 extraction from OCR text or a scan, in one model call or two), [workbench-support](https://github.com/Ilya-Grigoryev/workbench-support) (a tool-using
@@ -204,6 +204,17 @@ flowchart LR
     report --> comment
 ```
 
+### Dashboard (built, first version)
+
+A web app in `dashboard/` (Next.js, on Vercel), with its own README. A GitHub App installed on a project's repositories
+receives `workflow_run`; when a run finishes, the app downloads its `release-gate*` artifacts and stores one row per
+artifact in Postgres: the run's metadata, the verdict, the comment and the records the gate compared (the last error-free
+one per case and repetition, as the gate reads them). Installing the App reads the runs GitHub still keeps; the project's
+workflow needs no change and no secret. Signing in goes through the same App, so a user sees the repositories where it is
+installed and they have access on GitHub. Pages: the projects; a project's runs over time (base and candidate mean per
+run, same-version runs marked); a run's verdict and its cases, changed ones first; a case's answer, checks and steps on
+both sides.
+
 ## Merge request flow
 
 ```mermaid
@@ -289,6 +300,5 @@ about 25-fold for a long dialog.
   config hash changed, a JUnit report.
 - **Adapters**: a benchmark adapter (τ²-bench telecom), a harness agent in a container through `pipeline: command`,
   retrieval-augmented generation (to be decided), import of OpenTelemetry traces.
-- **Dashboard**: `llm-release-gate serve` (FastAPI and SQLite, in a Docker image): the history of merge requests and of the
-  main branch's mean with the anchor line, the base against the candidate down to a trace step, noise per case and check,
-  cost and time against the budget; results arrive from CI.
+- **Dashboard**: the main branch's mean with the anchor line, why a verdict passed or blocked (with its interval), noise
+  per case and check, cost and time against the budget, a diff of config and prompt, a demo without signing in.

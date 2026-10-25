@@ -10,7 +10,7 @@ The gate runs each case several times and compares the two versions case by case
 
 ## Status
 
-Work in progress. Built: the naive gate (one run per version against a fixed threshold) with a comment on every pull or merge request, cost and latency budgets, traces of agent runs, checks over the answer and the trace, and any program as a pipeline. The statistical rules come next. Three projects use the gate, each in its own repository: [receipt-intake](https://github.com/Ilya-Grigoryev/receipt-intake) reads seller, date, address and total from receipt scans for a bookkeeping team (test receipts from [SROIE](https://rrc.cvc.uab.es/?ch=13), ICDAR 2019), from the OCR text or from the scan; [workbench-support](https://github.com/Ilya-Grigoryev/workbench-support) is the support agent of a coworking space, with tools on its booking system and its own test cases, alone on a ticket or in a chat with a simulated user; [telecom-support](https://github.com/Ilya-Grigoryev/telecom-support) is a mobile carrier's support agent built on the telecom domain of [tau2-bench](https://github.com/sierra-research/tau2-bench): tau2's agent, tools, tasks and evaluator, unchanged.
+Work in progress. Built: the naive gate (one run per version against a fixed threshold) with a comment on every pull or merge request, cost and latency budgets, traces of agent runs, checks over the answer and the trace, any program as a pipeline, and a [dashboard](#dashboard) of the runs. The statistical rules come next. Three projects use the gate, each in its own repository: [receipt-intake](https://github.com/Ilya-Grigoryev/receipt-intake) reads seller, date, address and total from receipt scans for a bookkeeping team (test receipts from [SROIE](https://rrc.cvc.uab.es/?ch=13), ICDAR 2019), from the OCR text or from the scan; [workbench-support](https://github.com/Ilya-Grigoryev/workbench-support) is the support agent of a coworking space, with tools on its booking system and its own test cases, alone on a ticket or in a chat with a simulated user; [telecom-support](https://github.com/Ilya-Grigoryev/telecom-support) is a mobile carrier's support agent built on the telecom domain of [tau2-bench](https://github.com/sierra-research/tau2-bench): tau2's agent, tools, tasks and evaluator, unchanged.
 
 [`docs/design.md`](docs/design.md) describes the parts, the flow of a merge request and the record of a run.
 
@@ -246,10 +246,17 @@ Outside GitHub Actions the same two commands do the work, from the repository's 
 token with the `api` scope); `--check` tells beforehand whether the job can comment, `--dry-run` prints the comment and
 posts nothing.
 
+## Dashboard
+
+[`dashboard/`](dashboard/) is a web app that keeps the gate's runs: https://llm-release-gate.vercel.app. Install its
+GitHub App on the repositories that run the gate action and sign in with GitHub to see each pull request's verdict, the
+cases that changed between the two versions, and the answer, checks and steps of every run on both sides. The project's
+workflow needs no change; how it works and how to run it is in its [README](dashboard/README.md).
+
 ## CI
 
 `.gitlab-ci.yml` and `.github/workflows/ci.yml` run the same checks on every push: lint, the tests and a validation of
-the test golden set.
+the test golden set; for the dashboard lint, types, tests and a build.
 
 ## License
 
