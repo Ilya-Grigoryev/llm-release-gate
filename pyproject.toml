@@ -3,6 +3,8 @@ name = "llm-release-gate"
 version = "0.1.0"
 description = "CI release gate for LLM pipelines"
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [
     { name = "Ilia Grigorev", email = "a12221388@unet.univie.ac.at" }
 ]

@@ -145,6 +145,10 @@ It needs:
 
 `python -m llm_release_gate.comment comment.md --dry-run` prints the comment and posts nothing.
 
+## License
+
+MIT, see [`LICENSE`](LICENSE). The SROIE data is not part of this repository and keeps its own terms.
+
 ## Context
 
 Bachelor thesis at the University of Vienna, Software Architecture group. Supervisor: Dr. Theodoros Theodoropoulos.
