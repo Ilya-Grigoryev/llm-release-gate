@@ -193,13 +193,57 @@ Answer checks: `field_match`, `exact`, `contains`, `regex`, `number` (with `tol`
 
 A check compares against its own `value` or against the case's expected value at the path `expected` (`field_match` reads `expected.fields` by default); `field` picks a part of the answer. A check over many items reports one result each, as `id.field` or `id.N:tool`. `exact` ignores surrounding spaces, `contains` also ignores case; `number` takes plain numbers and amounts such as `RM 7.70`. In `args`, a value must match exactly and a mapping is a set of operators (`{eq: {...}}` matches a mapping). `called` and `active` count calls that went through; `not_called` also counts a call the tool refused, since the attempt is the conduct being checked. `max_steps` passes a run with no model calls. A missing answer is not a refusal. `aggregate` applies to `field_match` too; `all` needs every scored result to be full. In `args`, `gt`, `gte`, `lt` and `lte` take a number and `in` a list of allowed values. `actions` lists `{tool, args}` (or names them with `expected`), `doc_found` takes `ids`, `state` takes `key` (`final_state` or `state_change`). `order` looks at calls that went through or whose outcome the trace does not know (`unknown`). A `function` check may carry its own keys and must return true, false, a share or nothing. `golden validate` checks every configuration against the case's expected values without running it, and rejects keys a check does not know.
 
+## Use it in your project
+
+1. Add the gate as a dependency, pinned to a release:
+   ```toml
+   [tool.uv.sources]
+   llm-release-gate = { git = "https://github.com/Ilya-Grigoryev/llm-release-gate", tag = "v0.1.0-dev.2" }
+   ```
+2. Write an adapter (`build(config)` and `run(case)`, [Your pipeline](#your-pipeline)), a config for the version in
+   production and a golden set.
+3. Add the gate to the pull request workflow; put the provider's key in the repository's secrets:
+   ```yaml
+   on: pull_request
+   jobs:
+     release-gate:
+       runs-on: ubuntu-latest
+       permissions: {contents: read, pull-requests: write}
+       env:
+         OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+       steps:
+         - uses: actions/checkout@v7
+         - uses: Ilya-Grigoryev/llm-release-gate/setup@v0.1.0-dev.2
+           with:
+             gate-ssh-key: ${{ secrets.LLM_RELEASE_GATE_KEY }}  # while this repository is private
+         - uses: Ilya-Grigoryev/llm-release-gate@v0.1.0-dev.2
+           with:
+             config: configs/production.yaml
+             golden: golden/smoke
+   ```
+
+`setup` installs Python, uv and the project's locked environment. The gate action checks that it can comment, validates
+the golden set (against a `manifest` if given), runs the version from the target branch and the one from the request on
+it, in parallel and each with its own code, compares them and posts the verdict as one comment, edited on later pushes
+(one per `name` when a request gates several pipelines). It keeps the records as an artifact and fails the job with the
+gate's verdict; the job only advises until it is made a required check. A golden set that stays out of git is fetched or
+built in a step between the two. While this repository is private, a project needs read access to it: a read-only
+deploy key passed as `gate-ssh-key`, and the owner's setting that lets other repositories use its actions.
+
+Three projects use it, each with its own `.github/workflows/ci.yml`: [receipt-intake](https://github.com/Ilya-Grigoryev/receipt-intake)
+(about $0.06 a pull request), [workbench-support](https://github.com/Ilya-Grigoryev/workbench-support) ($0.04) and
+[telecom-support](https://github.com/Ilya-Grigoryev/telecom-support) ($0.20).
+
+Outside GitHub Actions the same two commands do the work, from the repository's root:
+`python -m llm_release_gate.pr BASE_REV PROJECT_DIR CONFIG GOLDEN_DIR OUT_DIR` runs both versions and the gate,
+`python -m llm_release_gate.comment OUT_DIR/comment.md` posts the verdict (on GitLab with `GITLAB_TOKEN`, a project access
+token with the `api` scope); `--check` tells beforehand whether the job can comment, `--dry-run` prints the comment and
+posts nothing.
+
 ## CI
 
-`.gitlab-ci.yml` and `.github/workflows/ci.yml` run the same checks on every push: lint, the tests and a validation of the test golden set.
-
-A project gates its own pull requests with two commands, the gate installed as a dependency. `python -m llm_release_gate.pr BASE_REV PROJECT_DIR CONFIG GOLDEN_DIR OUT_DIR`, run from the repository's root, runs the version from the target branch and the one from the request on the golden set, in parallel and each with its own code, then the gate. `python -m llm_release_gate.comment` posts the verdict as one comment (one per name with `--name`) and edits it on later pushes; `--check` tells beforehand whether the job can comment. The job only advises until it is a required check. The three projects above do this on GitHub Actions, for about $0.06 (receipt-intake), $0.04 (workbench-support) and $0.20 (telecom-support) a pull request; their `.github/workflows/ci.yml` shows the steps.
-
-The job needs the provider's key (`OPENAI_API_KEY`) as a secret, read access to this repository while it is private (the three projects use a read-only deploy key) and, on GitLab, `GITLAB_TOKEN`, a project access token with the `api` scope, to write the comment. `python -m llm_release_gate.comment comment.md --dry-run` prints the comment and posts nothing.
+`.gitlab-ci.yml` and `.github/workflows/ci.yml` run the same checks on every push: lint, the tests and a validation of
+the test golden set.
 
 ## License
 

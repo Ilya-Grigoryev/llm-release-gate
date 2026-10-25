@@ -1,0 +1,67 @@
+name: llm-release-gate
+description: Run the target branch's version and this pull request's on a golden set, compare them and comment the verdict.
+inputs:
+  config:
+    description: The version's config, relative to the project's directory.
+    required: true
+  golden:
+    description: The golden set's directory, relative to the project's directory.
+    required: true
+  manifest:
+    description: A manifest the golden set must match (ids and hash), relative to the project's directory.
+    default: ""
+  project-dir:
+    description: The project's directory in the repository.
+    default: "."
+  name:
+    description: Names the comment and the artifact, so that several pipelines of one request keep one comment each.
+    default: ""
+  github-token:
+    description: Writes the comment; needs pull-requests write.
+    default: ${{ github.token }}
+runs:
+  using: composite
+  steps:
+    - name: can comment
+      shell: bash
+      working-directory: ${{ inputs.project-dir }}
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+      run: |
+        command -v uv > /dev/null || { echo "::error::run Ilya-Grigoryev/llm-release-gate/setup first"; exit 1; }
+        uv run python -m llm_release_gate.comment --check
+    - name: golden set
+      shell: bash
+      working-directory: ${{ inputs.project-dir }}
+      env:
+        GOLDEN: ${{ inputs.golden }}
+        MANIFEST: ${{ inputs.manifest }}
+      run: uv run python -m llm_release_gate.golden validate "$GOLDEN" ${MANIFEST:+--manifest "$MANIFEST"}
+    - name: gate
+      shell: bash
+      env:
+        PROJECT: ${{ inputs.project-dir }}
+        CONFIG: ${{ inputs.config }}
+        GOLDEN: ${{ inputs.golden }}
+        OUT: ${{ runner.temp }}/llm-release-gate
+      run: |
+        git fetch --depth=1 origin "$GITHUB_BASE_REF"
+        uv run --project "$PROJECT" python -m llm_release_gate.pr FETCH_HEAD "$PROJECT" "$CONFIG" "$PROJECT/$GOLDEN" "$OUT"
+    - name: comment
+      if: ${{ !cancelled() }}
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        PROJECT: ${{ inputs.project-dir }}
+        NAME: ${{ inputs.name }}
+        OUT: ${{ runner.temp }}/llm-release-gate
+      run: uv run --project "$PROJECT" python -m llm_release_gate.comment "$OUT/comment.md" ${NAME:+--name "$NAME"}
+    - uses: actions/upload-artifact@v7
+      if: ${{ !cancelled() }}
+      with:
+        name: release-gate${{ inputs.name != '' && format('-{0}', inputs.name) || '' }}-${{ github.run_attempt }}
+        path: |
+          ${{ runner.temp }}/llm-release-gate/*.jsonl
+          ${{ runner.temp }}/llm-release-gate/*.json
+          ${{ runner.temp }}/llm-release-gate/*.md
+          ${{ runner.temp }}/llm-release-gate/*.log

@@ -1,0 +1,36 @@
+name: llm-release-gate setup
+description: Python, uv and the project's locked environment, with read access to the gate's repository while it is private.
+inputs:
+  project-dir:
+    description: The project's directory in the repository.
+    default: "."
+  gate-ssh-key:
+    description: A read-only deploy key of Ilya-Grigoryev/llm-release-gate, as long as that repository is private.
+    default: ""
+  python-version:
+    default: "3.12"
+  uv-version:
+    default: "0.11.25"
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v7
+      with:
+        python-version: ${{ inputs.python-version }}
+    - shell: bash
+      env:
+        UV_VERSION: ${{ inputs.uv-version }}
+      run: pip install --quiet "uv==$UV_VERSION"
+    - if: inputs.gate-ssh-key != ''
+      shell: bash
+      env:
+        GATE_KEY: ${{ inputs.gate-ssh-key }}
+      run: |
+        mkdir -p ~/.ssh && printf '%s\n' "$GATE_KEY" > ~/.ssh/llm-release-gate && chmod 600 ~/.ssh/llm-release-gate
+        echo "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl" >> ~/.ssh/known_hosts
+        git config --global core.sshCommand "ssh -i ~/.ssh/llm-release-gate -o IdentitiesOnly=yes"
+        git config --global url."ssh://git@github.com/Ilya-Grigoryev/llm-release-gate".insteadOf \
+          https://github.com/Ilya-Grigoryev/llm-release-gate
+    - shell: bash
+      working-directory: ${{ inputs.project-dir }}
+      run: uv sync --locked
