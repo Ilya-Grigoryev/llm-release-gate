@@ -10,7 +10,7 @@ from test_agent import FakeClient, call
 from llm_release_gate import runner
 from llm_release_gate.golden import load_cases, validate
 from llm_release_gate.metrics import hits
-from llm_release_gate.pipeline import Retryable, config_hash, load_config
+from llm_release_gate.pipeline import Fatal, Retryable, config_hash, load_config
 from llm_release_gate.runner import read_records
 
 EXAMPLE = Path(__file__).parent.parent
@@ -92,6 +92,10 @@ def test_a_good_run_passes_every_check_with_a_trace(tmp_path):
     ]
     assert [s.get("call_id") for s in t["steps"] if s["kind"] == "tool"] == ["c1", "c2"]
     assert t["state_change"] == {"cancelled": ["B-202"]} and t["stop"] == "done"
+    assert any(
+        b["id"] == "B-202" and b["status"] == "cancelled"
+        for b in t["final_state"]["bookings"]
+    )
     assert r["output"]["reply"].startswith("Cancelled B-202")
     assert r["usage"]["agent"]["llm_calls"] == 3
 
@@ -132,6 +136,41 @@ def test_a_chat_records_the_member_apart(tmp_path):
     )
     actors = [s["actor"] for s in r["trace"]["steps"] if s["kind"] == "llm"]
     assert actors == ["user", "agent", "agent", "agent", "user"]
+
+
+@pytest.mark.parametrize(
+    "error, expected",
+    [
+        (
+            lambda r: openai.RateLimitError(
+                "slow", response=r(429), body={"code": "insufficient_quota"}
+            ),
+            Fatal,
+        ),
+        (
+            lambda r: openai.AuthenticationError("bad key", response=r(401), body=None),
+            Fatal,
+        ),
+        (lambda r: openai.APIConnectionError(request=None), Retryable),
+    ],
+)
+def test_provider_errors_map_to_retry_or_stop(error, expected):
+    def response(code):
+        return type("R", (), {"status_code": code, "headers": {}, "request": None})()
+
+    class Failing:
+        def __init__(self):
+            self.chat = type("C", (), {"completions": self})()
+
+        def create(self, **request):
+            e = error(response)
+            if isinstance(e, openai.RateLimitError):
+                e.code = "insufficient_quota"
+            raise e
+
+    pipeline = gate_adapter.build(load_config(CONFIG), client=Failing())
+    with pytest.raises(expected):
+        pipeline.run(load_cases(EXAMPLE / "golden" / "solo")[0])
 
 
 def test_rate_limits_become_retries():

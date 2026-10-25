@@ -69,9 +69,11 @@ the work, can still match it; checks on the agent's own steps come with the gate
 
 ## Under the gate
 
-`configs/support.yaml` is the version under test: the agent's model, `policy.md` and `tools.yaml`. Its hash changes when
+`configs/support.yaml` is the version under test: the agent's model, `policy.md` and `tools.yaml`; the step limit
+(`MAX_STEPS` in `gate_adapter.py`) belongs to the version through the module's `VERSION`, so bump it when you change the
+limit. Its hash changes when
 any of them does. `golden/solo` and `golden/chat` are the test sets, built from `cases/` (`python -m support_agent.golden`;
-a test checks they match). A chat case lists `cases/simulator.yaml` as an input, so the simulator belongs to the set's
+a test checks they match). A chat case lists a copy of `cases/simulator.yaml` (`inputs/simulator.yaml`, kept in step by a test) as an input, so the simulator belongs to the set's
 hash, not to the version.
 
 Each golden case passes only if every check does (`aggregate: all`): the database changed as the reference actions
