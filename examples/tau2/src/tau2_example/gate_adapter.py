@@ -16,6 +16,7 @@ from typing import Any
 import litellm
 import yaml
 from tau2.data_model.tasks import Task
+from tau2.domains.telecom.utils import TELECOM_DB_PATH, TELECOM_USER_DB_PATH
 from tau2.evaluator.evaluator import EvaluationType
 from tau2.orchestrator.orchestrator import Orchestrator
 from tau2.runner import (
@@ -47,6 +48,17 @@ STOP = (
     litellm.PermissionDeniedError,
     litellm.NotFoundError,
 )
+# tau2's files a case depends on besides its task: the starting world, the simulator's guidelines
+PINNED = {
+    "db": TELECOM_DB_PATH,
+    "user_db": TELECOM_USER_DB_PATH,
+    "user_guidelines": GLOBAL_USER_SIM_GUIDELINES_PATH_TOOLS,
+}
+TOKENS = (
+    "###STOP###",
+    "###TRANSFER###",
+    "###OUT-OF-SCOPE###",
+)  # how the simulated user ends a chat
 
 
 def sha256(path: Path) -> str:
@@ -83,14 +95,9 @@ class Adapter:
             )
         user = harness.get("user")  # none: the agent works the ticket alone
         solo = user is None
-        if (
-            user
-            and sha256(GLOBAL_USER_SIM_GUIDELINES_PATH_TOOLS)
-            != user["guidelines_sha256"]
-        ):
-            raise Fatal(
-                f"{GLOBAL_USER_SIM_GUIDELINES_PATH_TOOLS} differs from the simulator in the golden set"
-            )
+        for name, digest in harness["pinned"].items():
+            if sha256(PINNED[name]) != digest:
+                raise Fatal(f"{PINNED[name]} differs from the golden set's")
         no_retry = {"num_retries": 0}  # the runner retries and counts retries
         env = build_environment(harness["domain"], solo_mode=solo)
         env.policy = self.policy(solo)
@@ -120,7 +127,7 @@ class Adapter:
             task=task,
             max_steps=harness["max_steps"],
             max_errors=harness["max_errors"],
-            seed=harness["seed"],
+            seed=harness["seed"],  # None: no seed reaches the provider
             solo_mode=solo,
             simulation_id=case.id,
         )
@@ -141,8 +148,6 @@ class Adapter:
         steps = record(sim.messages, self.config.model, user and user["model"])
         info = sim.reward_info
         stop = sim.termination_reason.value
-        if stop == "infrastructure_error":
-            raise Retryable(f"tau2 stopped the simulation: {stop}")
         if (t := trace.current()) is not None:
             t.stop = {
                 "agent_stop": "done",
@@ -151,6 +156,8 @@ class Adapter:
             }.get(stop, "error")
         agent_llm = [s for s in steps if s["kind"] == "llm" and s["actor"] == "agent"]
         texts = [s["text"] for s in agent_llm if s.get("text")]
+        user_llm = [s for s in steps if s["kind"] == "llm" and s["actor"] == "user"]
+        user_said = (user_llm[-1].get("text") or "") if user_llm else ""
         return Answer(
             output={
                 "reward": info.reward,
@@ -159,6 +166,7 @@ class Adapter:
                     for i, a in enumerate(info.env_assertions or [])
                 },
                 "termination": stop,
+                "user_token": next((k for k in TOKENS if k in user_said), None),
             },
             raw=texts[-1] if texts else "",
             input_tokens=sum(s["tokens_in"] for s in agent_llm),

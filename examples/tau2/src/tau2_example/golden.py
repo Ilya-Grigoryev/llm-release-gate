@@ -3,9 +3,9 @@
 A manifest (`golden/telecom-<mode>.yaml`, in git) is the source of truth: the set is rebuilt from its tau2 task ids
 (`tasks`; `ids` are the case ids that `golden validate --manifest` compares). Without
 one, the generator takes the `small` split and `--train` tasks sampled from `train` with `--seed` (the `test` split stays
-held out), and writes the manifest. Each case points to its tau2 task and to `run.yaml`: tau2's version, the run limits
-and, in a chat set, the user simulator (model, parameters, the hash of its guidelines), so the simulator is part of the
-set's hash. The checks: tau2's reward, each of its environment assertions, the expected actions the agent must take
+held out), and writes the manifest. Each case points to its tau2 task and to `run.yaml`: tau2's version, the run limits,
+the hashes of tau2's starting world and, in a chat set, the user simulator (model, parameters, the hash of its
+guidelines), so the world and the simulator are part of the set's hash. The checks: tau2's reward, each of its environment assertions, the expected actions the agent must take
 (all of them alone, the `assistant` ones in a chat) and that the agent called a tool at all.
 """
 
@@ -20,10 +20,10 @@ import yaml
 from tau2.runner import load_task_splits, load_tasks
 
 from llm_release_gate.golden import validate
-from tau2_example.gate_adapter import GLOBAL_USER_SIM_GUIDELINES_PATH_TOOLS
+from tau2_example.gate_adapter import PINNED
 
 HERE = Path(__file__).resolve().parents[2]
-SEED = 300  # tau2's default run seed
+SEED = None  # as in the other examples: tau2 would send one seed with every call of every repetition
 USER = {"model": "gpt-5.4-mini-2026-03-17", "params": {"temperature": 0}}
 
 
@@ -73,11 +73,12 @@ def build(
     inputs.mkdir(parents=True)
     run = {"tau2": importlib.metadata.version("tau2"), "domain": "telecom", "seed": SEED, "max_steps": 100,
            "max_errors": 10}  # fmt: skip
+    pinned = ["db", "user_db"] + (["user_guidelines"] if mode == "chat" else [])
+    run["pinned"] = {
+        k: hashlib.sha256(PINNED[k].read_bytes()).hexdigest() for k in pinned
+    }
     if mode == "chat":
-        guidelines = hashlib.sha256(
-            GLOBAL_USER_SIM_GUIDELINES_PATH_TOOLS.read_bytes()
-        ).hexdigest()
-        run["user"] = {**user, "guidelines_sha256": guidelines}
+        run["user"] = user
     (inputs / "run.yaml").write_text(yaml.safe_dump(run, sort_keys=False))
     for task_id in ids:
         task, cid = tasks[task_id], case_id(task_id)

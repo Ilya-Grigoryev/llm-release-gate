@@ -78,7 +78,9 @@ def script(monkeypatch):
     return install
 
 
-def config(tmp_path, main_solo=POLICY / "main_policy_solo.md"):
+def config(
+    tmp_path, main_solo=POLICY / "main_policy_solo.md", main=POLICY / "main_policy.md"
+):
     path = tmp_path / "telecom.yaml"
     path.write_text(
         yaml.safe_dump(
@@ -86,7 +88,7 @@ def config(tmp_path, main_solo=POLICY / "main_policy_solo.md"):
                 "pipeline": "tau2_example.gate_adapter",
                 "model": MODEL,
                 "prompt": {
-                    "main": str(POLICY / "main_policy.md"),
+                    "main": str(main),
                     "main_solo": str(main_solo),
                     "tech_support": str(POLICY / "tech_support_manual.md"),
                 },
@@ -187,6 +189,52 @@ def test_a_chat_records_the_simulated_user_as_its_own_actor(tmp_path, script):
         t.steps[1]["model"] == "sim-model-2026-01-01" and answer.model is None
     )  # the agent made no model call
     assert s.requests[0]["model"] == golden.USER["model"] and t.stop == "user_stop"
+    assert answer.output["user_token"] == "###STOP###"
+
+
+def test_a_simulator_that_fixes_the_phone_alone_fails_agent_acted(tmp_path, script):
+    """The case of smoke 24.10.: the simulated user toggles roaming itself, the agent never calls a tool."""
+    script(
+        [
+            response(calls=[("u0", "toggle_roaming", {})], model="sim-2026-01-01"),
+            response("###STOP###"),
+        ]
+    )
+    out_dir = golden_set(tmp_path, "chat")
+    out = tmp_path / "runs.jsonl"
+    runner.run(load_pipeline(config(tmp_path)), load_cases(out_dir), 1, out, config_hash="c" * 64,
+               set_hash=validate(out_dir)[0], score=hits, workers=1)  # fmt: skip
+    [r] = read_records(out)
+    tools = [
+        (s["actor"], s["name"]) for s in r["trace"]["steps"] if s["kind"] == "tool"
+    ]
+    assert tools == [("user", "toggle_roaming")]
+    assert (
+        r["output"]["reward"] == 1.0
+        and r["hits"]["reward"]
+        and r["hits"]["agent-acted"] is False
+    )
+    assert r["score"] == 0.0
+
+
+def test_the_chat_policy_comes_from_the_config(tmp_path, script):
+    edited = tmp_path / "main_policy.md"
+    edited.write_text(
+        (POLICY / "main_policy.md").read_text() + "\nMARKER-CHAT-POLICY\n"
+    )
+    s = script(
+        [
+            response("Hi, my mobile data is slow."),
+            response("Which number is it?"),
+            response("###STOP###"),
+        ]
+    )
+    run_case(tmp_path, "chat", cfg=config(tmp_path, main=edited))
+    agent_system = s.requests[1]["messages"][0]["content"]
+    assert "MARKER-CHAT-POLICY" in agent_system
+    assert (
+        "MARKER-CHAT-POLICY" not in s.requests[0]["messages"][0]["content"]
+    )  # the user never sees it
 
 
 def test_a_rate_limit_retries_and_keeps_the_paid_steps(tmp_path, script):
@@ -216,14 +264,19 @@ def test_no_quota_stops_the_run(tmp_path, script):
         run_case(tmp_path)
 
 
-def test_a_simulator_that_differs_from_the_golden_set_stops_the_run(tmp_path, script):
-    out_dir = golden_set(tmp_path, "chat")
+@pytest.mark.parametrize(
+    "mode, pinned", [("chat", "user_guidelines"), ("solo", "db"), ("solo", "user_db")]
+)
+def test_tau2_files_that_differ_from_the_golden_set_stop_the_run(
+    tmp_path, script, mode, pinned
+):
+    out_dir = golden_set(tmp_path, mode)
     run_yaml = out_dir / "inputs" / "run.yaml"
     run = yaml.safe_load(run_yaml.read_text())
-    run["user"]["guidelines_sha256"] = "0" * 64
+    run["pinned"][pinned] = "0" * 64
     run_yaml.write_text(yaml.safe_dump(run))
     [case] = load_cases(out_dir)
-    with pytest.raises(Fatal, match="differs from the simulator"):
+    with pytest.raises(Fatal, match="differs from the golden set"):
         load_pipeline(config(tmp_path)).run(case)
 
 
