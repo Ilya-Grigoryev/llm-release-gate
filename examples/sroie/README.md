@@ -33,6 +33,22 @@ uv run python -m sroie_example.rescore ../../data/runs/2026-10-12/base-text-r*.j
 uv run pytest
 ```
 
+## In the browser
+
+```sh
+uv run --env-file ../../.env python -m sroie_example.web   # then open http://127.0.0.1:8767
+```
+
+Pick a receipt of the golden set (or open any `train` receipt by id, also as `#<id>` in the address) and read it with a
+version from `configs/`: the page shows the four fields against the labels, marked right or wrong by the gate's own
+`field_match`, with tokens, list price (`prices.yaml`) and time. **Read 3 more times** shows how much the answer moves
+between runs; a second version beside the first shows what a pull request would change. The two-call version also shows
+each call, which the gate cannot see yet. On the scan, the OCR lines that contain a field's value are outlined in the
+field's colour: a text search to help reading, not part of the score. The page builds each version with the gate's
+`load_config` and `load_pipeline`, so it runs exactly the version the gate hashes. Scans and labels are read from
+`../../data/SROIE2019/train` (`--data` for another split) and never copied. The server listens on
+127.0.0.1 unless you pass `--host`.
+
 ## One step or two
 
 `configs/sroie-steps.yaml` runs `sroie_example.steps`. Step 1 extracts the fields with the prompt of `sroie-text.yaml`; step 2 gets the receipt and those fields and checks them with `prompts/sroie_check.md`. A record holds the final answer and the tokens and time of both calls. To see whether the second call pays off, run both versions on the same set and let the gate compare them:
