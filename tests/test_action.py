@@ -35,14 +35,11 @@ def _step(name):
 
 
 @pytest.mark.parametrize("url", ["", "https://example.com/files/{name}"])
-def test_the_cases_step_keeps_text_and_says_where_the_rest_is(tmp_path, url):
-    for f in ("a.yaml", "inputs/a.txt", "inputs/a.jpg"):
-        (tmp_path / "cases" / f).parent.mkdir(parents=True, exist_ok=True)
-        (tmp_path / "cases" / f).write_text("x")
+def test_the_cases_step_says_where_the_other_files_are(tmp_path, url):
+    (tmp_path / "cases").mkdir()
     env = {"INPUTS_URL": url, "OUT": str(tmp_path), "PATH": "/usr/bin:/bin"}
     subprocess.run(["bash", "-c", _step("cases")["run"]], env=env, check=True)
-    cases = tmp_path / "cases"
-    left = {str(p.relative_to(cases)) for p in cases.rglob("*") if p.is_file()}
-    assert left == {"a.yaml", "inputs/a.txt"} | ({"inputs-url.txt"} if url else set())
+    written = tmp_path / "cases" / "inputs-url.txt"
+    assert written.exists() == bool(url)
     if url:
-        assert (cases / "inputs-url.txt").read_text() == url + "\n"
+        assert written.read_text() == url + "\n"

@@ -20,7 +20,7 @@ inputs:
     description: Writes the comment; needs pull-requests write.
     default: ${{ github.token }}
   cases:
-    description: Upload the golden set's case files and their text inputs as a second artifact, for a dashboard to show.
+    description: Upload the golden set's text files (cases and text inputs) as a second artifact, for a dashboard to show.
     default: "true"
   inputs-url:
     description: >-
@@ -83,10 +83,8 @@ runs:
       env:
         INPUTS_URL: ${{ inputs.inputs-url }}
         OUT: ${{ runner.temp }}/llm-release-gate${{ inputs.name != '' && format('-{0}', inputs.name) || '' }}
-      run: |
-        [ -d "$OUT/cases" ] || exit 0
-        find "$OUT/cases" -type f ! \( -name '*.yaml' -o -name '*.yml' -o -name '*.json' -o -name '*.txt' -o -name '*.md' -o -name '*.csv' \) -delete
-        if [ -n "$INPUTS_URL" ]; then printf '%s\n' "$INPUTS_URL" > "$OUT/cases/inputs-url.txt"; fi
+      run: |  # pr.sh copied only the set's text files
+        if [ -d "$OUT/cases" ] && [ -n "$INPUTS_URL" ]; then printf '%s\n' "$INPUTS_URL" > "$OUT/cases/inputs-url.txt"; fi
     - uses: actions/upload-artifact@v7
       if: ${{ !cancelled() && inputs.cases == 'true' }}
       with:

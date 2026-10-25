@@ -15,7 +15,7 @@ export type WorkflowRun = {
   pull_requests?: { number: number }[];
 };
 
-type Artifact = { id: number; name: string; expired: boolean; workflow_run?: { id: number } };
+type Artifact = { id: number; name: string; expired: boolean; size_in_bytes?: number; workflow_run?: { id: number } };
 type RepoRef = { id: number; full_name: string };
 
 /** Stores every gate artifact of one workflow run that is not stored yet; returns how many it stored. */
@@ -29,8 +29,7 @@ export async function ingestRun(token: string, repo: RepoRef, run: WorkflowRun):
     // A re-run keeps the artifacts of earlier attempts; each gets the metadata of its own attempt.
     const at = attempt === run.run_attempt ? run : await gh<WorkflowRun>(`/repos/${repo.full_name}/actions/runs/${run.id}/attempts/${attempt}`, token);
     const parsed = parseArtifact(await download(`/repos/${repo.full_name}/actions/artifacts/${a.id}/zip`, token));
-    const sibling = artifacts.find((c) => c.name === `${a.name}-cases` && !c.expired);
-    const cases = sibling ? parseCases(await download(`/repos/${repo.full_name}/actions/artifacts/${sibling.id}/zip`, token)) : null;
+    const cases = await readCases(token, repo, artifacts.find((c) => c.name === `${a.name}-cases` && !c.expired));
     const meta = {
       artifact_id: a.id,
       repo_id: repo.id,
@@ -49,6 +48,17 @@ export async function ingestRun(token: string, repo: RepoRef, run: WorkflowRun):
     stored++;
   }
   return stored;
+}
+
+/** The case files of a run, if its gate uploaded them; a problem with them never costs the run itself. */
+async function readCases(token: string, repo: RepoRef, artifact?: Artifact) {
+  if (!artifact || (artifact.size_in_bytes ?? 0) > 20 * 1024 * 1024) return null;
+  try {
+    return parseCases(await download(`/repos/${repo.full_name}/actions/artifacts/${artifact.id}/zip`, token));
+  } catch (e) {
+    console.error(`cases of ${repo.full_name} artifact ${artifact.id} unreadable`, e);
+    return null;
+  }
 }
 
 /** Stores the gate runs among the repository's 1,000 newest artifacts (GitHub deletes artifacts after 90 days by default). */

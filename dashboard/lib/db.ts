@@ -76,10 +76,10 @@ export async function runsOf(repoId: number): Promise<RunRow[]> {
   return (await sql().query(`select ${COLUMNS} from runs where repo_id = $1 order by runs.created_at desc limit 300`, [repoId])) as RunRow[];
 }
 
-export async function runOf(repoId: number, artifactId: string): Promise<RunFull | null> {
+export async function runOf(repoId: number, artifactId: string, withCases = false): Promise<RunFull | null> {
   if (!/^\d+$/.test(artifactId)) return null;
   const rows = await sql().query(
-    `select ${COLUMNS}, verdict, comment, base, candidate, cases from runs where repo_id = $1 and artifact_id = $2`,
+    `select ${COLUMNS}, verdict, comment, base, candidate, ${withCases ? "cases" : "null as cases"} from runs where repo_id = $1 and artifact_id = $2`,
     [repoId, artifactId],
   );
   return (rows[0] as RunFull) ?? null;

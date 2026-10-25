@@ -15,7 +15,9 @@ function One({ name, input }: { name: string; input: Input }) {
     return (
       <div>
         {head}
-        {input.url ? (
+        {input.large ? (
+          <p className="text-sm text-ink-3">{input.path}: too large to show here</p>
+        ) : input.url ? (
           <a href={input.url} target="_blank" rel="noreferrer" className="text-sm underline underline-offset-4 hover:text-ink">
             {input.path.slice(input.path.lastIndexOf("/") + 1)}
           </a>

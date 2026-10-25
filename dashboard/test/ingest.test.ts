@@ -63,6 +63,14 @@ describe("ingestRun", () => {
     expect(db.insertRun.mock.calls[1][3]).toBeNull();
     expect(github.download.mock.calls.map(([p]) => p.split("/").at(-2))).toEqual(["1", "6", "2"]);
   });
+
+  it("stores the run without cases when the cases artifact cannot be read", async () => {
+    github.gh.mockResolvedValue({ artifacts: [{ id: 1, name: "release-gate-1", expired: false }, { id: 6, name: "release-gate-1-cases", expired: false }] });
+    db.known.mockResolvedValue(new Set());
+    github.download.mockImplementation(async (path: string) => (path.includes("/artifacts/6/") ? new Uint8Array([1, 2, 3]) : zip));
+    expect(await ingestRun("t", repo, run(1))).toBe(1);
+    expect(db.insertRun.mock.calls[0][3]).toBeNull();
+  });
 });
 
 describe("backfill", () => {

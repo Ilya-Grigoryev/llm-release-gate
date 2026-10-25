@@ -33,7 +33,7 @@ function Answer({ rec, expected }: { rec: Rec; expected?: Record<string, unknown
               <dt className="text-ink-3">{key}</dt>
               <dd className="break-words">
                 {value == null ? "—" : String(value)}
-                {rec.hits?.[key] === false && expected && key in expected && (
+                {rec.hits?.[key] === false && expected && Object.hasOwn(expected, key) && (
                   <span className="block text-xs text-ink-3">expected {String(expected[key])}</span>
                 )}
               </dd>
@@ -111,7 +111,7 @@ function Side({ title, color, recs, flipped, expected }: { title: string; color:
 
 export default async function Case(props: PageProps<"/[owner]/[repo]/runs/[id]/[case]">) {
   const { owner, repo: name, id, case: raw } = await props.params;
-  const { repo, run } = await loadRun(owner, name, id, `/${owner}/${name}/runs/${id}/${raw}`);
+  const { repo, run } = await loadRun(owner, name, id, `/${owner}/${name}/runs/${id}/${raw}`, true);
   const row = compareCases(run.base, run.candidate).find((r) => r.case === raw || r.case === decode(raw));
   if (!row) notFound();
   const flipped = new Set(row.flipped);

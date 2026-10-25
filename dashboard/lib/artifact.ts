@@ -187,7 +187,7 @@ export function compareCases(base: Rec[], candidate: Rec[]): CaseRow[] {
 }
 
 /** One input of a case: a file of the golden set, with its text when it is small text, else where to find it. */
-export type Input = { path: string; text?: string; parsed?: unknown; url?: string };
+export type Input = { path: string; text?: string; parsed?: unknown; url?: string; large?: boolean };
 
 /** A case as the golden set defines it (id, input, expected, scoring), with its inputs. */
 export type CaseFile = { spec: Record<string, unknown>; inputs: Record<string, Input> };
@@ -199,22 +199,35 @@ const TEXT = /\.(ya?ml|json|txt|md|csv)$/i;
  */
 export function parseCases(zip: Uint8Array): Record<string, CaseFile> {
   const rel = (path: string) => (path.startsWith("cases/") ? path.slice("cases/".length) : path);
-  const files = unzipSync(zip, { filter: (f) => TEXT.test(f.name) && f.originalSize <= 64 * 1024 });
+  const present = new Set<string>();
+  const files = unzipSync(zip, {
+    filter: (f) => (present.add(rel(f.name)), TEXT.test(f.name) && f.originalSize <= 64 * 1024),
+  });
   const text = new Map(Object.entries(files).map(([path, bytes]) => [rel(path), strFromU8(bytes)]));
   const template = text.get("inputs-url.txt")?.trim();
   const url = (ref: string) =>
     template?.startsWith("https://")
-      ? template.replaceAll("{path}", ref).replaceAll("{name}", ref.slice(ref.lastIndexOf("/") + 1))
+      ? template
+          .replaceAll("{path}", ref.split("/").map(encodeURIComponent).join("/"))
+          .replaceAll("{name}", encodeURIComponent(ref.slice(ref.lastIndexOf("/") + 1)))
       : undefined;
   const cases: Record<string, CaseFile> = {};
   for (const [path, body] of text) {
     if (path.includes("/") || !/\.ya?ml$/i.test(path)) continue; // case files sit at the set's root
     const spec = structured(path, body) as Record<string, unknown> | undefined;
-    if (!spec || typeof spec.id !== "string") continue;
+    if (!spec || typeof spec !== "object" || typeof spec.id !== "string") continue;
     const inputs: Record<string, Input> = {};
-    for (const [key, ref] of Object.entries((spec.input ?? {}) as Record<string, string>)) {
+    const input = spec.input && typeof spec.input === "object" ? Object.entries(spec.input) : [];
+    for (const [key, value] of input) {
+      if (typeof value !== "string") continue;
+      const ref = value.replace(/^\.\//, "");
       const body = text.get(ref);
-      inputs[key] = body === undefined ? { path: ref, url: url(ref) } : { path: ref, text: body, parsed: structured(ref, body) };
+      inputs[key] =
+        body !== undefined
+          ? { path: ref, text: body, parsed: structured(ref, body) }
+          : present.has(ref) && TEXT.test(ref)
+            ? { path: ref, large: true }
+            : { path: ref, url: url(ref) };
     }
     cases[spec.id] = { spec, inputs };
   }
@@ -223,7 +236,8 @@ export function parseCases(zip: Uint8Array): Record<string, CaseFile> {
 
 function structured(path: string, body: string): unknown {
   try {
-    return /\.json$/i.test(path) ? JSON.parse(body) : /\.ya?ml$/i.test(path) ? parseYaml(body) : undefined;
+    // YAML 1.1, as the gate reads it (PyYAML): `yes`, `012` and `1e3` mean the same on both sides.
+    return /\.json$/i.test(path) ? JSON.parse(body) : /\.ya?ml$/i.test(path) ? parseYaml(body, { version: "1.1" }) : undefined;
   } catch {
     return undefined;
   }

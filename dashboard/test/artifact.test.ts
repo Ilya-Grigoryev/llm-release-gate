@@ -146,6 +146,24 @@ describe("parseCases", () => {
     expect(cases.X51.inputs.image).toEqual({ path: "inputs/X51.jpg", url: "https://github.com/acme/app/releases/download/set-1/X51.jpg" });
   });
 
+  it("reads YAML as the gate does, normalises ./ and says when a text input is too large", () => {
+    const zip = zipSync({
+      "c.yaml": strToU8("id: c\ninput:\n  a: ./inputs/a.txt\n  big: inputs/big.txt\n  odd: 7\nexpected:\n  ok: yes\n"),
+      "inputs/a.txt": strToU8("hi"),
+      "inputs/big.txt": strToU8("x".repeat(70 * 1024)),
+      "inputs-url.txt": strToU8("https://x.example/{path}?n={name}"),
+      "list.yaml": strToU8("- not a case\n"),
+    });
+    const c = parseCases(zip).c;
+    expect(c.spec.expected).toEqual({ ok: true });
+    expect(c.inputs).toEqual({ a: { path: "inputs/a.txt", text: "hi", parsed: undefined }, big: { path: "inputs/big.txt", large: true } });
+  });
+
+  it("encodes file names in links", () => {
+    const zip = zipSync({ "a.yaml": strToU8("id: a\ninput:\n  image: inputs/a b#c.jpg\n"), "inputs-url.txt": strToU8("https://x.example/{path}") });
+    expect(parseCases(zip).a.inputs.image.url).toBe("https://x.example/inputs/a%20b%23c.jpg");
+  });
+
   it("links only to https", () => {
     const zip = zipSync({ "a.yaml": strToU8("id: a\ninput:\n  image: inputs/a.jpg\n"), "inputs-url.txt": strToU8("javascript:alert(1)//{name}") });
     expect(parseCases(zip).a.inputs.image).toEqual({ path: "inputs/a.jpg", url: undefined });
