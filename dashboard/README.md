@@ -14,6 +14,10 @@ artifacts after 90 days by default). **Read runs from GitHub** on a project's pa
 whose webhook failed: the app logs such a failure and moves on. The project's workflow needs no change and no secret.
 Rows stay in the database when the App is uninstalled; nobody sees them until it is installed again.
 
+Next to the records the action uploads the golden set's case files and their text inputs (`release-gate…-cases`). The
+app stores them with the run, so a case's page shows its input and the expected answer. Files the artifact leaves out,
+such as images, appear as links where the project sets the action's `inputs-url`.
+
 Signing in goes through the same App (`app/api/auth`). A user sees the repositories where the App is installed and they
 have access on GitHub, checked against GitHub on every page. The App's user token lives eight hours; after that the
 next page goes through GitHub again, which skips the prompt for a user who already authorized the App.

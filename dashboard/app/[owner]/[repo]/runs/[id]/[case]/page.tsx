@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
+import { CasePanel } from "@/components/case";
 import { Crumbs } from "@/components/crumbs";
 import { Fold, Json } from "@/components/json";
 import { Hit } from "@/components/outcome";
@@ -18,7 +19,7 @@ function decode(value: string): string {
   }
 }
 
-function Answer({ rec }: { rec: Rec }) {
+function Answer({ rec, expected }: { rec: Rec; expected?: Record<string, unknown> }) {
   const out = rec.output;
   if (out && typeof out === "object" && !Array.isArray(out)) {
     const o = out as Record<string, unknown>;
@@ -30,7 +31,12 @@ function Answer({ rec }: { rec: Rec }) {
           {fields.map(([key, value]) => (
             <div key={key} className="contents">
               <dt className="text-ink-3">{key}</dt>
-              <dd className="break-words">{value == null ? "—" : String(value)}</dd>
+              <dd className="break-words">
+                {value == null ? "—" : String(value)}
+                {rec.hits?.[key] === false && expected && key in expected && (
+                  <span className="block text-xs text-ink-3">expected {String(expected[key])}</span>
+                )}
+              </dd>
               <dd>{rec.hits && key in rec.hits ? <Hit value={rec.hits[key]} /> : null}</dd>
             </div>
           ))}
@@ -40,7 +46,7 @@ function Answer({ rec }: { rec: Rec }) {
   return <Json value={out ?? rec.raw ?? null} />;
 }
 
-function Side({ title, color, recs, flipped }: { title: string; color: string; recs: Rec[]; flipped: Set<string> }) {
+function Side({ title, color, recs, flipped, expected }: { title: string; color: string; recs: Rec[]; flipped: Set<string>; expected?: Record<string, unknown> }) {
   return (
     <div className="min-w-0 rounded-lg border border-line bg-panel p-4">
       <h2 className="flex items-center gap-2 font-medium">
@@ -71,7 +77,7 @@ function Side({ title, color, recs, flipped }: { title: string; color: string; r
           )}
           <div>
             <h3 className="mb-1.5 text-xs text-ink-3">Answer</h3>
-            <Answer rec={rec} />
+            <Answer rec={rec} expected={expected} />
           </div>
           {rec.hits && (
             <div>
@@ -109,6 +115,8 @@ export default async function Case(props: PageProps<"/[owner]/[repo]/runs/[id]/[
   const row = compareCases(run.base, run.candidate).find((r) => r.case === raw || r.case === decode(raw));
   if (!row) notFound();
   const flipped = new Set(row.flipped);
+  const file = run.cases?.[row.case];
+  const expected = file?.spec.expected as Record<string, unknown> | undefined;
   const title = run.pr ? `#${run.pr}` : (run.branch ?? "run");
 
   return (
@@ -126,9 +134,17 @@ export default async function Case(props: PageProps<"/[owner]/[repo]/runs/[id]/[
         Score {score(row.baseMean)} → {score(row.candidateMean)}
         {row.flipped.length > 0 && ` · checks that differ: ${row.flipped.join(", ")}`}
       </p>
-      <div className="mt-6 grid gap-4 lg:grid-cols-2">
-        <Side title="Base · target branch" color="var(--base)" recs={row.base} flipped={flipped} />
-        <Side title="Candidate · pull request" color="var(--cand)" recs={row.candidate} flipped={flipped} />
+      {file ? (
+        <CasePanel file={file} />
+      ) : (
+        <p className="mt-4 text-sm text-ink-3">
+          This run&apos;s artifact has no case files, so the input and the expected answer are not shown. The gate keeps them
+          from v0.1.0-dev.4 on.
+        </p>
+      )}
+      <div className="mt-4 grid gap-4 lg:grid-cols-2">
+        <Side title="Base · target branch" color="var(--base)" recs={row.base} flipped={flipped} expected={expected} />
+        <Side title="Candidate · pull request" color="var(--cand)" recs={row.candidate} flipped={flipped} expected={expected} />
       </div>
     </section>
   );

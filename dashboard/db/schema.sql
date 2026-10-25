@@ -26,3 +26,5 @@ create table if not exists runs (
   candidate      jsonb not null
 );
 create index if not exists runs_repo on runs (repo_id, created_at desc);
+-- The golden set's cases by id, with their text inputs and links to the other files.
+alter table runs add column if not exists cases jsonb;

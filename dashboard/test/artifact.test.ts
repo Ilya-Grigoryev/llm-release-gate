@@ -1,6 +1,6 @@
 import { strToU8, zipSync } from "fflate";
 import { describe, expect, it } from "vitest";
-import { compareCases, gateArtifact, latest, parseArtifact, summarize, type Rec } from "../lib/artifact";
+import { compareCases, gateArtifact, latest, parseArtifact, parseCases, summarize, type Rec } from "../lib/artifact";
 
 const rec = (fields: Partial<Rec> & Pick<Rec, "case">): Rec => ({ rep: 0, config_hash: "c1", score: 1, hits: {}, ...fields });
 const lines = (rs: Rec[]) => rs.map((r) => JSON.stringify(r)).join("\n") + "\n";
@@ -121,5 +121,33 @@ describe("compareCases", () => {
   it("counts a case that errs on one side only as changed", () => {
     const [row] = compareCases([rec({ case: "a" })], [rec({ case: "a", error: "boom" })]);
     expect(row.changed).toBe(true);
+  });
+});
+
+describe("parseCases", () => {
+  const files = (prefix: string) =>
+    zipSync({
+      [`${prefix}book-desk.yaml`]: strToU8("id: book-desk\ninput:\n  case: inputs/book-desk.yaml\n  world: inputs/world.json\nexpected:\n  booked: D-1\n"),
+      [`${prefix}receipt.yaml`]: strToU8("id: X51\ninput:\n  text: inputs/X51.txt\n  image: inputs/X51.jpg\n"),
+      [`${prefix}notes.yaml`]: strToU8("just: notes\n"),
+      [`${prefix}inputs/book-desk.yaml`]: strToU8("ticket: Anna wants a desk on Wednesday.\n"),
+      [`${prefix}inputs/world.json`]: strToU8('{"spaces": 3}'),
+      [`${prefix}inputs/X51.txt`]: strToU8("TOTAL 7.60"),
+      [`${prefix}inputs-url.txt`]: strToU8("https://github.com/acme/app/releases/download/set-1/{name}\n"),
+    });
+
+  it.each(["", "cases/"])("reads the case files and their text inputs (%s)", (prefix) => {
+    const cases = parseCases(files(prefix));
+    expect(Object.keys(cases).sort()).toEqual(["X51", "book-desk"]);
+    expect(cases["book-desk"].spec.expected).toEqual({ booked: "D-1" });
+    expect(cases["book-desk"].inputs.case.parsed).toEqual({ ticket: "Anna wants a desk on Wednesday." });
+    expect(cases["book-desk"].inputs.world.parsed).toEqual({ spaces: 3 });
+    expect(cases.X51.inputs.text).toEqual({ path: "inputs/X51.txt", text: "TOTAL 7.60", parsed: undefined });
+    expect(cases.X51.inputs.image).toEqual({ path: "inputs/X51.jpg", url: "https://github.com/acme/app/releases/download/set-1/X51.jpg" });
+  });
+
+  it("links only to https", () => {
+    const zip = zipSync({ "a.yaml": strToU8("id: a\ninput:\n  image: inputs/a.jpg\n"), "inputs-url.txt": strToU8("javascript:alert(1)//{name}") });
+    expect(parseCases(zip).a.inputs.image).toEqual({ path: "inputs/a.jpg", url: undefined });
   });
 });

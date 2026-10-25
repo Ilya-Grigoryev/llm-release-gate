@@ -1,4 +1,4 @@
-import { gateArtifact, parseArtifact, summarize } from "./artifact";
+import { gateArtifact, parseArtifact, parseCases, summarize } from "./artifact";
 import { insertRun, known } from "./db";
 import { download, gh, installationToken } from "./github";
 
@@ -29,6 +29,8 @@ export async function ingestRun(token: string, repo: RepoRef, run: WorkflowRun):
     // A re-run keeps the artifacts of earlier attempts; each gets the metadata of its own attempt.
     const at = attempt === run.run_attempt ? run : await gh<WorkflowRun>(`/repos/${repo.full_name}/actions/runs/${run.id}/attempts/${attempt}`, token);
     const parsed = parseArtifact(await download(`/repos/${repo.full_name}/actions/artifacts/${a.id}/zip`, token));
+    const sibling = artifacts.find((c) => c.name === `${a.name}-cases` && !c.expired);
+    const cases = sibling ? parseCases(await download(`/repos/${repo.full_name}/actions/artifacts/${sibling.id}/zip`, token)) : null;
     const meta = {
       artifact_id: a.id,
       repo_id: repo.id,
@@ -43,7 +45,7 @@ export async function ingestRun(token: string, repo: RepoRef, run: WorkflowRun):
       url: at.html_url,
       created_at: at.run_started_at ?? at.created_at,
     };
-    await insertRun(meta, summarize(parsed), parsed);
+    await insertRun(meta, summarize(parsed), parsed, cases);
     stored++;
   }
   return stored;

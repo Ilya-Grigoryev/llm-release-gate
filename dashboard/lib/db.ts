@@ -1,5 +1,5 @@
 import { neon } from "@neondatabase/serverless";
-import type { Parsed, Rec, Summary, Verdict } from "./artifact";
+import type { CaseFile, Parsed, Rec, Summary, Verdict } from "./artifact";
 import { env } from "./session";
 
 const sql = () => neon(env("DATABASE_URL"));
@@ -19,7 +19,13 @@ export type RunRow = Summary & {
   created_at: string;
 };
 
-export type RunFull = RunRow & { verdict: Verdict | null; comment: string | null; base: Rec[]; candidate: Rec[] };
+export type RunFull = RunRow & {
+  verdict: Verdict | null;
+  comment: string | null;
+  base: Rec[];
+  candidate: Rec[];
+  cases: Record<string, CaseFile> | null;
+};
 
 const COLUMNS = `artifact_id::text, repo, gate, run_id::text, attempt, pr, title, branch, sha, url, to_json(runs.created_at) #>> '{}' as created_at,
   outcome, exit_code, base_mean, candidate_mean, diff_pp, cost, same_version`;
@@ -45,13 +51,13 @@ export type Meta = {
   created_at: string;
 };
 
-export async function insertRun(m: Meta, s: Summary, p: Parsed): Promise<void> {
+export async function insertRun(m: Meta, s: Summary, p: Parsed, cases: Record<string, CaseFile> | null): Promise<void> {
   await sql()`insert into runs (artifact_id, repo_id, repo, gate, run_id, attempt, pr, title, branch, sha, url, created_at,
-      outcome, exit_code, base_mean, candidate_mean, diff_pp, cost, same_version, verdict, comment, base, candidate)
+      outcome, exit_code, base_mean, candidate_mean, diff_pp, cost, same_version, verdict, comment, base, candidate, cases)
     values (${m.artifact_id}, ${m.repo_id}, ${m.repo}, ${m.gate}, ${m.run_id}, ${m.attempt}, ${m.pr}, ${m.title}, ${m.branch},
       ${m.sha}, ${m.url}, ${m.created_at}, ${s.outcome}, ${s.exit_code}, ${s.base_mean}, ${s.candidate_mean}, ${s.diff_pp},
       ${s.cost}, ${s.same_version}, ${JSON.stringify(p.verdict)}::jsonb, ${p.comment}, ${JSON.stringify(p.base)}::jsonb,
-      ${JSON.stringify(p.candidate)}::jsonb)
+      ${JSON.stringify(p.candidate)}::jsonb, ${cases && JSON.stringify(cases)}::jsonb)
     on conflict (artifact_id) do nothing`;
 }
 
@@ -73,8 +79,9 @@ export async function runsOf(repoId: number): Promise<RunRow[]> {
 export async function runOf(repoId: number, artifactId: string): Promise<RunFull | null> {
   if (!/^\d+$/.test(artifactId)) return null;
   const rows = await sql().query(
-    `select ${COLUMNS}, verdict, comment, base, candidate from runs where repo_id = $1 and artifact_id = $2`,
+    `select ${COLUMNS}, verdict, comment, base, candidate, cases from runs where repo_id = $1 and artifact_id = $2`,
     [repoId, artifactId],
   );
   return (rows[0] as RunFull) ?? null;
 }
+

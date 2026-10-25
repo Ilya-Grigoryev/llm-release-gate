@@ -26,9 +26,11 @@ const zip = zipSync({
   "candidate.jsonl": strToU8('{"case": "a", "rep": 0, "config_hash": "c", "score": 1}\n'),
 });
 
+const casesZip = zipSync({ "a.yaml": strToU8("id: a\n") });
+
 beforeEach(() => {
   vi.resetAllMocks();
-  github.download.mockResolvedValue(zip);
+  github.download.mockImplementation(async (path: string) => (path.includes("/artifacts/6/") ? casesZip : zip));
   db.known.mockResolvedValue(new Set(["3"]));
 });
 
@@ -43,6 +45,7 @@ describe("ingestRun", () => {
             { id: 3, name: "release-gate-3", expired: false },
             { id: 4, name: "release-gate-1", expired: true },
             { id: 5, name: "coverage-2", expired: false },
+            { id: 6, name: "release-gate-2-cases", expired: false },
           ],
         };
       if (path.endsWith("/attempts/1")) return run(1);
@@ -56,6 +59,9 @@ describe("ingestRun", () => {
       [2, "support", 1, "attempt 1", "2026-10-25T11:00:05Z", "pass"],
     ]);
     expect(db.insertRun.mock.calls[0][0]).toMatchObject({ repo_id: 7, repo: "acme/app", run_id: 99, pr: 4 });
+    expect(db.insertRun.mock.calls[0][3]).toEqual({ a: { spec: { id: "a" }, inputs: {} } });
+    expect(db.insertRun.mock.calls[1][3]).toBeNull();
+    expect(github.download.mock.calls.map(([p]) => p.split("/").at(-2))).toEqual(["1", "6", "2"]);
   });
 });
 
