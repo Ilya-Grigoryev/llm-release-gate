@@ -143,3 +143,11 @@ def test_a_failed_model_call_is_shown_and_bad_requests_are_refused(page):
 def test_the_page_does_not_import_the_gate():
     code = "import sys, support_agent.web; assert 'llm_release_gate' not in sys.modules"
     subprocess.run([sys.executable, "-c", code], check=True)
+
+
+def test_malformed_requests_get_a_400(page):
+    request = page()
+    for path, body in (("/api/state?since=abc", None), ("/api/say", [1])):
+        with pytest.raises(urllib.error.HTTPError) as e:
+            request(path, body)
+        assert e.value.code == 400, path

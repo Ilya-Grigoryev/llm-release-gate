@@ -24,6 +24,9 @@ from test_adapter import (  # noqa: F401 - offline is an autouse fixture
 )
 from test_adapter import script as scripted
 
+ACTION_TASK = (
+    "[service_issue]contract_end_suspension[PERSONA:Hard]"  # also scored on actions
+)
 VERSION = {"model": "fake-model-2026-01-01", "params": {"temperature": 0}}
 USER = {"model": "fake-user-2026-01-01", "params": {"temperature": 0}}
 PROMPTS = {
@@ -38,7 +41,7 @@ script = scripted  # the fixture, under its own name
 @pytest.fixture
 def page(script):
     servers = []
-    tasks = {t.id: t for t in load_tasks("telecom") if t.id == TASK}
+    tasks = {t.id: t for t in load_tasks("telecom") if t.id in (TASK, ACTION_TASK)}
 
     def start(*replies):
         script(list(replies))
@@ -122,10 +125,11 @@ def test_you_play_the_customer_and_tau2_scores_the_chat(page):
     )
     # the reward is the end state's: the page says who changed it
     assert state["result"]["basis"] == ["ENV_ASSERTION"]
-    assert state["result"]["customer_changes"] == ["toggle_roaming"]
-    assert (
-        state["result"]["agent_changes"] == [] and state["result"]["agent_lookups"] == 1
-    )
+    assert state["result"]["changes"] == {
+        "customer": ["toggle_roaming"],
+        "agent": [],
+        "agent_lookups": 1,
+    }
     assert state["result"]["expected"] == [{"name": "toggle_roaming", "by": "customer"}]
 
 
@@ -176,3 +180,28 @@ def test_parse_action_reads_keyword_arguments():
 def test_the_page_does_not_import_the_gate():
     code = "import sys, tau2_example.web; assert 'llm_release_gate' not in sys.modules"
     subprocess.run([sys.executable, "-c", code], check=True)
+
+
+def test_a_task_scored_on_actions_shows_the_missing_action(page):
+    request = page(response("I'm sorry, I can't help with that."))
+    request("/api/start", {"task": ACTION_TASK, "mode": "you"})
+    request("/api/say", {"text": "My phone has no service."})
+    settle(request)
+    request("/api/end", {})
+    r = settle(request)["result"]
+    assert r["reward"] == 0.0 and "ACTION" in r["basis"]
+    assert {"name": "transfer_to_human_agents", "by": "agent", "met": False} in r[
+        "actions"
+    ]
+
+
+def test_malformed_requests_get_a_400(page):
+    request = page()
+    for path, body in (
+        ("/api/state?since=abc", None),
+        ("/api/say", [1]),
+        ("/api/tap", {"action": 'toggle_roaming(**{"a": 1})'}),
+    ):
+        with pytest.raises(urllib.error.HTTPError) as e:
+            request(path, body)
+        assert e.value.code == 400, path

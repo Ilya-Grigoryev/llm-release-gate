@@ -77,7 +77,7 @@ You play the member of a case you pick: the page shows the part to play, the cha
 the booking board, where the agent's lookups ring your bookings and its changes stay marked. **Let the simulated member
 play** runs the case with the test set's simulator instead. **Finish and check** compares the change to the database
 with the case's reference. The agent is the version under test (`configs/support.yaml`, `policy.md`, `tools.yaml`); the
-world lives in memory and resets with the case. One chat at a time, on 127.0.0.1 only.
+world lives in memory and resets with the case. One chat at a time, on 127.0.0.1 unless you pass `--host`.
 
 ## Under the gate
 

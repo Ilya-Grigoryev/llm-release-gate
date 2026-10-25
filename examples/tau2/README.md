@@ -80,6 +80,6 @@ environment holds it, and the customer's line at the carrier, where the agent's 
 sends tau2's `###STOP###`, and tau2's evaluator scores the conversation as it scores a simulated one. **Let the simulated
 customer play** runs the task with the set's simulator instead. Only the customer differs from a gate run: the agent,
 its policy (`configs/telecom.yaml`), the environment, the run limits and the evaluator are the same. Model calls keep
-tau2's own retries here, since no runner counts them. One chat at a time, on 127.0.0.1 only.
+tau2's own retries here, since no runner counts them. One chat at a time, on 127.0.0.1 unless you pass `--host`.
 
 tau2-bench is MIT-licensed (Sierra Research); its data stays out of this repository.

@@ -38,6 +38,9 @@ class Session:
         self.tools = tool_specs(HERE / "tools.yaml")
         self.cases = {c.id: c for c in load_cases(HERE / "cases")}
         self.lock = threading.Lock()  # tool calls against reads of the world
+        self.control = (
+            threading.Lock()
+        )  # one request that starts or ends work at a time
         self.thread = None
         self.start(FIRST if FIRST in self.cases else next(iter(self.cases)))
 
@@ -159,34 +162,46 @@ def handler(session: Session):
                 self.send(200, [{"id": c.id, "category": c.category, "known": c.user["known"].strip()}
                                 for c in session.cases.values()])  # fmt: skip
             elif url.path == "/api/state":
-                since = int(parse_qs(url.query).get("since", ["0"])[0])
-                self.send(200, session.snapshot(since))
+                since = parse_qs(url.query).get("since", ["0"])[0]
+                if not since.isdigit():
+                    return self.send(400, {"error": "since must be a whole number"})
+                self.send(200, session.snapshot(int(since)))
             else:
                 self.send(404, {"error": "not found"})
 
         def do_POST(self):
-            size = int(self.headers.get("Content-Length") or 0)
             try:
-                body = json.loads(self.rfile.read(size) or b"{}")
+                body = json.loads(
+                    self.rfile.read(int(self.headers.get("Content-Length") or 0))
+                    or b"{}"
+                )
+                if not isinstance(body, dict):
+                    raise TypeError("send a JSON object")
                 path = urlparse(self.path).path
-                if path == "/api/start":
-                    session.start(body["case"])
-                elif path == "/api/say":
-                    text = str(body.get("text", "")).strip()
-                    if not text:
-                        raise ValueError("write a message first")
-                    session.say(text)
-                elif path == "/api/simulate":
-                    session.simulate()
-                elif path == "/api/finish":
-                    if session.busy:
-                        raise Busy("the agent is still working")
-                    session.finish()
-                else:
+                if path not in (
+                    "/api/start",
+                    "/api/say",
+                    "/api/simulate",
+                    "/api/finish",
+                ):
                     return self.send(404, {"error": "not found"})
+                with session.control:
+                    if path == "/api/start":
+                        session.start(body["case"])
+                    elif path == "/api/say":
+                        text = str(body.get("text", "")).strip()
+                        if not text:
+                            raise ValueError("write a message first")
+                        session.say(text)
+                    elif path == "/api/simulate":
+                        session.simulate()
+                    else:
+                        if session.busy:
+                            raise Busy("the agent is still working")
+                        session.finish()
             except Busy as e:
                 return self.send(409, {"error": str(e)})
-            except (KeyError, ValueError) as e:
+            except (KeyError, TypeError, ValueError) as e:
                 return self.send(400, {"error": str(e)})
             self.send(200, session.snapshot())
 
@@ -205,13 +220,13 @@ def main() -> None:
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=8765)
     a = p.parse_args()
+    config = yaml.safe_load((HERE / "configs" / "support.yaml").read_text())
     try:
-        client = OpenAI()
+        client = OpenAI(timeout=config.get("timeout_s", 60))
     except OpenAIError as e:
         sys.exit(
             f"{e}\nStart it with the key: uv run --env-file ../../.env python -m support_agent.web"
         )
-    config = yaml.safe_load((HERE / "configs" / "support.yaml").read_text())
     version = {"model": config["model"], "params": config.get("params") or {}}
     simulator = yaml.safe_load((HERE / "cases" / "simulator.yaml").read_text())
     server = serve(Session(client, version, simulator), a.host, a.port)

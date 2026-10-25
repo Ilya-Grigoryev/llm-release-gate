@@ -232,7 +232,7 @@ main { display: grid; grid-template-columns: minmax(340px, 1fr) 360px minmax(300
   <section class="zone records" aria-label="The carrier's records">
     <div>
       <h2>At the carrier</h2>
-      <p class="sub">The agent sees and changes these records through its tools. You cannot.</p>
+      <p class="sub">The agent reads and changes these records through its tools. A bill paid on the phone lands here too.</p>
     </div>
     <dl class="facts" id="facts"></dl>
     <div class="verdict" id="verdict"></div>
@@ -412,22 +412,28 @@ main { display: grid; grid-template-columns: minmax(340px, 1fr) 360px minmax(300
     var el = $("verdict"), r = s.result;
     if (!r) {
       el.className = "verdict";
-      el.innerHTML = "<p>When the chat ends, tau2's evaluator checks the phone and the carrier's records against what this task expects. No language model judges it.</p>";
+      el.innerHTML = "<p>When the chat ends, tau2's evaluator checks this task the way it scores a benchmark run. No language model judges it.</p>";
       return;
     }
     var pass = r.reward >= 1, who = s.mode === "you" ? "You" : "The simulated customer";
-    var list = function (xs) { return xs.length ? xs.map(function (x) { return "<b>" + esc(x) + "</b>"; }).join(", ") : "nothing"; };
-    var endOnly = r.basis.length && r.basis.every(function (b) { return b === "ENV_ASSERTION" || b === "DB"; });
+    var counts = function (b) { return r.basis.indexOf(b) >= 0; };
+    var names = function (xs) { return xs.length ? xs.map(function (x) { return "<b>" + esc(x) + "</b>"; }).join(", ") : "nothing"; };
+    var checks = [];
+    if (counts("ENV_ASSERTION")) r.assertions.forEach(function (a) { checks.push((a.met ? "✓ " : "✗ ") + a.name); });
+    if (counts("ACTION")) r.actions.forEach(function (a) { checks.push((a.met ? "✓ " : "✗ ") + a.name + " by the " + a.by); });
+    var endOnly = r.basis.every(function (b) { return b === "ENV_ASSERTION" || b === "DB"; });
     var agentExpected = r.expected.filter(function (a) { return a.by === "agent"; }).length;
     el.className = "verdict " + (pass ? "pass" : "fail");
     el.innerHTML = '<div class="big">tau2 reward ' + esc(r.reward) + "</div>" +
-      "<p>" + (pass ? "The phone and the records ended as the task expects." : "The phone or the records did not end as the task expects.") + "</p><ul>" +
-      r.assertions.map(function (a) { return "<li>" + (a.met ? "✓ " : "✗ ") + esc(a.name) + "</li>"; }).join("") + "</ul>" +
+      "<p>" + (pass ? "Every check this task's reward counts passed:" : "Not every check this task's reward counts passed:") + "</p>" +
+      "<ul>" + checks.map(function (c) { return "<li>" + esc(c) + "</li>"; }).join("") + "</ul>" +
       '<dl class="facts">' +
-      "<dt>" + esc(who) + " changed</dt><dd>" + list(r.customer_changes) + "</dd>" +
-      "<dt>The agent changed</dt><dd>" + list(r.agent_changes) + " (and looked up " + esc(r.agent_lookups) + " records)</dd>" +
+      "<dt>" + esc(who) + " changed</dt><dd>" + names(r.changes.customer) + "</dd>" +
+      "<dt>The agent changed</dt><dd>" + names(r.changes.agent) + " (and looked up " + esc(r.changes.agent_lookups) + " records)</dd>" +
       "<dt>tau2's reference</dt><dd>" + (r.expected.length ? r.expected.map(function (a) { return "<b>" + esc(a.name) + "</b> by the " + esc(a.by); }).join(", ") : "no actions listed") + "</dd></dl>" +
-      (endOnly ? "<p><b>What this reward does not say:</b> tau2 scores this task on the end state only, not on who fixed it. A customer who fixes the phone without the agent's help gets the same reward. The release gate adds a check that the agent acted at all" + (agentExpected ? " and " + agentExpected + " expected tool call" + (agentExpected > 1 ? "s" : "") + " of the agent" : "; this task lists no tool calls for the agent") + ".</p>" : "") +
+      (endOnly
+        ? "<p><b>What this reward does not say:</b> tau2 scores this task on the end state only, not on who fixed it. A customer who fixes the phone without the agent's help gets the same reward. The release gate adds a check that the agent acted at all" + (agentExpected ? " and " + agentExpected + " expected tool call" + (agentExpected > 1 ? "s" : "") + " of the agent" : "; this task lists no tool calls for the agent") + ".</p>"
+        : "<p>This task's reward counts the end state and the actions tau2 expects, so it fails when an expected action is missing even if the phone works.</p>") +
       "<p>Ended by: " + esc(String(r.termination).replace(/_/g, " ")) + ".</p>";
   }
   function renderControls(s) {
