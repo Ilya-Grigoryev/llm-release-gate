@@ -6,6 +6,8 @@ const LOOK: Record<string, { color: string; ink: string; icon: string }> = {
   "infra error": { color: "var(--none)", ink: "#fff", icon: "!" },
 };
 
+export const look = (outcome: string) => LOOK[outcome] ?? LOOK["infra error"];
+
 export const blocks = (outcome: string) => outcome === "quality fail" || outcome === "budget fail";
 
 export function Outcome({ value }: { value: string }) {
