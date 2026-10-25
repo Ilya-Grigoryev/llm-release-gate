@@ -48,6 +48,7 @@ export type Rec = {
   output_tokens?: number | null;
   latency_s?: number | null;
   retries?: number;
+  scorer_version?: string;
   trace?: Trace | null;
 };
 
@@ -64,6 +65,7 @@ export type Verdict = {
   base_config?: string;
   candidate_config?: string;
   set_hash?: string;
+  scorer_version?: string;
   cost_usd?: { base: number | null; candidate: number | null };
   models_without_date?: string[];
   runs_per_case?: { base: number; candidate: number };
@@ -73,10 +75,10 @@ export type Parsed = { verdict: Verdict | null; comment: string | null; base: Re
 
 const ARTIFACT = /^release-gate(?:-(.+))?-(\d+)$/;
 
-/** The gate's name in an artifact the gate action uploaded (`release-gate[-NAME]-ATTEMPT`), or null for any other artifact. */
-export function gateName(artifact: string): string | null {
+/** The gate's name and the run attempt of an artifact the gate action uploaded (`release-gate[-NAME]-ATTEMPT`), or null for any other artifact. */
+export function gateArtifact(artifact: string): { gate: string; attempt: number } | null {
   const m = ARTIFACT.exec(artifact);
-  return m ? (m[1] ?? "") : null;
+  return m ? { gate: m[1] ?? "", attempt: Number(m[2]) } : null;
 }
 
 const FILES = new Set(["verdict.json", "comment.md", "base.jsonl", "candidate.jsonl"]);
@@ -163,7 +165,7 @@ const mean = (xs: (number | null | undefined)[]) => {
   return ok.length ? ok.reduce((a, b) => a + b, 0) / ok.length : null;
 };
 
-const share = (rs: Rec[], check: string) => mean(rs.map((r) => (r.hits?.[check] == null ? null : Number(r.hits[check]))));
+export const share = (rs: Rec[], check: string) => mean(rs.map((r) => (r.hits?.[check] == null ? null : Number(r.hits[check]))));
 
 /** The cases side by side, the ones that changed first and the most worsened among them first. */
 export function compareCases(base: Rec[], candidate: Rec[]): CaseRow[] {

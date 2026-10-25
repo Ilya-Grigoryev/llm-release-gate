@@ -3,7 +3,7 @@ import Link from "next/link";
 import { Crumbs } from "@/components/crumbs";
 import { Json } from "@/components/json";
 import { Hit, Outcome } from "@/components/outcome";
-import { compareCases } from "@/lib/artifact";
+import { compareCases, share } from "@/lib/artifact";
 import { date, points, score, short, usd } from "@/lib/format";
 import { loadRun } from "@/lib/load";
 
@@ -25,6 +25,9 @@ export default async function Run(props: PageProps<"/[owner]/[repo]/runs/[id]">)
   const rows = compareCases(run.base, run.candidate);
   const changed = rows.filter((r) => r.changed).length;
   const title = run.pr ? `#${run.pr}` : (run.branch ?? "run");
+  const scorers = new Set([...run.base, ...run.candidate].map((r) => r.scorer_version).filter(Boolean));
+  const rescored = v?.scorer_version && [...scorers].some((s) => s !== v.scorer_version);
+  const reps = Math.max(v?.runs_per_case?.base ?? 1, v?.runs_per_case?.candidate ?? 1);
 
   return (
     <section>
@@ -104,7 +107,14 @@ export default async function Run(props: PageProps<"/[owner]/[repo]/runs/[id]">)
       <h2 className="mt-8 text-lg font-semibold tracking-tight">Cases</h2>
       <p className="mt-1 text-sm text-ink-2">
         {changed} of {rows.length} changed between the versions; they come first, the most worsened at the top.
+        {reps > 1 && ` Scores average the ${reps} runs of a case; the verdict compares the first run of each.`}
       </p>
+      {rescored && (
+        <p className="mt-2 rounded-md bg-canvas px-3 py-2 text-sm text-ink-2">
+          The scores below are the ones each side&apos;s runner recorded ({[...scorers].join(", ")}). The gate scored both sides
+          again with {v?.scorer_version}, so its verdict may differ from this table.
+        </p>
+      )}
       <div className="mt-3 overflow-x-auto rounded-lg border border-line bg-panel">
         <table className="w-full text-sm">
           <thead className="border-b border-line text-left text-xs text-ink-3">
@@ -133,7 +143,7 @@ export default async function Run(props: PageProps<"/[owner]/[repo]/runs/[id]">)
                     <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs">
                       {r.flipped.map((check) => (
                         <span key={check} className="inline-flex items-center gap-1 font-mono">
-                          {check} <Hit value={r.base[0]?.hits?.[check]} />→<Hit value={r.candidate[0]?.hits?.[check]} />
+                          {check} <Hit value={share(r.base, check)} />→<Hit value={share(r.candidate, check)} />
                         </span>
                       ))}
                     </div>

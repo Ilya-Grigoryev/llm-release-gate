@@ -3,7 +3,7 @@ create table if not exists runs (
   artifact_id    bigint primary key,
   repo_id        bigint not null,
   repo           text not null,              -- owner/name when the run was read
-  gate           text not null default '',   -- the action's `name` input; '' for an unnamed gate
+  gate           text not null default '',   -- the action's `name` input, empty for an unnamed gate
   run_id         bigint not null,            -- the workflow run
   attempt        int not null,
   pr             int,

@@ -18,7 +18,7 @@ export function seal(data: unknown, secret: string): string {
 export function unseal<T>(value: string, secret: string): T | null {
   try {
     const raw = Buffer.from(value, "base64url");
-    const decipher = createDecipheriv("aes-256-gcm", key(secret), raw.subarray(0, 12));
+    const decipher = createDecipheriv("aes-256-gcm", key(secret), raw.subarray(0, 12), { authTagLength: 16 });
     decipher.setAuthTag(raw.subarray(12, 28));
     return JSON.parse(Buffer.concat([decipher.update(raw.subarray(28)), decipher.final()]).toString());
   } catch {
@@ -49,7 +49,15 @@ export const cookie = (maxAge: number) => ({
   maxAge,
 });
 
-/** A path on this site to return to after signing in; anything else becomes "/". */
+const HERE = "https://here.invalid";
+
+/** A path on this site to return to after signing in; anything that resolves elsewhere becomes "/". */
 export function safeNext(next: string | null): string {
-  return next && next.startsWith("/") && !next.startsWith("//") && !next.startsWith("/\\") ? next : "/";
+  if (!next?.startsWith("/")) return "/";
+  try {
+    const url = new URL(next, HERE);
+    return url.origin === HERE ? url.pathname + url.search + url.hash : "/";
+  } catch {
+    return "/";
+  }
 }

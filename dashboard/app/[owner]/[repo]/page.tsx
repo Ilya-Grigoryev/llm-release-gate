@@ -63,7 +63,7 @@ export default async function Project(props: PageProps<"/[owner]/[repo]">) {
         <>
           <div className="mt-6 grid grid-cols-2 gap-3 md:grid-cols-4">
             <Tile label="Runs" value={String(runs.length)} note={`${decided.length} with a verdict`} />
-            <Tile label="Blocked" value={String(blocked)} note="quality or budget fail" />
+            <Tile label="Blocked" value={String(blocked)} note={`quality or budget fail; ${runs.filter((r) => r.outcome === "inconclusive").length} inconclusive`} />
             <Tile
               label="Same version, different score"
               value={`${noisy.length} of ${same.length}`}

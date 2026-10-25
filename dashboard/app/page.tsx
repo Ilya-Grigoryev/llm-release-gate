@@ -3,8 +3,9 @@ import { Outcome } from "@/components/outcome";
 import { currentUser, viewer } from "@/lib/auth";
 import { overview } from "@/lib/db";
 import { date } from "@/lib/format";
+import { env } from "@/lib/session";
 
-const install = () => `https://github.com/apps/${process.env.GITHUB_APP_SLUG}/installations/new`;
+const install = () => `https://github.com/apps/${env("GITHUB_APP_SLUG")}/installations/new`;
 
 function Landing() {
   return (

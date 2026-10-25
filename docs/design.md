@@ -209,8 +209,8 @@ flowchart LR
 A web app in `dashboard/` (Next.js, on Vercel), with its own README. A GitHub App installed on a project's repositories
 receives `workflow_run`; when a run finishes, the app downloads its `release-gate*` artifacts and stores one row per
 artifact in Postgres: the run's metadata, the verdict, the comment and the records the gate compared (the last error-free
-one per case and repetition, as the gate reads them). Installing the App reads the runs GitHub still keeps; the project's
-workflow needs no change and no secret. Signing in goes through the same App, so a user sees the repositories where it is
+one per case and repetition, as the gate reads them). Installing the App reads the runs among the repository's 1,000 newest artifacts;
+the project's workflow needs no change and no secret. Signing in goes through the same App, so a user sees the repositories where it is
 installed and they have access on GitHub. Pages: the projects; a project's runs over time (base and candidate mean per
 run, same-version runs marked); a run's verdict and its cases, changed ones first; a case's answer, checks and steps on
 both sides.

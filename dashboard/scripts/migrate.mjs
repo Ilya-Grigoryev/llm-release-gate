@@ -4,5 +4,5 @@ import { neon } from "@neondatabase/serverless";
 
 const sql = neon(process.env.DATABASE_URL);
 const schema = readFileSync(new URL("../db/schema.sql", import.meta.url), "utf8");
-for (const statement of schema.split(";").map((s) => s.trim()).filter(Boolean)) await sql.query(statement);
+for (const statement of schema.split(/;\s*$/m).map((s) => s.trim()).filter(Boolean)) await sql.query(statement);
 console.log("schema applied");

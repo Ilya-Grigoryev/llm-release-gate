@@ -1,6 +1,6 @@
 import { strToU8, zipSync } from "fflate";
 import { describe, expect, it } from "vitest";
-import { compareCases, gateName, latest, parseArtifact, summarize, type Rec } from "../lib/artifact";
+import { compareCases, gateArtifact, latest, parseArtifact, summarize, type Rec } from "../lib/artifact";
 
 const rec = (fields: Partial<Rec> & Pick<Rec, "case">): Rec => ({ rep: 0, config_hash: "c1", score: 1, hits: {}, ...fields });
 const lines = (rs: Rec[]) => rs.map((r) => JSON.stringify(r)).join("\n") + "\n";
@@ -16,13 +16,13 @@ const verdict = {
   cost_usd: { base: 0.01, candidate: 0.02 },
 };
 
-describe("gateName", () => {
-  it("reads the gate's name out of the artifact's", () => {
-    expect(gateName("release-gate-1")).toBe("");
-    expect(gateName("release-gate-support-3")).toBe("support");
-    expect(gateName("release-gate-v2-1")).toBe("v2");
-    expect(gateName("coverage-1")).toBeNull();
-    expect(gateName("release-gate")).toBeNull();
+describe("gateArtifact", () => {
+  it("reads the gate's name and the attempt out of the artifact's name", () => {
+    expect(gateArtifact("release-gate-1")).toEqual({ gate: "", attempt: 1 });
+    expect(gateArtifact("release-gate-support-3")).toEqual({ gate: "support", attempt: 3 });
+    expect(gateArtifact("release-gate-v2-1")).toEqual({ gate: "v2", attempt: 1 });
+    expect(gateArtifact("coverage-1")).toBeNull();
+    expect(gateArtifact("release-gate")).toBeNull();
   });
 });
 

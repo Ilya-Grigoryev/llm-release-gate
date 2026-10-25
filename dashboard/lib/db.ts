@@ -21,7 +21,7 @@ export type RunRow = Summary & {
 
 export type RunFull = RunRow & { verdict: Verdict | null; comment: string | null; base: Rec[]; candidate: Rec[] };
 
-const COLUMNS = `artifact_id::text, repo, gate, run_id::text, attempt, pr, title, branch, sha, url, created_at::text,
+const COLUMNS = `artifact_id::text, repo, gate, run_id::text, attempt, pr, title, branch, sha, url, to_json(runs.created_at) #>> '{}' as created_at,
   outcome, exit_code, base_mean, candidate_mean, diff_pp, cost, same_version`;
 
 export async function known(artifactIds: number[]): Promise<Set<string>> {
@@ -59,15 +59,15 @@ export async function insertRun(m: Meta, s: Summary, p: Parsed): Promise<void> {
 export async function overview(repoIds: number[]): Promise<Map<number, { last: RunRow; count: number }>> {
   if (!repoIds.length) return new Map();
   const rows = await sql().query(
-    `select distinct on (repo_id) repo_id::float8 as repo_id, count(*) over (partition by repo_id)::int as count, ${COLUMNS}
-     from runs where repo_id = any($1) order by repo_id, created_at desc`,
+    `select distinct on (runs.repo_id) runs.repo_id::float8 as repo_id, count(*) over (partition by repo_id)::int as count, ${COLUMNS}
+     from runs where repo_id = any($1) order by runs.repo_id, runs.created_at desc`,
     [repoIds],
   );
   return new Map(rows.map((r) => [r.repo_id as number, { last: r as RunRow, count: r.count as number }]));
 }
 
 export async function runsOf(repoId: number): Promise<RunRow[]> {
-  return (await sql().query(`select ${COLUMNS} from runs where repo_id = $1 order by created_at desc limit 300`, [repoId])) as RunRow[];
+  return (await sql().query(`select ${COLUMNS} from runs where repo_id = $1 order by runs.created_at desc limit 300`, [repoId])) as RunRow[];
 }
 
 export async function runOf(repoId: number, artifactId: string): Promise<RunFull | null> {

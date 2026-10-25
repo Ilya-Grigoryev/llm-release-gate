@@ -9,9 +9,10 @@ https://llm-release-gate.vercel.app.
 A GitHub App, installed on the repositories that run the gate action, gets a `workflow_run` webhook when a workflow run
 finishes (`app/api/github/webhook`). The app answers at once, then downloads the run's `release-gate*` artifacts and
 stores each as one row in Postgres (`db/schema.sql`): the run's metadata, the verdict, the comment and the records the
-gate compared. Installing the App on a repository reads the runs GitHub still keeps (artifacts expire after 90 days by
-default); **Read runs from GitHub** on a project's page does the same by hand. The project's workflow needs no change and
-no secret.
+gate compared. Installing the App on a repository reads the gate runs among its 1,000 newest artifacts (GitHub deletes
+artifacts after 90 days by default). **Read runs from GitHub** on a project's page does the same by hand, also for a run
+whose webhook failed: the app logs such a failure and moves on. The project's workflow needs no change and no secret.
+Rows stay in the database when the App is uninstalled; nobody sees them until it is installed again.
 
 Signing in goes through the same App (`app/api/auth`). A user sees the repositories where the App is installed and they
 have access on GitHub, checked against GitHub on every page. The App's user token lives eight hours; after that the
@@ -24,7 +25,7 @@ the CI for the database: install the App only on repositories whose runs may lea
 
 | Setting | Value |
 |---|---|
-| Permissions | Actions: read (runs and artifacts), Metadata: read, Pull requests: read |
+| Permissions | Actions: read (runs and artifacts), Metadata: read |
 | Events | Workflow run (installation events come without subscribing) |
 | Callback URL | `<site>/api/auth/callback` |
 | Webhook URL | `<site>/api/github/webhook`, with a secret |
