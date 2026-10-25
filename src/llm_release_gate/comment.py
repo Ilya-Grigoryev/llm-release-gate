@@ -92,12 +92,25 @@ def call(
         return json.loads(response.read() or b"null")
 
 
-def post(text: str, t: Target, send: Send | None = None) -> str:
-    """Edit the gate's earlier comment or create one; return which."""
+def marker(name: str | None) -> str:
+    return f"<!-- llm-release-gate:{name} -->" if name else MARKER
+
+
+def post(
+    text: str, t: Target, send: Send | None = None, name: str | None = None
+) -> str:
+    """Edit the gate's earlier comment or create one; return which.
+
+    `name` labels the pipeline, so gates of several pipelines on one request keep a comment each.
+    """
     send = send or call
-    body = f"{MARKER}\n{text}" + (f"\n[Job log]({t.run_url})\n" if t.run_url else "")
+    mark = marker(name)
+    label = f"`{name}` · " if name else ""
+    body = f"{mark}\n{label}{text}" + (
+        f"\n[Job log]({t.run_url})\n" if t.run_url else ""
+    )
     earlier = [
-        c for c in send("GET", t.listing, t.headers) if MARKER in (c.get("body") or "")
+        c for c in send("GET", t.listing, t.headers) if mark in (c.get("body") or "")
     ]
     if earlier:
         send(
@@ -115,6 +128,9 @@ def main(argv: list[str] | None = None) -> None:
     )
     p.add_argument(
         "--dry-run", action="store_true", help="print the comment, post nothing"
+    )
+    p.add_argument(
+        "--name", help="the pipeline's name, for one comment per pipeline on a request"
     )
     p.add_argument(
         "--check",
@@ -136,7 +152,7 @@ def main(argv: list[str] | None = None) -> None:
         if args.check:
             print("can comment")
             return
-        print(f"comment {post(text, t)}")
+        print(f"comment {post(text, t, name=args.name)}")
     except NoTarget as e:
         sys.exit(f"cannot comment: {e}")
     except urllib.error.HTTPError as e:

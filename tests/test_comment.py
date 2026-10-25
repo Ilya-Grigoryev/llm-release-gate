@@ -154,3 +154,22 @@ def test_without_a_verdict_the_request_still_hears_why(tmp_path, monkeypatch):
     comment.main([str(tmp_path / "missing.md")])
     method, _, _, body = api.calls[-1]
     assert method == "POST" and "infra error" in body["body"]
+
+
+def test_named_pipelines_keep_a_comment_each(tmp_path):
+    api = FakeAPI(
+        [
+            {"id": 1, "body": f"{MARKER}\nunnamed verdict"},
+            {"id": 2, "body": "<!-- llm-release-gate:sroie -->\nsroie verdict"},
+        ]
+    )
+    t = target(github_env(tmp_path))
+    assert (
+        post("**Release gate: ✅ pass**\n", t, api, name="support-agent") == "created"
+    )
+    assert post("**Release gate: ✅ pass**\n", t, api, name="sroie") == "updated"
+    created, edited = (c for c in api.calls if c[0] != "GET")
+    assert created[3]["body"].startswith(
+        "<!-- llm-release-gate:support-agent -->\n`support-agent` · **Release gate"
+    )
+    assert edited[1].endswith("/comments/2")
