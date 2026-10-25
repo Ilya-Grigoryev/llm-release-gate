@@ -1,0 +1,516 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Workbench member support</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Schibsted+Grotesk:wght@400;500;600;700;800&display=swap">
+<style>
+/*
+  Workbench member support: a coworking space's support chat, answered by an LLM agent with tools over the booking system.
+  Job: let a person play the member and watch a real agent act on a real (in-memory) database.
+
+  Color   concrete #e4e6e1 page · sheet #fafaf7 panels · ink #1b221e · felt #2d5a4a brand and rooms
+          slate #5f7a8a desks · marker #f3d046 what the agent changed · alarm #b03c34 refusals and errors
+  Type    Schibsted Grotesk for everything (800 wordmark, 600 headings, 400 text); JetBrains Mono only for tool calls,
+          which are code. Scale 12 / 13.5 / 15 / 18 / 24.
+  Layout  header strip; the member's side at left (part, chat, composer), the system's side at right (the booking board,
+          credits, the check). Left aligned. Below 900px the two sides stack.
+  Bold    the booking board: the agent's lookups ring the member's bookings, its writes leave a marker stroke.
+          Everything else stays quiet: no cards around everything, no capitals labels, no decoration.
+*/
+:root {
+  --concrete: #e4e6e1;
+  --sheet: #fafaf7;
+  --ink: #1b221e;
+  --ink-soft: #57615b;
+  --ink-faint: #8a938d;
+  --line: #cfd3cc;
+  --felt: #2d5a4a;
+  --felt-tint: #dce7e1;
+  --slate: #5f7a8a;
+  --marker: #f3d046;
+  --marker-ink: #3a3000;
+  --alarm: #b03c34;
+  --alarm-tint: #f6e1de;
+  --ok: #2d6a3f;
+  --f-text: "Schibsted Grotesk", "Helvetica Neue", Arial, sans-serif;
+  --f-code: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --concrete: #141816; --sheet: #1b201d; --ink: #e5eae6; --ink-soft: #a1aba4; --ink-faint: #6f7a73; --line: #2d3530;
+    --felt: #5b9a82; --felt-tint: #20352c; --slate: #7f9cad; --marker: #e6c33a; --marker-ink: #1d1800;
+    --alarm: #e47a70; --alarm-tint: #3a1d1a; --ok: #6cc28a; color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body { margin: 0; background: var(--concrete); color: var(--ink); font: 15px/1.5 var(--f-text); }
+button, select, textarea { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--felt); outline-offset: 2px; }
+
+/* header */
+.top {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 12px 24px; padding: 12px 24px;
+  background: var(--sheet); border-bottom: 1px solid var(--line);
+}
+.brand { display: flex; align-items: center; gap: 10px; margin-right: auto; }
+.brand svg { width: 30px; height: 30px; color: var(--felt); flex: none; }
+.brand b { font-size: 22px; font-weight: 800; letter-spacing: -0.03em; }
+.brand span { color: var(--ink-soft); font-size: 15px; }
+.controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.controls label { color: var(--ink-soft); font-size: 13.5px; }
+select {
+  background: var(--concrete); border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; max-width: 280px;
+}
+.btn { border: 1px solid var(--line); background: var(--sheet); border-radius: 6px; padding: 6px 12px; cursor: pointer; }
+.btn:hover:not(:disabled) { border-color: var(--ink-faint); }
+.btn.primary { background: var(--felt); border-color: var(--felt); color: #fff; font-weight: 600; }
+.btn:disabled { opacity: 0.45; cursor: default; }
+.honest { flex-basis: 100%; margin: 0; color: var(--ink-soft); font-size: 13.5px; }
+
+/* two sides */
+main { display: grid; grid-template-columns: minmax(360px, 5fr) minmax(0, 7fr); height: calc(100% - var(--top, 96px)); }
+.side { min-width: 0; min-height: 0; }
+.member { display: flex; flex-direction: column; border-right: 1px solid var(--line); }
+.system { overflow: auto; padding: 20px 24px 40px; display: grid; grid-auto-rows: max-content; gap: 28px; align-content: start; }
+@media (max-width: 900px) {
+  main { grid-template-columns: minmax(0, 1fr); height: auto; }
+  .member { border-right: 0; border-bottom: 1px solid var(--line); }
+  .chat { max-height: 70vh; }
+}
+
+/* the part you play */
+.part { padding: 16px 20px; border-bottom: 1px solid var(--line); background: var(--sheet); display: grid; gap: 6px; }
+.part h2 { margin: 0; font-size: 15px; font-weight: 600; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.part p { margin: 0; color: var(--ink-soft); font-size: 13.5px; max-width: 62ch; }
+.part .who { color: var(--ink); font-size: 15px; }
+.tag { font-size: 12px; font-weight: 500; color: var(--felt); background: var(--felt-tint); border-radius: 4px; padding: 1px 7px; }
+
+/* chat */
+.chat { flex: 1; overflow: auto; padding: 18px 20px; display: flex; flex-direction: column; gap: 10px; }
+.msg { max-width: 82%; display: grid; gap: 2px; }
+.msg .by { font-size: 12px; color: var(--ink-faint); }
+.msg .text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.msg.agent .text { background: var(--sheet); border: 1px solid var(--line); border-radius: 4px 14px 14px 14px; padding: 8px 12px; }
+.msg.user { align-self: flex-end; }
+.msg.user .by { text-align: right; }
+.msg.user .text { background: var(--felt); color: #fff; border-radius: 14px 4px 14px 14px; padding: 8px 12px; }
+.ended { font-size: 12px; color: var(--ink-faint); text-align: right; }
+.tool {
+  align-self: stretch; margin-left: 10px; padding: 2px 0 2px 12px; border-left: 2px dotted var(--line);
+  font: 12.5px/1.45 var(--f-code); color: var(--ink-soft); overflow-wrap: anywhere;
+}
+.tool .fn { color: var(--ink); font-weight: 500; }
+.tool .res { display: block; color: var(--ink-soft); }
+.tool .res.write { color: var(--ink); }
+.tool .res.write mark { background: var(--marker); color: var(--marker-ink); padding: 0 3px; border-radius: 2px; }
+.tool .res.err { color: var(--alarm); }
+.chat.quiet .tool { display: none; }
+.working { color: var(--ink-faint); font-size: 13.5px; display: flex; gap: 8px; align-items: center; }
+.dots { display: inline-flex; gap: 3px; }
+.dots i { width: 5px; height: 5px; border-radius: 50%; background: currentColor; display: block; }
+@media (prefers-reduced-motion: no-preference) {
+  .dots i { animation: blink 1.2s infinite; }
+  .dots i:nth-child(2) { animation-delay: 0.2s; }
+  .dots i:nth-child(3) { animation-delay: 0.4s; }
+}
+@keyframes blink { 0%, 80%, 100% { opacity: 0.25; } 40% { opacity: 1; } }
+.error { background: var(--alarm-tint); color: var(--alarm); border-radius: 6px; padding: 8px 12px; font-size: 13.5px; }
+
+.composer { border-top: 1px solid var(--line); background: var(--sheet); padding: 12px 20px 14px; display: grid; gap: 8px; }
+.composer textarea {
+  width: 100%; resize: none; min-height: 64px; border: 1px solid var(--line); border-radius: 8px; padding: 9px 12px;
+  background: var(--concrete);
+}
+.composer textarea:disabled { opacity: 0.6; }
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.row .grow { margin-right: auto; }
+.row label.grow:not(.switch) { color: var(--ink-faint); font-size: 12px; }
+.switch { display: inline-flex; gap: 6px; align-items: center; font-size: 13.5px; color: var(--ink-soft); cursor: pointer; }
+
+/* booking board */
+.system h2 { margin: 0; font-size: 18px; font-weight: 600; letter-spacing: -0.01em; }
+.system .sub { margin: 2px 0 0; color: var(--ink-soft); font-size: 13.5px; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12px; color: var(--ink-soft); margin-top: 10px; }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.chip { width: 18px; height: 10px; border-radius: 2px; display: inline-block; }
+.chip.desk { background: var(--slate); }
+.chip.room { background: var(--felt); }
+.chip.gone { background: repeating-linear-gradient(135deg, var(--line) 0 3px, transparent 3px 6px); border: 1px solid var(--line); }
+.chip.mark { background: var(--marker); }
+.chip.yours { border: 2px solid var(--ink); }
+.board { overflow-x: auto; background: var(--sheet); border: 1px solid var(--line); border-radius: 8px; padding: 6px 0 10px; }
+.grid { min-width: 600px; display: grid; grid-template-columns: 62px 84px 1fr; }
+.hours { grid-column: 3; position: relative; height: 20px; margin-right: 14px; }
+.hours span { position: absolute; top: 2px; transform: translateX(-50%); font-size: 11px; color: var(--ink-faint); font-variant-numeric: tabular-nums; }
+.day { grid-column: 1; padding: 6px 0 0 14px; border-top: 1px solid var(--line); }
+.day b { display: block; font-size: 15px; font-weight: 600; line-height: 1.1; }
+.day small { color: var(--ink-faint); font-size: 12px; }
+.day.today b::after { content: " today"; font-size: 11px; font-weight: 500; color: var(--felt); }
+.space { grid-column: 2; font-size: 12px; color: var(--ink-soft); height: 22px; line-height: 22px; white-space: nowrap; }
+.lane { grid-column: 3; position: relative; height: 22px; margin-right: 14px; }
+.lane::before { content: ""; position: absolute; left: 0; right: 0; top: 50%; border-top: 1px dashed var(--line); }
+.first { border-top: 1px solid var(--line); padding-top: 6px; height: 28px; line-height: 16px; }
+.lane.first::before { top: calc(50% + 3px); }
+.past { position: absolute; top: 0; bottom: 0; left: 0; background: repeating-linear-gradient(90deg, transparent 0 4px, var(--concrete) 4px 6px); opacity: 0.9; }
+.now { position: absolute; top: -4px; bottom: -4px; border-left: 2px solid var(--felt); }
+.bk {
+  position: absolute; top: 3px; bottom: 3px; border-radius: 3px; color: #fff; font-size: 11px; line-height: 16px;
+  padding: 0 5px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+}
+.lane.first .bk { top: 9px; }
+.bk.desk { background: var(--slate); }
+.bk.room { background: var(--felt); }
+.bk.yours { box-shadow: 0 0 0 2px var(--sheet), 0 0 0 4px var(--ink); }
+.bk.gone { background: repeating-linear-gradient(135deg, var(--line) 0 3px, transparent 3px 6px); color: var(--ink-faint); text-decoration: line-through; }
+.bk.mark { box-shadow: 0 0 0 3px var(--marker); }
+.bk.new { background: var(--marker); color: var(--marker-ink); font-weight: 600; }
+.bk.ring { outline: 2px solid var(--marker); outline-offset: 2px; }
+@media (prefers-reduced-motion: no-preference) {
+  .bk.ring { animation: ring 1.6s ease-out 1; }
+  .bk.fresh { animation: swipe 0.6s ease-out 1; }
+}
+@keyframes ring { 0% { outline-color: var(--marker); outline-offset: 6px; } 100% { outline-color: transparent; outline-offset: 1px; } }
+@keyframes swipe { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
+
+.ledger { display: grid; gap: 6px; font-size: 13.5px; }
+.ledger .line { display: flex; gap: 10px; align-items: baseline; }
+.ledger .line b { font-weight: 600; min-width: 92px; }
+.ledger .empty { color: var(--ink-faint); }
+.ledger mark { background: var(--marker); color: var(--marker-ink); padding: 0 4px; border-radius: 2px; }
+
+/* the check */
+.check { border-top: 3px solid var(--line); padding-top: 14px; display: grid; gap: 10px; }
+.check.pass { border-top-color: var(--ok); }
+.check.fail { border-top-color: var(--alarm); }
+.check .verdict { font-size: 18px; font-weight: 600; letter-spacing: -0.01em; }
+.check.pass .verdict { color: var(--ok); }
+.check.fail .verdict { color: var(--alarm); }
+.cmp { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 20px; font-size: 13.5px; }
+.cmp h3 { margin: 0; font-size: 12px; font-weight: 600; color: var(--ink-soft); }
+.cmp ul { margin: 0; padding-left: 18px; }
+.check .note { margin: 0; color: var(--ink-soft); font-size: 13.5px; max-width: 70ch; }
+.check.waiting { border-top-style: dashed; }
+.check.waiting p { margin: 0; color: var(--ink-soft); font-size: 13.5px; max-width: 70ch; }
+.usage { color: var(--ink-faint); font-size: 12px; }
+</style>
+</head>
+<body>
+<header class="top" id="top">
+  <div class="brand">
+    <svg viewBox="0 0 32 32" aria-hidden="true"><rect x="3" y="9" width="26" height="5" rx="1.5" fill="currentColor"/><rect x="6" y="14" width="3" height="12" rx="1" fill="currentColor"/><rect x="23" y="14" width="3" height="12" rx="1" fill="currentColor"/><rect x="12" y="4" width="8" height="5" rx="1" fill="currentColor" opacity="0.55"/></svg>
+    <b>Workbench</b><span>Member support</span>
+  </div>
+  <div class="controls">
+    <label for="case">Scenario</label>
+    <select id="case"></select>
+    <button class="btn" id="restart" type="button">Restart</button>
+    <button class="btn" id="simulate" type="button">Let the simulated member play</button>
+  </div>
+  <p class="honest" id="honest">A live agent on an in-memory copy of the booking system. Bookings, credits and members are made up and reset with the scenario.</p>
+</header>
+
+<main>
+  <section class="side member" aria-label="The member's side">
+    <div class="part" id="part"></div>
+    <div class="chat" id="chat" aria-live="polite"></div>
+    <form class="composer" id="composer">
+      <div class="row"><label for="text" class="grow">Enter sends, Shift+Enter adds a line</label><span class="usage" id="usage"></span></div>
+      <textarea id="text" rows="2" placeholder="Hi, I'd like to cancel my booking"></textarea>
+      <div class="row">
+        <label class="switch grow"><input type="checkbox" id="show-tools" checked> Show the agent's tool calls</label>
+        <button class="btn" id="finish" type="button">Finish and check</button>
+        <button class="btn primary" id="send" type="submit">Send</button>
+      </div>
+    </form>
+  </section>
+
+  <section class="side system" aria-label="The booking system">
+    <div>
+      <h2>Booking board</h2>
+      <p class="sub" id="range"></p>
+      <div class="legend">
+        <span><i class="chip desk"></i>desk</span>
+        <span><i class="chip room"></i>meeting room</span>
+        <span><i class="chip yours"></i>your bookings</span>
+        <span><i class="chip mark"></i>changed by the agent</span>
+        <span><i class="chip gone"></i>cancelled</span>
+      </div>
+    </div>
+    <div class="board"><div class="grid" id="grid"></div></div>
+    <div class="ledger" id="ledger"></div>
+    <div class="check waiting" id="check"></div>
+  </section>
+</main>
+
+<script>
+(function () {
+  "use strict";
+  var $ = function (id) { return document.getElementById(id); };
+  var shown = 0, polling = false, snap = null, ringed = -1, freshIds = {};
+  var DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  var OPEN = 8, CLOSE = 20;
+
+  function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+  function parse(iso) { var d = iso.split("T")[0].split("-"), t = (iso.split("T")[1] || "00:00").split(":"); return { y: +d[0], m: +d[1], d: +d[2], h: +t[0], min: +t[1], key: iso.split("T")[0] }; }
+  function dow(p) { return new Date(Date.UTC(p.y, p.m - 1, p.d)).getUTCDay(); }
+  function when(iso) { var p = parse(iso); return DAYS[dow(p)] + " " + p.d + " " + MONTHS[p.m - 1] + " " + String(p.h).padStart(2, "0") + ":" + String(p.min).padStart(2, "0"); }
+  function addDays(key, n) { var p = parse(key); var t = new Date(Date.UTC(p.y, p.m - 1, p.d + n)); return t.toISOString().slice(0, 10); }
+
+  async function api(path, body) {
+    var r = await fetch(path, body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    var data = await r.json();
+    if (!r.ok) throw new Error(data.error || ("HTTP " + r.status));
+    return data;
+  }
+
+  /* ---- chat ---- */
+  function member(s) { var m = /You are ([^.]+)\./.exec(s.case.known); return m ? m[1] : "the member"; }
+  function args(a) {
+    return Object.keys(a || {}).map(function (k) {
+      var v = typeof a[k] === "string" ? '"' + (a[k].length > 48 ? a[k].slice(0, 46) + "…" : a[k]) + '"' : JSON.stringify(a[k]);
+      return k + ": " + v;
+    }).join(", ");
+  }
+  function spaceName(id) { var s = (snap.tables.spaces || []).find(function (x) { return x.id === id; }); return s ? s.name : id; }
+  function summary(e) {
+    var r = e.result;
+    if (e.error) return { cls: "err", html: "refused: " + esc(e.error) };
+    switch (e.tool) {
+      case "find_member": case "get_member": return { html: esc(r.name + ", " + r.plan + " plan, " + r.id) };
+      case "list_bookings":
+        if (!r.length) return { html: "no active bookings" };
+        return { html: r.map(function (b) { return esc(b.booking_id + " " + spaceName(b.space_id) + ", " + when(b.start) + ", " + b.hours + " h"); }).join("; ") };
+      case "search_availability": return { html: r.length ? "free: " + esc(r.map(function (s) { return s.name; }).join(", ")) : "nothing free" };
+      case "create_booking": return { cls: "write", html: "<mark>booked " + esc(r.booking_id) + "</mark> " + esc(spaceName(r.space_id) + ", " + when(r.start) + ", " + r.hours + " h, €" + r.price_eur) };
+      case "cancel_booking": return { cls: "write", html: "<mark>cancelled " + esc(r.booking_id) + "</mark>" };
+      case "issue_credit": return { cls: "write", html: "<mark>credit €" + esc(r.amount_eur) + "</mark> " + esc(r.credit_id) };
+      case "escalate_to_human": return { cls: "write", html: "<mark>handed to staff</mark> " + esc(r.ticket) };
+    }
+    return { html: esc(JSON.stringify(r)) };
+  }
+  function addEvent(e, s) {
+    var chat = $("chat"), el = document.createElement("div");
+    if (e.tool) {
+      var sum = summary(e);
+      el.className = "tool";
+      el.innerHTML = '<span class="fn">' + esc(e.tool) + "</span>(" + esc(args(e.args)) + ')<span class="res ' + (sum.cls || "") + '">' + sum.html + "</span>";
+    } else if (e.role === "agent") {
+      el.className = "msg agent";
+      el.innerHTML = '<span class="by">Workbench agent</span><span class="text">' + esc(e.text).replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>") + "</span>";
+    } else {
+      var stop = e.text.indexOf("###STOP###") >= 0, text = e.text.replace("###STOP###", "").trim();
+      el.className = "msg user";
+      el.innerHTML = '<span class="by">' + (s.mode === "you" ? "You, as " + esc(member(s)) : "Simulated " + esc(member(s))) + '</span><span class="text">' + esc(text || "…") + "</span>" + (stop ? '<span class="ended">ended the chat</span>' : "");
+    }
+    chat.appendChild(el);
+  }
+  function renderChat(s, all) {
+    var chat = $("chat");
+    if (all) { chat.innerHTML = ""; shown = 0; }
+    s.events.forEach(function (e) { addEvent(e, s); });
+    shown = s.count;
+    var old = chat.querySelector(".working, .error.live");
+    if (old) old.remove();
+    if (s.busy) {
+      var w = document.createElement("div");
+      w.className = "working";
+      w.innerHTML = '<span class="dots"><i></i><i></i><i></i></span> The agent is working';
+      chat.appendChild(w);
+    }
+    if (s.error) {
+      var er = document.createElement("div");
+      er.className = "error live";
+      er.textContent = "The model call failed: " + s.error;
+      chat.appendChild(er);
+    }
+    chat.scrollTop = chat.scrollHeight;
+  }
+
+  /* ---- the part ---- */
+  function renderPart(s) {
+    var mine = s.mode === "you";
+    $("part").innerHTML = "<h2>" + (mine ? "Your part" : "The simulator's part") + ' <span class="tag">' + esc(s.case.category) + "</span></h2>" +
+      '<p class="who">' + esc(s.case.known) + "</p><p>" + esc(s.case.instructions) + "</p>" +
+      (mine ? "" : "<p>The simulated member from the test set plays this part, as in the gate's chat runs.</p>");
+  }
+
+  /* ---- board ---- */
+  function memberIdOf(s) {
+    var m = /[\w.+-]+@[\w.-]+/.exec(s.case.known);
+    var hit = m && (s.tables.members || []).find(function (x) { return x.email === m[0]; });
+    return hit ? hit.id : null;
+  }
+  function lookedUp(s) {
+    var base = s.count - s.events.length, id = null;
+    s.events.forEach(function (e, j) {
+      if (base + j <= ringed || !e.tool) return;
+      ringed = base + j;
+      var lookup = ["find_member", "get_member", "list_bookings"].indexOf(e.tool) >= 0 && !e.error;
+      id = lookup ? (e.args && e.args.member_id) || (e.result && e.result.id) || null : null;
+    });
+    return id;
+  }
+  function renderBoard(s) {
+    var t = s.tables, now = parse(s.case.now), you = memberIdOf(s), ring = lookedUp(s);
+    var names = {}; (t.members || []).forEach(function (m) { names[m.id] = m.name.split(" ")[0]; });
+    var monday = addDays(now.key, -((dow(now) + 6) % 7));
+    var days = [0, 1, 2, 3, 4].map(function (n) { return addDays(monday, n); });
+    (t.bookings || []).forEach(function (b) { var k = b.start.slice(0, 10); if (days.indexOf(k) < 0) days.push(k); });
+    days.sort();
+    var first = parse(days[0]), last = parse(days[days.length - 1]);
+    $("range").textContent = first.d + " " + MONTHS[first.m - 1] + " to " + last.d + " " + MONTHS[last.m - 1] + " " + last.y + ", open 08:00 to 20:00. It is " + when(s.case.now) + " for the agent.";
+    var g = $("grid"), html = '<div></div><div></div><div class="hours">';
+    for (var h = OPEN; h <= CLOSE; h += 2) html += '<span style="left:' + ((h - OPEN) / (CLOSE - OPEN) * 100) + '%">' + String(h).padStart(2, "0") + "</span>";
+    html += "</div>";
+    var spaces = t.spaces || [];
+    days.forEach(function (key) {
+      var p = parse(key), today = key === now.key;
+      html += '<div class="day' + (today ? " today" : "") + '" style="grid-row: span ' + spaces.length + '"><b>' + DAYS[dow(p)] + "</b><small>" + p.d + " " + MONTHS[p.m - 1] + "</small></div>";
+      spaces.forEach(function (sp, si) {
+        var cls = si === 0 ? " first" : "";
+        html += '<div class="space' + cls + '">' + esc(sp.name) + '</div><div class="lane' + cls + '">';
+        if (key < now.key) html += '<div class="past" style="width:100%"></div>';
+        if (today) {
+          var pastW = Math.max(0, Math.min(1, (now.h + now.min / 60 - OPEN) / (CLOSE - OPEN))) * 100;
+          html += '<div class="past" style="width:' + pastW + '%"></div><div class="now" style="left:' + pastW + '%" title="now"></div>';
+        }
+        (t.bookings || []).forEach(function (b) {
+          if (b.space_id !== sp.id || b.start.slice(0, 10) !== key) return;
+          var bp = parse(b.start), left = (bp.h + bp.min / 60 - OPEN) / (CLOSE - OPEN) * 100, width = b.hours / (CLOSE - OPEN) * 100;
+          var isNew = s.initial.indexOf(b.id) < 0, gone = b.status !== "active", c = ["bk", sp.kind];
+          if (b.member_id === you) c.push("yours");
+          if (gone) c.push("gone");
+          if (isNew && !gone) { c.push("new"); if (!freshIds[b.id]) { c.push("fresh"); freshIds[b.id] = 1; } }
+          if (!isNew && gone) c.push("mark");
+          if (ring && b.member_id === ring && !gone) c.push("ring");
+          var label = (names[b.member_id] || b.member_id) + " " + bp.h + "–" + (bp.h + b.hours);
+          html += '<div class="' + c.join(" ") + '" style="left:' + left + "%;width:" + width + '%" title="' + esc(b.id + ": " + (names[b.member_id] || b.member_id) + ", " + sp.name + ", " + when(b.start) + ", " + b.hours + " h, " + b.status) + '">' + esc(label) + "</div>";
+        });
+        html += "</div>";
+      });
+    });
+    g.innerHTML = html;
+  }
+  function renderLedger(s) {
+    var t = s.tables, full = {}; (t.members || []).forEach(function (m) { full[m.id] = m.name; });
+    var credits = (t.credits || []).map(function (c) { return "<mark>€" + esc(c.amount_eur) + "</mark> to " + esc(full[c.member_id] || c.member_id) + ": " + esc(c.reason); });
+    var esc2 = (t.escalations || []).map(function (e) { return "<mark>" + esc(full[e.member_id] || e.member_id) + "</mark>: " + esc(e.summary); });
+    $("ledger").innerHTML =
+      '<div class="line"><b>Credits</b><span>' + (credits.join("<br>") || '<span class="empty">none issued</span>') + "</span></div>" +
+      '<div class="line"><b>Handed to staff</b><span>' + (esc2.join("<br>") || '<span class="empty">nothing</span>') + "</span></div>";
+  }
+
+  /* ---- the check ---- */
+  function describe(change, s) {
+    var full = {}; (s.tables.members || []).forEach(function (m) { full[m.id] = m.name; });
+    var out = [];
+    (change.created || []).forEach(function (c) { out.push("booked a " + (c.space === "desk" ? "desk" : spaceName(c.space)) + " for " + full[c.member_id] + ", " + when(c.start) + ", " + c.hours + " h"); });
+    (change.cancelled || []).forEach(function (id) { out.push("cancelled " + id); });
+    (change.credits || []).forEach(function (c) { out.push("credit €" + c.amount_eur + " to " + full[c.member_id]); });
+    (change.escalations || []).forEach(function (id) { out.push("handed " + full[id] + " to staff"); });
+    return out.length ? out : ["no change"];
+  }
+  function renderCheck(s) {
+    var el = $("check"), r = s.result;
+    if (!r) {
+      el.className = "check waiting";
+      el.innerHTML = "<p>When the chat is over, <b>Finish and check</b> compares what changed in the database with the change this case expects.</p>";
+      return;
+    }
+    el.className = "check " + (r.match ? "pass" : "fail");
+    var li = function (xs) { return "<ul>" + xs.map(function (x) { return "<li>" + esc(x) + "</li>"; }).join("") + "</ul>"; };
+    el.innerHTML = '<div class="verdict">' + (r.match ? "The database changed exactly as the case expects" : "The database does not match the case") + "</div>" +
+      '<div class="cmp"><div><h3>The agent did</h3>' + li(describe(r.got, s)) + "</div><div><h3>The case expects</h3>" + li(describe(r.want, s)) + "</div></div>" +
+      '<p class="note">The release gate checks more than the end state: that the agent looked the member up before changing anything, issued no credit above €30, and used at most 15 model calls.</p>';
+  }
+
+  /* ---- controls ---- */
+  function renderControls(s) {
+    var over = !!s.stop || s.mode !== "you";
+    $("text").disabled = s.busy || over;
+    $("send").disabled = s.busy || over;
+    $("finish").disabled = s.busy || !!s.result;
+    $("simulate").disabled = s.busy;
+    $("restart").disabled = s.busy;
+    $("case").disabled = s.busy;
+    $("case").value = s.case.id;
+    var tk = s.tokens, u = "Agent " + tk.agent[0].toLocaleString("en") + " tokens in, " + tk.agent[1].toLocaleString("en") + " out";
+    if (tk.user[0]) u += "; simulated member " + tk.user[0].toLocaleString("en") + " in, " + tk.user[1].toLocaleString("en") + " out";
+    $("usage").textContent = u;
+    $("text").placeholder = s.mode === "you" ? (s.stop ? "This chat is over. Restart the scenario to try again." : "Write as " + member(s)) : "The simulated member is writing";
+    $("honest").textContent = "A live agent (" + s.model + ") on an in-memory copy of the booking system. Bookings, credits and members are made up and reset with the scenario.";
+  }
+
+  function render(s, all, reset) {
+    snap = s;
+    if (reset) { freshIds = {}; ringed = -1; }
+    renderPart(s);
+    renderChat(s, all);
+    renderBoard(s);
+    renderLedger(s);
+    renderCheck(s);
+    renderControls(s);
+    document.documentElement.style.setProperty("--top", $("top").offsetHeight + "px");
+    if (s.busy) poll();
+  }
+  async function poll() {
+    if (polling) return;
+    polling = true;
+    try {
+      while (true) {
+        await new Promise(function (r) { setTimeout(r, 450); });
+        var s = await api("/api/state?since=" + shown), all = false;
+        if (s.count < shown) { s = await api("/api/state?since=0"); all = true; }
+        render(s, all, false);
+        if (!s.busy) break;
+      }
+    } catch (e) { showError(e); }
+    polling = false;
+  }
+  function showError(e) {
+    var el = document.createElement("div");
+    el.className = "error";
+    el.textContent = e.message;
+    $("chat").appendChild(el);
+    $("chat").scrollTop = $("chat").scrollHeight;
+  }
+  async function act(path, body, reset) {
+    try { render(await api(path, body), true, reset); } catch (e) { showError(e); }
+  }
+
+  $("composer").addEventListener("submit", async function (ev) {
+    ev.preventDefault();
+    var text = $("text").value.trim();
+    if (!text) return;
+    $("text").value = "";
+    act("/api/say", { text: text }, false);
+  });
+  $("text").addEventListener("keydown", function (ev) {
+    if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); $("composer").requestSubmit(); }
+  });
+  $("finish").addEventListener("click", function () { act("/api/finish", {}, false); });
+  $("simulate").addEventListener("click", function () { act("/api/simulate", {}, true); });
+  $("restart").addEventListener("click", function () { act("/api/start", { case: $("case").value }, true); });
+  $("case").addEventListener("change", function () { act("/api/start", { case: $("case").value }, true); });
+  $("show-tools").addEventListener("change", function () { $("chat").classList.toggle("quiet", !this.checked); });
+
+  (async function init() {
+    try {
+      var cases = await api("/api/cases");
+      $("case").innerHTML = cases.map(function (c) {
+        var title = c.id.replace(/-/g, " ");
+        return '<option value="' + esc(c.id) + '">' + esc(title.charAt(0).toUpperCase() + title.slice(1)) + " (" + esc(c.category) + ")</option>";
+      }).join("");
+      render(await api("/api/state?since=0"), true, true);
+    } catch (e) { showError(e); }
+  })();
+})();
+</script>
+</body>
+</html>

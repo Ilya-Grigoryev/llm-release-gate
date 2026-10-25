@@ -67,6 +67,18 @@ whether they match. `--out runs.jsonl` keeps one line per run with the time, the
 The database comparison sees only the end state. An agent that skips the name check, or one whose simulated member did
 the work, can still match it; checks on the agent's own steps come with the gate's trace.
 
+## In the browser
+
+```sh
+uv run --env-file ../../.env python -m support_agent.web   # then open http://127.0.0.1:8765
+```
+
+You play the member of a case you pick: the page shows the part to play, the chat, each tool call the agent makes, and
+the booking board, where the agent's lookups ring your bookings and its changes stay marked. **Let the simulated member
+play** runs the case with the test set's simulator instead. **Finish and check** compares the change to the database
+with the case's reference. The agent is the version under test (`configs/support.yaml`, `policy.md`, `tools.yaml`); the
+world lives in memory and resets with the case. One chat at a time, on 127.0.0.1 only.
+
 ## Under the gate
 
 `configs/support.yaml` is the version under test: the agent's model, `policy.md` and `tools.yaml`; the step limit

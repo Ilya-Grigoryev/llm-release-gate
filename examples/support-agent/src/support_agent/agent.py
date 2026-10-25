@@ -155,12 +155,13 @@ def run(
     user: dict | None = None,
     max_steps: int = 20,
     max_turns: int = 10,
+    transcript: Transcript | None = None,
 ) -> Transcript:
     """One run of a case. Without `user` the agent works alone on the ticket; with it, a simulated member chats.
 
-    `user` holds the simulator's `client`, `model`, `params` and `guidelines`.
+    `user` holds the simulator's `client`, `model`, `params` and `guidelines`. Pass `transcript` to watch it fill.
     """
-    transcript = Transcript()
+    transcript = Transcript() if transcript is None else transcript
     if user is None:
         agent = Agent(
             client, model, params, policy + SOLO, tools, world, transcript, max_steps
