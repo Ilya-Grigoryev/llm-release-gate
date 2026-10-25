@@ -187,3 +187,21 @@ def test_is_alias():
         "claude-sonnet-4-5-20250929"
     )
     assert not is_alias(None)
+
+
+def test_a_model_change_with_an_alias_is_compared():
+    base = alias_arm("gpt-4.1-mini-2025-04-14", 10)
+    base.records[("case-1", 0)]["model"] = "gpt-4.1-mini-2025-04-14"
+    candidate = alias_arm("gpt-6-luna", 10)
+    candidate.records[("case-1", 0)]["model"] = "gpt-6-luna"
+    pair(base, candidate)  # different requested models: the reported ones may differ
+    other = alias_arm("gpt-6-sol", 10)
+    other.records[("case-1", 0)]["model"] = "gpt-6-sol"
+    pair(candidate, other)
+
+
+def test_times_without_a_zone_count_as_utc():
+    a = alias_arm("gpt-6-luna", 10)
+    b = alias_arm("gpt-6-luna", 10)
+    b.records[("case-1", 0)]["timestamp"] = "2026-10-25T10:30:00"  # no zone
+    pair(a, b)

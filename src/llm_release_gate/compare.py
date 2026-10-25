@@ -95,14 +95,22 @@ def pair(base: Arm, candidate: Arm) -> dict[str, tuple[list[dict], list[dict]]]:
                 f"model {names} has no date, so the provider may have changed it while these runs were made: "
                 f"they have a pause of {gap}; run both versions together"
             )
-        reported = [
-            {r.get("model") for r in arm.records.values()} for arm in (base, candidate)
-        ]
-        if reported[0] != reported[1]:
-            raise Mismatch(
-                f"model {names}: the provider reported {sorted(map(str, reported[0]))} for the base "
-                f"and {sorted(map(str, reported[1]))} for the candidate"
-            )
+        for alias in sorted(
+            base.aliases & candidate.aliases
+        ):  # a model change between the versions is fine
+            reported = [
+                {
+                    r.get("model")
+                    for r in arm.records.values()
+                    if r.get("requested_model") == alias
+                }
+                for arm in (base, candidate)
+            ]
+            if reported[0] != reported[1]:
+                raise Mismatch(
+                    f"model {alias}: the provider reported {sorted(map(str, reported[0]))} for the base "
+                    f"and {sorted(map(str, reported[1]))} for the candidate"
+                )
     b, c = by_case(base), by_case(candidate)
     one_sided = sorted(b.keys() ^ c.keys())
     if one_sided:

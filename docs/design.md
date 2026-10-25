@@ -35,7 +35,7 @@ target architecture.
   module's `VERSION`.
 - A model is a dated snapshot when there is one. A name without a date is accepted (`is_alias`) with three precautions:
   the record keeps the requested and the reported model and the time, the report warns, and comparison refuses runs with
-  a pause longer than an hour or with different reported models.
+  a pause longer than an hour, or runs that asked for the same model and got different ones.
 
 ### Golden set (built)
 

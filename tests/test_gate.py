@@ -320,3 +320,34 @@ def test_the_comment_warns_about_a_model_without_a_date():
     arm = gate.Arm("c" * 64, "s" * 64, "metrics/5", {}, frozenset({"gpt-6-luna"}))
     v = gate.naive({"a": 1.0}, {"a": 1.0}, 5)
     assert "Model without a date (gpt-6-luna)" in gate.markdown(v, arm, arm)
+
+
+def test_the_json_report_lists_models_without_a_date(tmp_path, monkeypatch):
+    import json as js
+
+    records = []
+    for arm in ("base", "candidate"):
+        r = {
+            "record_version": 4,
+            "config_hash": "c" * 64,
+            "set_hash": "s" * 64,
+            "case": "a",
+            "rep": 0,
+            "timestamp": "2026-10-25T10:00:00+00:00",
+            "requested_model": "gpt-6-luna",
+            "model": "gpt-6-luna",
+            "scorer_version": "metrics/5",
+            "score": 1.0,
+            "hits": {"x": True},
+            "error": None,
+        }
+        path = tmp_path / f"{arm}.jsonl"
+        path.write_text(js.dumps(r) + "\n")
+        records.append(path)
+    out = tmp_path / "v.json"
+    code = gate.main(
+        ["--base", str(records[0]), "--candidate", str(records[1]), "--json", str(out)]
+    )
+    assert code == 0 and js.loads(out.read_text())["models_without_date"] == [
+        "gpt-6-luna"
+    ]

@@ -31,7 +31,7 @@ params: {temperature: 0}
 Prefer a dated snapshot. A name without a date (`gpt-6-luna`) works, but the provider may change the model behind it,
 so the gate takes three precautions: every record keeps the requested model next to the one the provider reports and the
 time, the gate's comment warns about it, and the gate refuses to compare two versions whose runs, taken together, have a
-pause longer than an hour, or for which the provider reported different models.
+pause longer than an hour, or that asked for the same model and got different ones from the provider.
 
 The gate's code imports no pipeline. Give your module a `VERSION` and bump it when your code changes what the model gets. [`examples/sroie/`](examples/sroie/) is a whole project set up this way.
 
