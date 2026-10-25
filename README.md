@@ -35,6 +35,33 @@ pause longer than an hour, or for which the provider reported different models.
 
 The gate's code imports no pipeline. Give your module a `VERSION` and bump it when your code changes what the model gets. [`examples/sroie/`](examples/sroie/) is a whole project set up this way.
 
+### Any program
+
+An application in another language needs no Python adapter. Name the program in the config:
+
+```yaml
+pipeline: command
+command: [node, agent.js]
+model: gpt-5.4-mini-2026-03-17
+prompt: prompts/system.md
+input: text
+```
+
+For each run the gate writes one JSON request to the program's stdin: the case id, the absolute paths of its inputs and
+the version (model, prompt paths, input, params); never the expected values. The program writes one JSON answer to
+stdout: `output`, and optionally `raw`, `input_tokens`, `output_tokens`, `model` and a `trace` with `steps`,
+`final_state`, `state_change` and `stop` (the format below). The exit code decides the rest:
+
+| Exit | Meaning |
+|---|---|
+| 0 | the answer |
+| 75 | try again later (rate limit, upstream timeout): the runner backs off and retries |
+| 78 | stop the whole run (no quota, wrong key) |
+| other, or no answer within `timeout_s` | this run fails; a timeout is retried |
+
+`command` is part of the version and its hash. [`tests/fixtures/command/agent.sh`](tests/fixtures/command/agent.sh) is a
+small example in shell.
+
 ## Traces
 
 A tool-using agent makes many calls per case. The runner keeps a trace for each run, and your adapter records into it

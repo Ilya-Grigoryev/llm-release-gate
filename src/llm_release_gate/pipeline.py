@@ -60,6 +60,7 @@ class PipelineConfig:
     params: dict[str, Any] = field(default_factory=dict)
     max_retries: int = 5
     timeout_s: float = 60.0
+    command: tuple[str, ...] | None = None  # `pipeline: command` runs this program
 
 
 def plain_numbers(value: Any) -> Any:
@@ -91,7 +92,7 @@ def prompt_files(raw: Any, base: Path) -> Path | dict[str, Path]:
 def load_config(path: Path) -> PipelineConfig:
     """Read a pipeline config. Prompt paths are relative to the config file."""
     raw = yaml.safe_load(Path(path).read_text())
-    optional = {"params", "max_retries", "timeout_s"}
+    optional = {"params", "max_retries", "timeout_s", "command"}
     keys = {"pipeline", "model", "prompt", "input"} | optional
     if not isinstance(raw, dict) or not raw.keys() <= keys:
         raise ValueError(f"{path}: expected a mapping with keys from {sorted(keys)}")
@@ -105,6 +106,17 @@ def load_config(path: Path) -> PipelineConfig:
         raise ValueError(f"{path}: timeout_s must be a finite number > 0")
     if not isinstance(raw["model"], str) or not raw["model"]:
         raise ValueError(f"{path}: model must be a name, got {raw['model']!r}")
+    command = raw.get("command")
+    if (raw["pipeline"] == "command") != (command is not None):
+        raise ValueError(
+            f"{path}: `command` goes with `pipeline: command`, and only with it"
+        )
+    if command is not None and not (
+        isinstance(command, list)
+        and command
+        and all(isinstance(c, str) and c for c in command)
+    ):
+        raise ValueError(f"{path}: command must be a list: [program, argument, ...]")
     try:
         prompt = prompt_files(raw["prompt"], Path(path).parent)
     except ValueError as e:
@@ -117,6 +129,7 @@ def load_config(path: Path) -> PipelineConfig:
         params=plain_numbers(raw.get("params") or {}),
         max_retries=retries,
         timeout_s=float(timeout),  # 60 and 60.0 must hash alike
+        command=tuple(command) if command else None,
     )
 
 
@@ -126,7 +139,9 @@ def is_alias(model: str | None) -> bool:
 
 
 def pipeline_module(name: str) -> ModuleType:
-    """The module named in `pipeline:` by its import path, e.g. `my_app.gate_adapter`."""
+    """The module named in `pipeline:` by its import path, e.g. `my_app.gate_adapter`; `command` is the gate's own."""
+    if name == "command":
+        name = "llm_release_gate.command"
     try:
         module = importlib.import_module(name)
     except Exception as e:  # foreign code: any failure here is a config error
@@ -143,9 +158,12 @@ def config_hash(config: PipelineConfig) -> str:
     pipeline module's VERSION, which the module bumps when its code changes what the model is asked."""
     module = pipeline_module(config.pipeline)
     prompt = config.prompt
+    fields = asdict(config)
+    if fields["command"] is None:  # configs from before `command` keep their hash
+        del fields["command"]
     return canonical_hash(
         {
-            **asdict(config),
+            **fields,
             "prompt": file_hash(prompt)
             if isinstance(prompt, Path)
             else {name: file_hash(p) for name, p in prompt.items()},
