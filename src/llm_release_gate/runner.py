@@ -1,7 +1,7 @@
 """Run a pipeline K times per case and append one JSON record per (case, repetition).
 
 Each run gets a trace (`trace.Trace`): the pipeline records its steps into it, and the record keeps them even when
-the run fails, with the raw provider responses in `<out>.native.jsonl`.
+the run fails, with the raw provider responses in `<stem>.native.jsonl`.
 """
 
 import argparse

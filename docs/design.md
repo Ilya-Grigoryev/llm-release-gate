@@ -40,7 +40,8 @@ over a mock database, alone on a ticket or in a chat with a simulated user).
   the bytes of each prompt file and the module's `VERSION`.
 - **Any program** (`pipeline: command`, `command: [program, args]`): one JSON request on stdin (case id, input paths, the
   version; never the expected values), one JSON answer on stdout (`output`, optionally tokens, model and a trace). Exit 75
-  retries, 78 stops the run, any other non-zero code or a timeout fails the run (a timeout is retried).
+  and a timeout retry; 78, 126, 127 and a program that cannot start stop the run; any other non-zero code fails the run.
+  A trace printed before a failed exit is kept. On timeout the gate kills the program's process group.
 - **Model names.** A dated snapshot when there is one. A name without a date is accepted (`is_alias(model)`) with three
   precautions: the record keeps the requested and the reported model and the time, the report warns, and comparison
   refuses runs with a pause longer than an hour, or runs that asked for the same model and got different ones.
@@ -94,13 +95,14 @@ An adapter records into the current trace without touching the application:
 ### Scoring (built)
 
 `score(expected, actual, scoring, trace=None) -> {"score": float | None, "per_field": {id: bool | float | None}}`; the
-runner's scorer is `hits(case, answer)` (the run's trace taken from the runner), with `hits.version` stored in each record.
+runner's scorer is `hits(case, answer, trace=None)` (by default the run's trace, taken from the runner), with `hits.version` stored in each record.
 
 - `scoring.method` picks the scorer: `field_match` (each expected field against the answer; dates and numbers by value,
   strings after normalisers; a field expected as `null` is not scored) or `checks` (a list of checks).
 - Checks over the answer: `field_match`, `exact`, `contains`, `regex`, `number`, `json_schema`, `refusal`. Over the trace:
   `called`, `not_called`, `order`, `max_steps`, `active`, `actions`, `state`, `doc_found`. Plus `function`
-  (`module:function`). Trace checks look at the last attempt and one actor, and fail without a trace.
+  (`module:function`). Step checks look at the last attempt and one actor; `state` reads `final_state` and
+  `state_change`. Without a trace they fail (`doc_found` with no ids expected is not scored).
 - `aggregate` turns per-check results into the case score: `mean` (default) or `all` (1 only if every scored result is
   full). The record keeps every result.
 - Runs scored by different scorer versions are compared only after rescoring from their saved answers (`gate --golden`).
@@ -112,8 +114,8 @@ runner's scorer is `hits(case, answer)` (the run's trace taken from the runner),
 - `pair(base, candidate) -> {case: (base records, candidate records)}` refuses different sets or scorers, cases on one side
   only, and, for a model without a date, runs that are not close in time.
 - **Built — naive rule.** `naive(base, candidate, threshold_pp, relative=False) -> Verdict`, a pure function over one
-  score per case and version (the earliest repetition): block when the candidate's mean is lower than the base's by more
-  than the threshold (5 points by default, absolute or relative). Means are compared as exact fractions. `Verdict` holds
+  score per case and version (the CLI passes the earliest repetition): block when the candidate's mean is lower than the
+  base's by more than the threshold (absolute or relative; the CLI's default is 5 points). Means are compared as exact fractions. `Verdict` holds
   `outcome`, `exit_code`, `base_mean`, `candidate_mean`, `diff_pp`, `limit_pp`, `rule`, `cases` and the cases that got
   worse. It gives `pass` (0) or `quality fail` (10); `inconclusive` (11) and `budget fail` (12) are reserved for the
   planned rules; `infra error` (20) is any failure to compare.
@@ -126,13 +128,17 @@ runner's scorer is `hits(case, answer)` (the run's trace taken from the runner),
 ### Budget, report and comment
 
 - **Built.** `cost(arm, prices) -> float | None`: a traced record costs what its model steps cost at the gate's prices (the
-  user simulator's included: it is the price of the decision); a record without a trace is priced from its tokens.
+  user simulator's included: it is the price of the decision); a record with no model steps in its trace is priced
+  from its tokens and reported model.
   `markdown(verdict, base, candidate, costs)` writes the verdict, the two means, the rule, the cases, the configs, the
-  set, the cost, the warning about models without a date and the cases that got worse; the JSON report holds the same
-  plus the thresholds and `models_without_date`. CLI: `python -m llm_release_gate.gate --base FILE --candidate FILE
+  set, the cost, the warning about models without a date and the cases that got worse; the JSON report holds the
+  verdict's fields plus the threshold, both config hashes, the set hash, the scorer version, whether it rescored, the
+  cost, `models_without_date` and the runs per case. CLI: `python -m llm_release_gate.gate --base FILE --candidate FILE
   [--threshold PP] [--relative] [--golden DIR] [--prices FILE] [--markdown FILE] [--json FILE]`; the exit code is the
   verdict's. `comment.py` posts the Markdown as one comment on a GitHub pull request or GitLab merge request, edits it on
-  later pushes, and posts an infra-error comment when the job stopped before a verdict.
+  later pushes, and posts an infra-error comment when the job stopped before a verdict. CLI: `python -m
+  llm_release_gate.comment [FILE] [--check] [--dry-run]`; it needs `GITHUB_TOKEN` with `pull-requests: write` or
+  `GITLAB_TOKEN` with scope `api`.
 - **Planned.** Cost and latency limits that give `budget fail`; a latency quantile with an interval; a JUnit report.
 
 ### CI adapter (built for this repository)
@@ -142,7 +148,7 @@ against its manifest, then runs `ci/gate.sh BASE_REV EXAMPLE_DIR CONFIG GOLDEN_D
 branch in a worktree, runs both versions in parallel, each with its own code (one run per case: the runner's default `-k
 1`), runs the gate and writes `comment.md` and `verdict.json`. If a version cannot run, it writes an infra-error comment
 and exits 20; otherwise it exits with the gate's code. The job posts the comment and keeps the records as artifacts. It
-advises until the check is made required.
+advises: on GitHub until the check is made required, on GitLab while the job has `allow_failure: true`.
 
 ```mermaid
 flowchart LR
@@ -174,6 +180,7 @@ flowchart LR
     adapter -->|steps| trace --> runner
     runner --> scoring --> store
     store --> compare --> criterion --> report
+    prices --> runner
     prices --> report
     gatesh --> runner
     gatesh --> criterion
@@ -234,12 +241,12 @@ The trace:
 | Field | Meaning |
 |---|---|
 | `v` | format of the trace |
-| `steps` | ordered steps, each with `seq`, `kind` (`llm`, `tool`, `message`, `retrieval`), `actor` (`agent`, `user`, `system`, `env`), `ts`, `run_attempt` |
-| — model step | `status`; when `ok`: `model`, `tokens_in`, `tokens_out`, `tokens_cached`, `tokens_reasoning`, `cost_usd`, `finish_reason`, `fingerprint`, `request_id`, `text`, `tool_calls` (`id`, `name`, `args`), `latency_ms`, `purpose` (e.g. `compaction`, not counted by `max_steps`); when `error`: `error`, `attempt` |
+| `steps` | ordered steps, each with `seq`, `kind` (`llm`, `tool`, `message`, `retrieval`), `actor` (`agent`, `user`, `system`, `env`), `ts` (`null` for a tool step restored from a model's call), `run_attempt` |
+| — model step | `status`; when `ok`: `model`, `tokens_in`, `tokens_out`, `tokens_cached`, `tokens_reasoning`, `cost_usd`, `finish_reason`, `fingerprint`, `request_id`, `text`, `tool_calls` (`id`, `name`, `args`), `latency_ms`, `purpose` (set by the adapter, e.g. `compaction`, not counted by `max_steps`); when `error`: `error`, `attempt`, `latency_ms` |
 | — tool step | `name`, `args`, `status` (`ok`, `error`, `unknown`), `result` or `error`, `call_id`, `latency_ms` |
 | — retrieval step | `docs` with `id` (what `doc_found` reads) |
 | `final_state`, `state_change` | the world after the run and what changed, as the adapter reports them |
-| `stop` | why the run ended: `done`, `user_stop`, `max_steps`, `max_turns`, `error`, `aborted` |
+| `stop` | why the run ended, as the adapter says: `done`, `user_stop`, `max_steps`, `max_turns`, `error`, `aborted`; the runner sets `error` on a failed run with steps and no `stop`. The gate does not check the value |
 | `last_attempt` | the number of the runner's final attempt; checks look at its steps |
 | `notes` | calls that went unrecorded, and why |
 | `native` | the file with the raw provider responses |
