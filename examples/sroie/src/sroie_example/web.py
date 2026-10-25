@@ -37,7 +37,7 @@ VERSIONS = {  # the page's names for the configs
     "steps": ("Two calls, extract then check", "sroie-steps.yaml"),
     "image": ("One call, the scan", "sroie-image.yaml"),
 }
-ID = re.compile(r"^[A-Za-z0-9]+$")
+ID = re.compile(r"[A-Za-z0-9]+")
 MAX_TIMES = 5
 
 
@@ -77,7 +77,7 @@ class Desk:
         self.hashes = {k: config_hash(c)[:8] for k, c in self.configs.items()}
 
     def receipt(self, rid: str) -> Case:
-        if not ID.match(rid) or not (self.data / "box" / f"{rid}.txt").is_file():
+        if not ID.fullmatch(rid) or not (self.data / "box" / f"{rid}.txt").is_file():
             raise KeyError(f"no receipt {rid} in {self.data.name}")
         box = self.data / "box" / f"{rid}.txt"
         return Case(id=rid, inputs={"text": box, "image": self.data / "img" / f"{rid}.jpg"},
@@ -110,25 +110,20 @@ class Desk:
         recorder = Recorder(self.client)
         try:
             answer = load_pipeline(config, client=recorder).run(case)
-        except (Fatal, Retryable) as e:
-            return {"version": version, "error": str(e)}
+        except (
+            Fatal,
+            Retryable,
+            OpenAIError,
+        ) as e:  # the calls already answered stay, they were paid
+            steps = self.steps(case, recorder)
+            return {
+                "version": version,
+                "error": str(e),
+                "steps": steps,
+                "cost_usd": total(steps),
+            }
         result = score(case.expected, answer.output, SCORING)
-        steps = []
-        for r in recorder.responses:
-            try:
-                output = json.loads(r.choices[0].message.content or "")
-            except json.JSONDecodeError:
-                output = None
-            details = getattr(r.usage, "prompt_tokens_details", None)
-            cached = getattr(details, "cached_tokens", 0) or 0
-            steps.append({
-                "output": output,
-                "per_field": field_match(case.expected, output, SCORING),
-                "tokens_in": r.usage.prompt_tokens,
-                "tokens_out": r.usage.completion_tokens,
-                "cost_usd": usd(r.model, r.usage.prompt_tokens, r.usage.completion_tokens, self.prices, cached),
-            })  # fmt: skip
-        costs = [s["cost_usd"] for s in steps]
+        steps = self.steps(case, recorder)
         return {
             "version": version,
             "output": answer.output,
@@ -139,9 +134,31 @@ class Desk:
             "tokens_in": answer.input_tokens,
             "tokens_out": answer.output_tokens,
             "latency_s": answer.latency_s,
-            "cost_usd": None if None in costs else sum(costs),
+            "cost_usd": total(steps),
             "steps": steps,
         }
+
+    def steps(self, case: Case, recorder: Recorder) -> list[dict]:
+        """Each model call the pipeline made, scored on its own; priced as the gate books it (no cached-input price)."""
+        out = []
+        for r in recorder.responses:
+            try:
+                output = json.loads(r.choices[0].message.content or "")
+            except json.JSONDecodeError:
+                output = None
+            out.append({
+                "output": output,
+                "per_field": field_match(case.expected, output, SCORING),
+                "tokens_in": r.usage.prompt_tokens,
+                "tokens_out": r.usage.completion_tokens,
+                "cost_usd": usd(r.model, r.usage.prompt_tokens, r.usage.completion_tokens, self.prices),
+            })  # fmt: skip
+        return out
+
+
+def total(steps: list[dict]) -> float | None:
+    costs = [s["cost_usd"] for s in steps]
+    return None if None in costs else sum(costs)
 
 
 def handler(desk: Desk):
@@ -171,18 +188,27 @@ def handler(desk: Desk):
                             "fields": FIELDS,
                         },
                     )
-                if path.startswith("/api/receipt/"):
-                    return self.send(200, desk.describe(path.rsplit("/", 1)[1]))
+                if (
+                    path.startswith("/api/receipt/")
+                    and "/" not in path[len("/api/receipt/") :]
+                ):
+                    return self.send(200, desk.describe(path[len("/api/receipt/") :]))
                 if path.startswith("/scan/") and path.endswith(".jpg"):
                     case = desk.receipt(path[len("/scan/") : -len(".jpg")])
                     return self.send(
                         200, case.inputs["image"].read_bytes(), "image/jpeg"
                     )
-            except (KeyError, OSError) as e:
+            except (KeyError, FileNotFoundError) as e:
                 return self.send(404, {"error": str(e).strip("'\"")})
+            except Exception as e:  # noqa: BLE001 - a broken data file: say so instead of dropping the connection
+                return self.send(500, {"error": f"{type(e).__name__}: {e}"})
             self.send(404, {"error": "not found"})
 
         def do_POST(self):
+            if (
+                self.headers.get_content_type() != "application/json"
+            ):  # a browser sends that only from this page
+                return self.send(415, {"error": "send application/json"})
             try:
                 size = int(self.headers.get("Content-Length") or 0)
                 if size < 0:
@@ -207,8 +233,8 @@ def handler(desk: Desk):
                 )
             except (TypeError, ValueError) as e:
                 return self.send(400, {"error": str(e)})
-            except OpenAIError as e:
-                return self.send(502, {"error": f"the model call failed: {e}"})
+            except Exception as e:  # noqa: BLE001 - a broken data file: say so instead of dropping the connection
+                return self.send(500, {"error": f"{type(e).__name__}: {e}"})
             self.send(200, {"runs": runs})
 
         def log_message(self, *args):
@@ -240,7 +266,9 @@ def main() -> None:
         load_config(HERE / "configs" / f).timeout_s for _, f in VERSIONS.values()
     )
     try:
-        client = OpenAI(timeout=timeout)
+        client = OpenAI(
+            max_retries=0, timeout=timeout
+        )  # as the gate's: a run's time is its answer's
     except OpenAIError as e:
         sys.exit(
             f"{e}\nStart it with the key: uv run --env-file ../../.env python -m sroie_example.web"

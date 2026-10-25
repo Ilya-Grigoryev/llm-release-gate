@@ -329,6 +329,10 @@ def handler(session: Session):
                 self.send(404, {"error": "not found"})
 
         def do_POST(self):
+            if (
+                self.headers.get_content_type() != "application/json"
+            ):  # a browser sends that only from this page
+                return self.send(415, {"error": "send application/json"})
             try:
                 size = int(self.headers.get("Content-Length") or 0)
                 if size < 0:

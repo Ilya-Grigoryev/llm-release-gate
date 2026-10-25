@@ -12,7 +12,7 @@ import urllib.request
 
 import pytest
 from sroie_example import web
-from test_sroie import EXAMPLE, FIXTURE, OUTPUT, FakeClient
+from test_sroie import EXAMPLE, FIXTURE, OUTPUT, FakeClient, rate_limit
 
 from llm_release_gate.prices import load_prices
 
@@ -43,9 +43,9 @@ def desk(tmp_path):
     (data / "img" / "sample.jpg").write_bytes(PIXEL)
     servers = []
 
-    def start(*contents):
+    def start(*contents, client=None):
         d = web.Desk(
-            FakeClient(*contents),
+            client or FakeClient(*contents),
             data,
             load_prices(EXAMPLE / "prices.yaml"),
             ["sample", "missing"],
@@ -55,11 +55,12 @@ def desk(tmp_path):
         servers.append(server)
         base = f"http://127.0.0.1:{server.server_port}"
 
-        def request(path, body=None):
+        def request(path, body=None, kind="application/json"):
             data = None if body is None else json.dumps(body).encode()
-            with urllib.request.urlopen(
-                urllib.request.Request(base + path, data=data)
-            ) as r:
+            post = urllib.request.Request(
+                base + path, data=data, headers={"Content-Type": kind}
+            )
+            with urllib.request.urlopen(post) as r:
                 raw = r.read()
             return json.loads(raw) if path.startswith("/api/") else raw
 
@@ -162,3 +163,37 @@ def test_without_data_the_page_says_where_to_put_it(tmp_path):
         text=True,
     )
     assert p.returncode != 0 and "no SROIE data" in p.stderr
+
+
+def test_a_post_that_is_not_json_is_refused(desk):
+    request = desk()
+    with pytest.raises(urllib.error.HTTPError) as e:
+        request(
+            "/api/read", {"receipt": "sample", "version": "text"}, kind="text/plain"
+        )
+    assert e.value.code == 415
+
+
+def test_a_failed_second_call_keeps_the_paid_first_one(desk):
+    client = FakeClient(json.dumps(OUTPUT))
+    create = client.chat.completions.create
+
+    def second_call_limited(**request):
+        if client.requests:
+            raise rate_limit()
+        return create(**request)
+
+    client.chat.completions.create = second_call_limited
+    request = desk(client=client)
+    run = request("/api/read", {"receipt": "sample", "version": "steps"})["runs"][0]
+    assert (
+        "slow down" in run["error"] and len(run["steps"]) == 1 and run["cost_usd"] > 0
+    )
+
+
+def test_a_broken_label_file_is_a_500_not_a_dropped_connection(desk, tmp_path):
+    request = desk()
+    (tmp_path / "train" / "entities" / "sample.txt").write_text("{not json")
+    with pytest.raises(urllib.error.HTTPError) as e:
+        request("/api/receipt/sample")
+    assert e.value.code == 500

@@ -31,11 +31,12 @@ def page():
         servers.append(server)
         base = f"http://127.0.0.1:{server.server_port}"
 
-        def request(path, body=None):
+        def request(path, body=None, kind="application/json"):
             data = None if body is None else json.dumps(body).encode()
-            with urllib.request.urlopen(
-                urllib.request.Request(base + path, data=data)
-            ) as r:
+            post = urllib.request.Request(
+                base + path, data=data, headers={"Content-Type": kind}
+            )
+            with urllib.request.urlopen(post) as r:
                 raw = r.read()
             return raw if path == "/" else json.loads(raw)
 
@@ -151,3 +152,10 @@ def test_malformed_requests_get_a_400(page):
         with pytest.raises(urllib.error.HTTPError) as e:
             request(path, body)
         assert e.value.code == 400, path
+
+
+def test_a_post_that_is_not_json_is_refused(page):
+    request = page()
+    with pytest.raises(urllib.error.HTTPError) as e:
+        request("/api/say", {"text": "hi"}, kind="text/plain")
+    assert e.value.code == 415

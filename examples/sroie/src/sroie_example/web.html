@@ -102,7 +102,8 @@ main { display: grid; grid-template-columns: 230px minmax(320px, 1fr) minmax(380
 .reading h2 { margin: 0; font-size: 18px; font-weight: 600; font-stretch: 87.5%; }
 .reading .sub { margin: 2px 0 0; color: var(--ink-soft); font-size: 13.5px; }
 .grid { overflow-x: auto; border: 1px solid var(--rule); border-radius: 6px; }
-table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+table { border-collapse: collapse; width: max-content; min-width: 100%; font-size: 13.5px; }
+td { min-width: 120px; max-width: 250px; }
 th, td { padding: 8px 10px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--rule); }
 tr:last-child td { border-bottom: 0; }
 td + td, th + th { border-left: 1px solid var(--rule); }
@@ -112,7 +113,7 @@ thead th.focus { color: var(--ink); box-shadow: inset 0 -2px 0 var(--ink); }
 tbody th { font-weight: 600; white-space: nowrap; }
 tbody th .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 7px; vertical-align: 0; }
 tbody tr:hover, tbody tr.hot { background: var(--tray); }
-.val { font: 12px/1.5 var(--f-print); overflow-wrap: anywhere; min-width: 120px; }
+.val { font: 12px/1.5 var(--f-print); overflow-wrap: break-word; }
 .val.none { color: var(--ink-faint); font-family: var(--f-ui); }
 .mark { font: 600 12px var(--f-ui); margin-right: 5px; }
 .mark.ok { color: var(--right); }
@@ -189,14 +190,20 @@ tfoot td, tfoot th { font-size: 12px; color: var(--ink-soft); background: var(--
   /* ---- matching OCR lines to a value: a reading aid ---- */
   function norm(s) { return String(s || "").toLowerCase().replace(/\s+/g, " ").trim(); }
   function letters(s) { return String(s || "").toLowerCase().replace(/[^a-z0-9]/g, ""); }
+  function found(text, x, exact) {  // a number must not sit inside a longer one: 5.00 is not in 45.00
+    for (var i = text.indexOf(x); i >= 0; i = text.indexOf(x, i + 1)) {
+      if (!exact || !/[0-9.]/.test(text.charAt(i - 1) || "")) return true;
+    }
+    return false;
+  }
   function linesFor(value, field) {
     if (!S.receipt || value == null || value === "") return [];
-    var exact = field === "total" || field === "date";  // numbers: no loose matching
+    var exact = field === "total" || field === "date";  // matched as printed, not letter by letter
     var v = exact ? norm(value) : letters(value), vs = [v];
     if (field === "total") vs.push(v.replace(/^(rm|\$)\s*/, ""));
     return S.receipt.lines.map(function (l, i) { return { l: l, i: i }; }).filter(function (o) {
       var t = exact ? norm(o.l.text) : letters(o.l.text);
-      return vs.some(function (x) { return x.length >= 3 && t.indexOf(x) >= 0; }) || (!exact && t.length >= 6 && v.indexOf(t) >= 0);
+      return vs.some(function (x) { return x.length >= 3 && found(t, x, exact); }) || (!exact && t.length >= 6 && v.indexOf(t) >= 0);
     });
   }
   function shownOutput() {
@@ -228,7 +235,8 @@ tfoot td, tfoot th { font-size: 12px; color: var(--ink-soft); background: var(--
     x0 -= pad; y0 -= pad + 16; w += 2 * pad; h += 2 * pad + 16;
     svg.setAttribute("viewBox", x0 + " " + y0 + " " + w + " " + h);
     var k = w / Math.max(1, $("paper").clientWidth || 560);
-    var html = '<image href="/scan/' + encodeURIComponent(S.receipt.id) + '.jpg" x="0" y="0"/>';
+    var size = S.size ? ' width="' + S.size[0] + '" height="' + S.size[1] + '"' : "";
+    var html = '<image href="/scan/' + encodeURIComponent(S.receipt.id) + '.jpg" x="0" y="0"' + size + "/>";
     Object.keys(hits).forEach(function (i) {
       var b = S.receipt.lines[i].box;
       hits[i].forEach(function (f, j) {
@@ -254,15 +262,15 @@ tfoot td, tfoot th { font-size: 12px; color: var(--ink-soft); background: var(--
     var counts = {}, firsts = {};
     var head = "<thead><tr><th>Field</th><th>Label</th>" + S.runs.map(function (r, i) {
       counts[r.version] = (counts[r.version] || 0) + 1;
-      if (!(r.version in firsts)) firsts[r.version] = i;
+      if (!(r.version in firsts) && !r.error) firsts[r.version] = i;
       return '<th class="' + (i === S.focusRun ? "focus" : "") + '"><button type="button" data-run="' + i + '">' + esc(short(r.version)) + " " + counts[r.version] + "</button></th>";
     }).join("") + "</tr></thead>";
     var body = "<tbody>" + FIELDS.map(function (f) {
       var label = rec.labels[f];
       var cells = S.runs.map(function (r, i) {
-        if (r.error) return '<td class="val none">failed</td>';
+        if (r.error) return '<td><span class="mark no">failed</span></td>';
         var v = (r.output || {})[f], first = S.runs[firsts[r.version]];
-        var differs = i !== firsts[r.version] && !first.error && JSON.stringify((first.output || {})[f]) !== JSON.stringify(v);
+        var differs = first && i !== firsts[r.version] && JSON.stringify((first.output || {})[f]) !== JSON.stringify(v);
         return '<td class="' + (differs ? "differs" : "") + '"' + (differs ? ' title="differs from the first run of this version"' : "") + ">" + mark(r.per_field[f]) + value(v) + "</td>";
       }).join("");
       return '<tr data-field="' + f + '" class="' + (S.focusField === f ? "hot" : "") + '"><th><span class="sw" style="background:var(--' + f + ')"></span>' + NAMES[f] + '</th><td><span class="val' + (label == null ? " none" : "") + '">' + esc(label == null ? "no label" : label) + "</span></td>" + cells + "</tr>";
@@ -271,7 +279,7 @@ tfoot td, tfoot th { font-size: 12px; color: var(--ink-soft); background: var(--
     if (S.runs.length) {
       foot = "<tfoot><tr><th>Score</th><td>the gate's mean of fields</td>" + S.runs.map(function (r) { return "<td>" + (r.error ? "" : (r.score == null ? "none" : r.score.toFixed(2))) + "</td>"; }).join("") + "</tr>" +
         "<tr><th>Tokens</th><td>in, out</td>" + S.runs.map(function (r) { return "<td>" + (r.error ? "" : r.tokens_in.toLocaleString("en") + ", " + r.tokens_out) + "</td>"; }).join("") + "</tr>" +
-        "<tr><th>Cost</th><td>list price</td>" + S.runs.map(function (r) { return "<td>" + (r.error ? "" : money(r.cost_usd)) + "</td>"; }).join("") + "</tr>" +
+        "<tr><th>Cost</th><td>list price, as the gate books it</td>" + S.runs.map(function (r) { return "<td>" + (r.error ? "" : money(r.cost_usd)) + "</td>"; }).join("") + "</tr>" +
         "<tr><th>Time</th><td>the model's answer</td>" + S.runs.map(function (r) { return "<td>" + (r.error ? "" : r.latency_s.toFixed(1) + " s") + "</td>"; }).join("") + "</tr></tfoot>";
     }
     t.innerHTML = head + body + foot;
@@ -301,15 +309,18 @@ tfoot td, tfoot th { font-size: 12px; color: var(--ink-soft); background: var(--
       notes.push("<p><b>" + esc(S.versions[k].name) + ", " + rs.length + " runs:</b> " + (moved.length ? moved.map(function (f) { return NAMES[f].toLowerCase(); }).join(", ") + " changed between runs." : "every field came back the same.") + "</p>");
     });
     var calls = S.runs.reduce(function (n, r) { return n + (r.steps ? r.steps.length : 0); }, 0), cost = S.runs.reduce(function (n, r) { return n + (r.cost_usd || 0); }, 0);
-    if (calls) notes.push("<p>This receipt so far: " + calls + " model call" + (calls > 1 ? "s" : "") + ", " + money(cost) + " at list price.</p>");
+    if (calls) notes.push("<p>This receipt so far: " + calls + " model call" + (calls > 1 ? "s" : "") + ", " + money(cost) + " at list price, without the discount for cached input.</p>");
+    var focused = S.runs[S.focusRun];
+    if (focused && focused.raw) notes.unshift('<p><b>The answer was not JSON</b>, so every field scores 0: <span class="val">' + esc(focused.raw.slice(0, 240)) + "</span></p>");
+    if (focused && focused.error) notes.unshift("<p><b>This run failed:</b> " + esc(focused.error) + (focused.steps && focused.steps.length ? " The calls answered before it are counted in the cost." : "") + "</p>");
     notes.push("<p>The gate compares dates and totals by value (25/12/2018 equals 25 Dec 2018, 9.0 equals 9.00) and text after folding case and spaces. A field without a label is not scored. Over a pull request it does this for 30 receipts, several runs each, and compares two versions.</p>");
     $("notes").innerHTML = notes.join("");
   }
   function renderHeader() {
     var rec = S.receipt;
     $("title").textContent = rec ? "Reading " + rec.id : "Reading";
-    var a = S.versions[$("va").value];
-    $("sub").textContent = a ? a.name + ": " + a.model + ", config " + a.hash : "";
+    var a = S.versions[$("va").value], b = S.versions[$("vb").value];
+    $("sub").textContent = (a ? a.name + ": " + a.model + ", config " + a.hash : "") + (b ? ". Beside it, " + b.name.charAt(0).toLowerCase() + b.name.slice(1) + ": " + b.model + ", config " + b.hash : "");
     $("read").disabled = S.busy || !rec;
     $("more").disabled = S.busy || !rec || !S.runs.length;
     $("va").disabled = $("vb").disabled = S.busy;
@@ -332,6 +343,12 @@ tfoot td, tfoot th { font-size: 12px; color: var(--ink-soft); background: var(--
       S.receipt = await api("/api/receipt/" + encodeURIComponent(id));
       S.runs = []; S.focusRun = -1;
       if (!S.receipt.scan) S.view = "ocr";
+      S.size = null;
+      if (S.receipt.scan) {
+        var im = new Image();
+        im.onload = function () { S.size = [im.naturalWidth, im.naturalHeight]; renderPaper(); };
+        im.src = "/scan/" + encodeURIComponent(id) + ".jpg";
+      }
       try { history.replaceState(null, "", "#" + id); } catch (e) { /* the hash is a convenience */ }
     } catch (e) { S.error = e.message; }
     render();
@@ -361,6 +378,7 @@ tfoot td, tfoot th { font-size: 12px; color: var(--ink-soft); background: var(--
   $("v-scan").addEventListener("click", function () { S.view = "scan"; renderPaper(); });
   $("v-ocr").addEventListener("click", function () { S.view = "ocr"; renderPaper(); });
   $("va").addEventListener("change", function () { renderHeader(); });
+  $("vb").addEventListener("change", function () { renderHeader(); });
   window.addEventListener("resize", renderPaper);
   $("open").addEventListener("submit", function (ev) { ev.preventDefault(); var id = $("rid").value.trim(); if (id) open(id); });
 
