@@ -56,3 +56,26 @@ def test_follows_a_set_that_is_a_link(tmp_path):
     (real / "a.png").write_bytes(b"\x89PNG")
     (tmp_path / "golden").symlink_to(real)
     assert sorted(run_without_a_base(tmp_path, tmp_path / "golden")) == ["a.yaml"]
+
+
+def test_a_missing_set_is_an_infra_error(tmp_path):
+    (tmp_path / "repo").mkdir()
+    (tmp_path / "repo" / "a.yaml").write_text("x")
+    done = subprocess.run(
+        [
+            "bash",
+            str(pr.SCRIPT),
+            "HEAD",
+            ".",
+            "a.yaml",
+            str(tmp_path / "nope"),
+            str(tmp_path / "out"),
+        ],
+        cwd=tmp_path / "repo",
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert done.returncode == 20
+    assert "no golden set" in (tmp_path / "out" / "comment.md").read_text()
+    assert list((tmp_path / "out").iterdir()) == [tmp_path / "out" / "comment.md"]

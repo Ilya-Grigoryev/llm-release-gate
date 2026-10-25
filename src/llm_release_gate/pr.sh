@@ -8,14 +8,8 @@
 set -uo pipefail
 unset VIRTUAL_ENV  # each tree syncs and runs its own environment
 base_rev=$1 example=$2 config=$3
-golden=$(cd "$4" && pwd)
 mkdir -p "$5" && out=$(cd "$5" && pwd)
 root=$(pwd)
-rm -rf "$out/cases" && mkdir "$out/cases"
-# Links are followed and their targets copied as files, so nothing else of the set can come along.
-(cd "$golden" && find -L . -type f ! -path '*/.*' \( -iname '*.yaml' -o -iname '*.yml' -o -iname '*.json' \
-  -o -iname '*.txt' -o -iname '*.md' -o -iname '*.csv' \) -print0) |
-  while IFS= read -r -d '' f; do mkdir -p "$out/cases/${f%/*}" && cp -L "$golden/$f" "$out/cases/$f"; done
 
 infra() {  # MESSAGE [LOG]: a comment for a run that could not decide
   {
@@ -30,6 +24,13 @@ run() {  # TREE OUT: one version's runs, with that tree's own code
   cd "$1/$example" && uv sync --locked --quiet &&
     uv run python -m llm_release_gate.runner --config "$config" --golden "$golden" --out "$2"
 }
+
+golden=$([ -n "$4" ] && cd "$4" 2> /dev/null && pwd) || infra "There is no golden set at ${4:-(empty path)}."
+rm -rf "$out/cases" && mkdir "$out/cases"
+# Links are followed and their targets copied as files, so nothing else of the set can come along.
+(cd "$golden" && find -L . -type f ! -path '*/.*' \( -iname '*.yaml' -o -iname '*.yml' -o -iname '*.json' \
+  -o -iname '*.txt' -o -iname '*.md' -o -iname '*.csv' \) -print0) |
+  while IFS= read -r -d '' f; do mkdir -p "$out/cases/${f%/*}" && cp -L "$golden/$f" "$out/cases/$f"; done
 
 trap 'git -C "$root" worktree remove --force "$out/base-tree" 2> /dev/null' EXIT
 git worktree add --detach "$out/base-tree" "$base_rev" > /dev/null ||
