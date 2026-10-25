@@ -99,7 +99,16 @@ def rescored(arm: Arm, golden: Path) -> Arm:
     records = {}
     for key, r in arm.records.items():
         case = cases[r["case"]]
-        result = score(case.expected, r.get("output"), case.scoring, r.get("trace"))
+        try:
+            result = score(case.expected, r.get("output"), case.scoring, r.get("trace"))
+        except Exception as e:  # noqa: BLE001 - one unscorable record must not crash the gate
+            records[key] = {
+                **r,
+                "hits": None,
+                "score": None,
+                "score_error": f"{type(e).__name__}: {e}",
+            }
+            continue
         records[key] = {
             **r,
             "hits": result["per_field"],

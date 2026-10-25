@@ -303,7 +303,13 @@ def test_field_match_cases_score_as_before():
         answer,
         {
             "method": "checks",
-            "checks": [{"id": "f", "kind": "field_match", **golden["scoring"]}],
+            "checks": [
+                {
+                    "id": "f",
+                    "kind": "field_match",
+                    **{k: v for k, v in golden["scoring"].items() if k != "method"},
+                }
+            ],
         },
     )
     assert old["score"] == via_checks["score"] == 0.75
@@ -481,3 +487,78 @@ def test_the_runner_and_the_gate_give_the_same_verdicts_on_a_trace(tmp_path):
     )
     [again] = gate.rescored(arm, golden).records.values()
     assert again["hits"] == record["hits"] and again["score"] == record["score"]
+
+
+# review round 2 (25.10.)
+
+
+def test_a_broken_team_module_is_a_validation_error(tmp_path, monkeypatch):
+    (tmp_path / "broken_checks.py").write_text("def polite(:\n")
+    (tmp_path / "loud_checks.py").write_text("raise RuntimeError('boom')\n")
+    monkeypatch.syspath_prepend(str(tmp_path))
+    for module in ("broken_checks", "loud_checks"):
+        found = checks.validate(
+            EXPECTED,
+            {
+                "checks": [
+                    {"id": "c", "kind": "function", "function": f"{module}:polite"}
+                ]
+            },
+        )
+        assert found and "cannot load" in found[0]
+
+
+@pytest.mark.parametrize(
+    "spec, error",
+    [
+        (
+            {
+                "kind": "not_called",
+                "tool": "issue_credit",
+                "args": {"amount_eur": {"gt": "30"}},
+            },
+            "gt needs a number",
+        ),
+        ({"kind": "called", "tool": "x", "args": {"n": {"in": 5}}}, "in needs a list"),
+        (
+            {
+                "kind": "called",
+                "tool": "issue_credit",
+                "arg": {"amount_eur": {"gt": 100}},
+            },
+            "unknown keys ['arg']",
+        ),
+        (
+            {"kind": "regex", "feild": "reply", "pattern": "B-1"},
+            "unknown keys ['feild']",
+        ),
+        ({"kind": "refusal", "value": "false"}, "true or false"),
+        ({"kind": "contains", "field": "reply", "value": ""}, "empty value"),
+    ],
+)
+def test_round_two_configs_are_refused(spec, error):
+    found = checks.validate(EXPECTED, {"checks": [{"id": "c", **spec}]})
+    assert any(error in f for f in found), found
+
+
+def test_a_function_check_may_carry_its_own_keys(tmp_path, monkeypatch):
+    (tmp_path / "keyed.py").write_text(
+        "def at_least(expected, output, trace, spec):\n    return output['n'] >= spec['min']\n"
+    )
+    monkeypatch.syspath_prepend(str(tmp_path))
+    assert check("function", {"n": 3}, function="keyed:at_least", min=2) == {"c": True}
+
+
+def test_odd_answers_and_results_do_not_crash():
+    assert check("number", {"total": "NaN"}, field="total", value=1) == {"c": False}
+    schema = {"$ref": "https://example.invalid/schema.json"}
+    assert check("json_schema", {"a": 1}, schema=schema) == {"c": False}
+
+
+def test_a_team_function_must_return_a_result(tmp_path, monkeypatch):
+    (tmp_path / "wrong.py").write_text(
+        "def score(expected, output, trace, spec):\n    return 'yes'\n"
+    )
+    monkeypatch.syspath_prepend(str(tmp_path))
+    with pytest.raises(ValueError, match="returned 'yes'"):
+        check("function", {}, function="wrong:score")

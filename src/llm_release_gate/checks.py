@@ -136,9 +136,12 @@ def as_number(value: Any) -> Decimal | None:
     if value is None:
         return None
     try:
-        return Decimal(str(value).strip())
+        found = Decimal(str(value).strip())
     except InvalidOperation:
-        return parse_number(str(value))
+        found = parse_number(str(value))
+    return (
+        found if found is not None and found.is_finite() else None
+    )  # NaN and infinity are no answer
 
 
 def numeric(spec, expected, output, trace):
@@ -149,7 +152,10 @@ def numeric(spec, expected, output, trace):
 
 def json_schema(spec, expected, output, trace):
     validator = jsonschema.Draft202012Validator(spec["schema"])
-    return validator.is_valid(pick(output, spec.get("field")))
+    try:
+        return validator.is_valid(pick(output, spec.get("field")))
+    except Exception:  # noqa: BLE001 - a $ref outside the schema cannot be resolved here
+        return False
 
 
 def refusal(spec, expected, output, trace):
@@ -239,9 +245,9 @@ def load_function(spec: dict) -> Callable:
     module, _, name = spec["function"].partition(":")
     try:
         fn = getattr(importlib.import_module(module), name)
-    except (ImportError, AttributeError, ValueError) as e:
+    except Exception as e:  # noqa: BLE001 - foreign code: a syntax error, a failing import, a missing name
         raise ValueError(
-            f"check {spec['id']!r}: cannot load {spec['function']!r}: {e}"
+            f"check {spec['id']!r}: cannot load {spec['function']!r}: {type(e).__name__}: {e}"
         ) from None
     if not callable(fn):
         raise TypeError(f"check {spec['id']!r}: {spec['function']!r} is not callable")
@@ -249,8 +255,23 @@ def load_function(spec: dict) -> Callable:
 
 
 def function(spec, expected, output, trace):
-    """`module:function`, called with (expected, output, trace, spec)."""
-    return load_function(spec)(expected, output, trace, spec)
+    """`module:function`, called with (expected, output, trace, spec); it returns a result a check can give."""
+    value = load_function(spec)(expected, output, trace, spec)
+    results = value.values() if isinstance(value, dict) else [value]
+    if not all(result_ok(v) for v in results):
+        raise ValueError(
+            f"check {spec['id']!r}: {spec['function']!r} returned {value!r}"
+        )
+    return value
+
+
+def result_ok(value: Any) -> bool:
+    """True, False, None, or a share in [0, 1]."""
+    return (
+        value is None
+        or type(value) is bool
+        or (type(value) in (int, float) and 0 <= value <= 1)
+    )
 
 
 KINDS: dict[str, Callable] = {
@@ -277,6 +298,25 @@ VALUE_KINDS = {
     "number",
     "refusal",
 }  # a `value` or an `expected` path
+KEYS: dict[
+    str, set[str]
+] = {  # besides id and kind; a `function` check may carry its own keys
+    "field_match": {"expected", "field", "normalise", "fields"},
+    "exact": {"field", "value", "expected"},
+    "contains": {"field", "value", "expected"},
+    "regex": {"field", "pattern"},
+    "number": {"field", "value", "expected", "tol"},
+    "json_schema": {"field", "schema"},
+    "refusal": {"field", "value", "expected"},
+    "called": {"tool", "args", "actor"},
+    "not_called": {"tool", "args", "actor"},
+    "order": {"first", "then", "actor"},
+    "max_steps": {"max", "actor"},
+    "active": {"actor"},
+    "actions": {"actions", "expected", "actor"},
+    "state": {"key", "expected"},
+    "doc_found": {"ids", "expected", "actor"},
+}
 
 
 # validation
@@ -294,6 +334,11 @@ def problems(spec: Any, expected: dict) -> list[str]:
     if kind not in KINDS:
         return [f"check {name!r}: unknown kind {kind!r}, known: {sorted(KINDS)}"]
     found: list[str] = []
+    unknown = sorted(set(spec) - {"id", "kind"} - KEYS.get(kind, set(spec)))
+    if unknown:
+        found.append(
+            f"check {name!r}: unknown keys {unknown} for {kind}, known: {sorted(KEYS[kind])}"
+        )
 
     def need(key: str, ok: Callable[[Any], bool], what: str) -> None:
         if key not in spec:
@@ -343,6 +388,10 @@ def problems(spec: Any, expected: dict) -> list[str]:
             found.append(
                 f"check {name!r}: the expected value {value!r} is not a number"
             )
+        if kind == "refusal" and "value" in spec and type(spec["value"]) is not bool:
+            found.append(f"check {name!r}: value must be true or false")
+        if kind == "contains" and value == "":
+            found.append(f"check {name!r}: an empty value is contained in every answer")
     if kind == "number" and "tol" in spec:
         need("tol", lambda t: type(t) in (int, float) and t >= 0, "a number >= 0")
     if kind == "regex":
@@ -411,16 +460,31 @@ def problems(spec: Any, expected: dict) -> list[str]:
 
 
 def args_problems(name: str, args: Any) -> list[str]:
-    """Argument conditions: a value to equal, or a mapping of operators (`{eq: {...}}` for a mapping value)."""
+    """Argument conditions: a value to equal, or a mapping of operators (`{eq: {...}}` for a mapping value);
+    `gt`, `gte`, `lt`, `lte` take a number and `in` a list."""
     if args is None:
         return []
     if not isinstance(args, dict):
         return [f"check {name!r}: args must be a mapping"]
-    return [
-        f"check {name!r}: argument {k!r}: operators must be from {sorted(OPS)}, got {sorted(cond)}"
-        for k, cond in args.items()
-        if isinstance(cond, dict) and (not cond or not set(cond) <= OPS.keys())
-    ]
+    found = []
+    for k, cond in args.items():
+        if not isinstance(cond, dict):
+            continue
+        if not cond or not set(cond) <= OPS.keys():
+            found.append(
+                f"check {name!r}: argument {k!r}: operators must be from {sorted(OPS)}, got {sorted(cond)}"
+            )
+            continue
+        for op, b in cond.items():
+            if op in ("gt", "gte", "lt", "lte") and type(b) not in (int, float):
+                found.append(
+                    f"check {name!r}: argument {k!r}: {op} needs a number, got {b!r}"
+                )
+            if op == "in" and not isinstance(b, list):
+                found.append(
+                    f"check {name!r}: argument {k!r}: in needs a list, got {b!r}"
+                )
+    return found
 
 
 def validate(expected: dict, config: dict) -> list[str]:
