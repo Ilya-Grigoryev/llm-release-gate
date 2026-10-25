@@ -18,7 +18,7 @@ target architecture.
 | Prices | `prices.py` | list prices per model prefix, cached input included | built |
 | Comparison | `compare.py` | pairs the records of two versions case by case, refuses what cannot be compared | built |
 | Criterion | `gate.py` | the verdict and its exit code | built (naive rule: pass, quality fail); planned (statistical rules, inconclusive) |
-| Budget | `gate.py` | cost of the decision; cost and latency limits | built (cost report); planned (limits, budget fail) |
+| Budget | `budget.py`, `gate.py` | cost of the decision; cost and latency limits | built |
 | Report and comment | `gate.py`, `comment.py` | Markdown and JSON verdict; one comment on the pull or merge request, edited on later pushes | built |
 | CI adapter | `ci/gate.sh`, `.github/workflows/ci.yml`, `.gitlab-ci.yml` | runs both versions of a request and posts the verdict | built (this repository); planned (reusable action and template) |
 | Dashboard | — | history of merge requests, base against candidate down to a trace step | planned |
@@ -119,8 +119,8 @@ runner's scorer is `hits(case, answer, trace=None)` (by default the run's trace,
   score per case and version (the CLI passes the earliest repetition): block when the candidate's mean is lower than the
   base's by more than the threshold (absolute or relative; the CLI's default is 5 points). Means are compared as exact fractions. `Verdict` holds
   `outcome`, `exit_code`, `base_mean`, `candidate_mean`, `diff_pp`, `limit_pp`, `rule`, `cases` and the cases that got
-  worse. It gives `pass` (0) or `quality fail` (10); `inconclusive` (11) and `budget fail` (12) are reserved for the
-  planned rules; `infra error` (20) is any failure to compare.
+  worse. It gives `pass` (0) or `quality fail` (10); a budget can turn a pass into `budget fail` (12); `inconclusive` (11)
+  is reserved for the planned rules; `infra error` (20) is any failure to compare.
 - **Planned — statistical rules.** A paired test on the mean with a margin δ and three outcomes (pass, block, buy more
   runs and leave it to a human); a per-check test that blocks a check that breaks consistently, with a correction for
   multiple comparisons; a second comparison against an anchor version, so that many small losses cannot add up unseen;
@@ -135,13 +135,20 @@ runner's scorer is `hits(case, answer, trace=None)` (by default the run's trace,
   `markdown(verdict, base, candidate, costs)` writes the verdict, the two means, the rule, the cases, the configs, the
   set, the cost, the warning about models without a date and the cases that got worse; the JSON report holds the
   verdict's fields plus the threshold, both config hashes, the set hash, the scorer version, whether it rescored, the
-  cost, `models_without_date` and the runs per case. CLI: `python -m llm_release_gate.gate --base FILE --candidate FILE
-  [--threshold PP] [--relative] [--golden DIR] [--prices FILE] [--markdown FILE] [--json FILE]`; the exit code is the
-  verdict's. `comment.py` posts the Markdown as one comment on a GitHub pull request or GitLab merge request, edits it on
+  cost, the hash of the price table, the budget, `models_without_date` and the runs per case. CLI: `python -m
+  llm_release_gate.gate --base FILE --candidate FILE [--threshold PP] [--relative] [--golden DIR] [--prices FILE]
+  [--max-cost-per-run USD] [--max-latency S] [--latency-quantile Q] [--markdown FILE] [--json FILE]`; the exit code is
+  the verdict's. `comment.py` posts the Markdown as one comment on a GitHub pull request or GitLab merge request, edits it on
   later pushes, and posts an infra-error comment when the job stopped before a verdict. CLI: `python -m
   llm_release_gate.comment [FILE] [--check] [--dry-run]`; it needs `GITHUB_TOKEN` with `pull-requests: write` or
   `GITLAB_TOKEN` with scope `api`.
-- **Planned.** Cost and latency limits that give `budget fail`; a latency quantile with an interval; a JUnit report.
+- **Built — budgets.** `budget.check(costs, latencies, retried, cost_limit, latency_limit, latency_q, level) -> Budget`, a
+  pure function over the candidate's runs: the mean cost per run against its limit; a latency quantile with a
+  distribution-free interval from order statistics (`quantile_ci`), over only when the interval's lower end exceeds the
+  limit. A run's latency is the answering attempt's `latency_s`; runs with retries are counted apart. `Budget` holds the
+  outcome, the limits exceeded, the estimates, the interval and the limits. The gate turns a pass into `budget fail` (12);
+  quality comes first. CLI: `--max-cost-per-run USD` (needs `--prices`), `--max-latency S`, `--latency-quantile Q`.
+- **Planned.** A JUnit report.
 
 ### CI adapter (built for this repository)
 
@@ -223,7 +230,7 @@ sequenceDiagram
 
 ## The record of a run
 
-One JSON line per (case, repetition), record version 4:
+One JSON line per (case, repetition), record version 5:
 
 | Field | Meaning |
 |---|---|
@@ -231,6 +238,7 @@ One JSON line per (case, repetition), record version 4:
 | `config_hash`, `set_hash` | the version and the test set; runs on different sets are never paired |
 | `case`, `rep`, `run_id`, `timestamp` | which run, of which invocation, when (UTC) |
 | `requested_model` | the model the config asked for |
+| `prices_hash` | hash of the price table the runner priced `usage` with, `null` without one |
 | `output`, `raw`, `input_tokens`, `output_tokens`, `latency_s`, `model`, `fingerprint`, `reasoning_tokens`, `finish_reason`, `request_id` | the pipeline's `Answer`; `model` is what the provider reported |
 | `wall_s` | clock time of the run, backoff between attempts included |
 | `trace` | the steps of the run, or `null` for a pipeline that records none |

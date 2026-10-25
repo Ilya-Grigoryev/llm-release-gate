@@ -10,7 +10,7 @@ The gate runs each case several times and compares the two versions case by case
 
 ## Status
 
-Work in progress. Built: the naive gate (one run per version against a fixed threshold) with a comment on every pull or merge request, traces of agent runs, checks over the answer and the trace, and any program as a pipeline. The statistical rules and the cost and latency budgets come next. [`examples/sroie/`](examples/sroie/) extracts company, address, date and total from receipts in [SROIE](https://rrc.cvc.uab.es/?ch=13) (ICDAR 2019), from the OCR text or from the scan. [`examples/support-agent/`](examples/support-agent/) is a tool-using support agent over a mock database, with its own test cases, under the gate alone on a ticket or in a chat with a simulated user.
+Work in progress. Built: the naive gate (one run per version against a fixed threshold) with a comment on every pull or merge request, cost and latency budgets, traces of agent runs, checks over the answer and the trace, and any program as a pipeline. The statistical rules come next. [`examples/sroie/`](examples/sroie/) extracts company, address, date and total from receipts in [SROIE](https://rrc.cvc.uab.es/?ch=13) (ICDAR 2019), from the OCR text or from the scan. [`examples/support-agent/`](examples/support-agent/) is a tool-using support agent over a mock database, with its own test cases, under the gate alone on a ticket or in a chat with a simulated user.
 
 [`docs/design.md`](docs/design.md) describes the parts, the flow of a merge request and the record of a run.
 
@@ -135,6 +135,14 @@ uv run --env-file ../../.env python -m llm_release_gate.runner --config configs/
 
 The first gate compares one run per version: it blocks when the candidate's mean score is lower than the base's by more than a threshold, 5 points by default (`--relative` reads it as a percentage of the base mean). It pairs the two files case by case and refuses files with different set hashes, different scorer versions or cases missing from one side. `--golden` rescores both sides from their saved answers with the current scorer, without calling the model. `--prices` takes a YAML of `model: [input, output]` in USD per 1M tokens, or `[input, output, cached input]`, and adds what the decision cost: every successful call of both runs. An agent resends the whole dialog on every call, so most of its input is billed as cached; without the third price, cached tokens cost the full input price. For a traced record that means every model step, the user simulator's included.
 
+Budgets check the candidate: `--max-cost-per-run USD` against its mean cost per run at the gate's prices (it needs
+`--prices`), `--max-latency S` against a latency quantile (`--latency-quantile`, 0.95 by default). A run's latency is the
+time of the attempt that answered: backoff and failed attempts are left out, and the comment counts the runs that needed
+retries. The quantile comes with a 95 % interval from order statistics, which assumes nothing about the distribution;
+latency blocks only when the whole interval lies above the limit, so a few slow runs out of many do not. A budget turns
+a pass into `budget fail` (exit 12); a quality fail stays a quality fail. The runner stamps each record with the hash of
+the price table it used (`prices_hash`), and the JSON report carries the hash of the gate's.
+
 ```sh
 uv run python -m llm_release_gate.gate --base data/runs/base.jsonl --candidate data/runs/candidate.jsonl --markdown comment.md --json verdict.json
 ```
@@ -144,7 +152,7 @@ uv run python -m llm_release_gate.gate --base data/runs/base.jsonl --candidate d
 | 0 | pass |
 | 10 | quality fail |
 | 11 | inconclusive (not produced by the naive gate) |
-| 12 | budget fail (not yet checked) |
+| 12 | budget fail: quality passed, a cost or latency limit did not |
 | 20 | infra error: the runs cannot be compared, or the tool failed |
 
 Python and argparse keep 1 and 2, so a crash is never read as a verdict.

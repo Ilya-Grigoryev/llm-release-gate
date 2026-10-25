@@ -10,20 +10,27 @@ from dataclasses import asdict, dataclass, replace
 from fractions import Fraction
 from pathlib import Path
 
+from llm_release_gate import budget
 from llm_release_gate.compare import Arm, Mismatch, load_arm, pair
 from llm_release_gate.golden import load_cases, validate
+from llm_release_gate.hashing import canonical_hash
 from llm_release_gate.metrics import VERSION, score
 from llm_release_gate.prices import Prices, load_prices, usd
 from llm_release_gate.trace import usage
 
 # Exit codes. 1 and 2 stay with Python and argparse, so a crash is never read as a verdict.
 PASS, QUALITY_FAIL, INCONCLUSIVE, BUDGET_FAIL, INFRA_ERROR = 0, 10, 11, 12, 20
-VERDICTS = {PASS: "pass", QUALITY_FAIL: "quality fail", INCONCLUSIVE: "inconclusive"}
+VERDICTS = {
+    PASS: "pass",
+    QUALITY_FAIL: "quality fail",
+    INCONCLUSIVE: "inconclusive",
+    BUDGET_FAIL: "budget fail",
+}
 
 
 @dataclass(frozen=True)
 class Verdict:
-    outcome: str  # pass / quality fail
+    outcome: str  # pass / quality fail / budget fail (quality passed, a budget did not)
     exit_code: int
     base_mean: float
     candidate_mean: float
@@ -130,32 +137,55 @@ def first_run(records: list[dict]) -> float:
     return r["score"]
 
 
-def cost(arm: Arm, prices: Prices) -> float | None:
-    """USD for the arm's recorded calls; None if a model has no price.
+def record_cost(r: dict, prices: Prices) -> float | None:
+    """USD for one record's calls at the gate's prices; None if a model has no price.
 
     A record with a trace costs what its model steps cost, the user simulator's included: the price of the decision.
     """
-    total = 0.0
-    for r in arm.records.values():
-        answered = [
-            s
-            for s in (r.get("trace") or {}).get("steps", [])
-            if s["kind"] == "llm" and s.get("status") == "ok"
+    answered = [
+        s
+        for s in (r.get("trace") or {}).get("steps", [])
+        if s["kind"] == "llm" and s.get("status") == "ok"
+    ]
+    if answered:  # priced by the gate's table, whatever the runner had
+        spent = [
+            u["cost_usd"] for u in usage(r["trace"], prices, reprice=True).values()
         ]
-        if answered:  # priced by the gate's table, whatever the runner had
-            per_actor = usage(r["trace"], prices, reprice=True).values()
-            spent = [u["cost_usd"] for u in per_actor]
-            if None in spent:
-                return None
-            total += sum(spent)
-            continue
-        spent = usd(
-            r.get("model"), r.get("input_tokens"), r.get("output_tokens"), prices
-        )
-        if spent is None:
-            return None
-        total += spent
-    return total
+        return None if None in spent else sum(spent)
+    return usd(r.get("model"), r.get("input_tokens"), r.get("output_tokens"), prices)
+
+
+def cost(arm: Arm, prices: Prices) -> float | None:
+    """USD for the arm's recorded calls; None if a model has no price."""
+    spent = [record_cost(r, prices) for r in arm.records.values()]
+    return None if None in spent else sum(spent)
+
+
+def candidate_budget(
+    arm: Arm, prices: Prices | None, args: argparse.Namespace
+) -> budget.Budget | None:
+    """The candidate's budget over its runs, if the command line set a limit."""
+    if args.max_cost_per_run is None and args.max_latency is None:
+        return None
+    runs = list(arm.records.values())
+    costs = []
+    if args.max_cost_per_run is not None:
+        if prices is None:
+            raise ValueError("--max-cost-per-run needs --prices")
+        costs = [record_cost(r, prices) for r in runs]
+        if None in costs:
+            raise ValueError(
+                "a model in the candidate's runs has no price: the cost limit cannot be checked"
+            )
+    latencies = [r["latency_s"] for r in runs if r.get("latency_s") is not None]
+    return budget.check(
+        costs,
+        latencies,
+        sum(1 for r in runs if r.get("retries")),
+        cost_limit=args.max_cost_per_run,
+        latency_limit=args.max_latency,
+        latency_q=args.latency_quantile,
+    )
 
 
 def markdown(
@@ -163,6 +193,7 @@ def markdown(
     base: Arm,
     candidate: Arm,
     costs: tuple[float | None, float | None] | None = None,
+    spend: budget.Budget | None = None,
 ) -> str:
     icon = {
         "pass": "✅",
@@ -196,6 +227,31 @@ def markdown(
         lines.append(
             f"Cost of this decision ${b + c:.3f}: base ${b:.3f}, candidate ${c:.3f} "
             "(successful calls, list prices)."
+        )
+    if spend:
+        parts = []
+        if spend.cost_limit is not None:
+            parts.append(
+                f"cost ${spend.cost_per_run:.4f} per run (limit ${spend.cost_limit:g})"
+            )
+        if spend.latency_limit is not None and spend.latency_s is not None:
+            lo, hi = spend.latency_ci
+            ci = (
+                f"{lo:.2f}–{hi:.2f} s"
+                if lo is not None and hi is not None
+                else "interval needs more runs"
+            )
+            parts.append(
+                f"latency p{100 * spend.latency_q:g} {spend.latency_s:.2f} s ({ci}; limit {spend.latency_limit:g} s)"
+            )
+        verdict = "over: " + "; ".join(spend.over) if spend.over else "within"
+        retried = (
+            f", {spend.retried} of {spend.runs} runs needed retries"
+            if spend.retried
+            else ""
+        )
+        lines.append(
+            f"Budget of the candidate {verdict} · {' · '.join(parts)}{retried}."
         )
     if v.worse:
         lines += ["", "| Case | Base | Candidate |", "|---|---|---|"]
@@ -246,6 +302,22 @@ def main(argv: Sequence[str] | None = None) -> int:
         type=Path,
         help="YAML `model: [input, output]` or `[input, output, cached input]`, USD per 1M tokens",
     )
+    p.add_argument(
+        "--max-cost-per-run",
+        type=float,
+        help="budget: the candidate's mean USD per run (needs --prices)",
+    )
+    p.add_argument(
+        "--max-latency",
+        type=float,
+        help="budget: seconds for the candidate's latency quantile (blocks if its interval lies above)",
+    )
+    p.add_argument(
+        "--latency-quantile",
+        type=float,
+        default=0.95,
+        help="quantile for --max-latency (default 0.95)",
+    )
     p.add_argument("--json", type=Path, help="write the verdict as JSON")
     p.add_argument("--markdown", type=Path, help="write the merge request comment")
     args = p.parse_args(argv)
@@ -265,7 +337,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         prices = load_prices(args.prices) if args.prices else None
         costs = (cost(base, prices), cost(candidate, prices)) if prices else None
-        text = markdown(v, base, candidate, costs)
+        spend = candidate_budget(candidate, prices, args)
+        if v.exit_code == PASS and spend and spend.outcome == "over":
+            v = replace(v, outcome=VERDICTS[BUDGET_FAIL], exit_code=BUDGET_FAIL)
+        text = markdown(v, base, candidate, costs, spend)
         report = {
             **asdict(v),
             "threshold_pp": args.threshold,
@@ -276,6 +351,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             "scorer_version": base.scorer_version,
             "rescored": bool(args.golden),
             "cost_usd": dict(zip(("base", "candidate"), costs)) if costs else None,
+            "prices_hash": canonical_hash(prices) if prices else None,
+            "budget": asdict(spend) if spend else None,
             "models_without_date": sorted(base.aliases | candidate.aliases),
             # the naive gate uses only the first of these
             "runs_per_case": {
