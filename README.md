@@ -128,6 +128,8 @@ scoring:
 
 Answer checks: `field_match`, `exact`, `contains`, `regex`, `number` (with `tol`), `json_schema`, `refusal`. Trace checks: `called` and `not_called` (with argument conditions `eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `in`), `order`, `max_steps`, `active`, `actions` (one result per expected action), `state`, `doc_found` (the share of expected documents retrieved). `function` calls your own `module:function` with the expected values, the answer, the trace and the check. Trace checks look at the steps of the runner's last attempt, at the agent unless `actor` says otherwise, and fail when the run has no trace.
 
+A check compares against its own `value` or against the case's expected value at the path `expected` (`field_match` reads `expected.fields` by default); `field` picks a part of the answer. A check over many items reports one result each, as `id.field` or `id.N:tool`. `exact` ignores surrounding spaces, `contains` also ignores case; `number` takes plain numbers and amounts such as `RM 7.70`. In `args`, a value must match exactly and a mapping is a set of operators (`{eq: {...}}` matches a mapping). `called` and `active` count calls that went through; `not_called` also counts a call the tool refused, since the attempt is the conduct being checked. `max_steps` passes a run with no model calls. A missing answer is not a refusal. `aggregate` applies to `field_match` too; `all` needs every scored result to be full. `golden validate` checks every configuration against the case's expected values without running it.
+
 ## CI
 
 `.gitlab-ci.yml` and `.github/workflows/ci.yml` run the same checks on every push: lint, the tests of the gate and of each example, and a validation of the test golden set.

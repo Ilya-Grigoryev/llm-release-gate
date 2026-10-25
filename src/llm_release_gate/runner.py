@@ -32,7 +32,7 @@ from llm_release_gate.prices import Prices, load_prices
 from llm_release_gate.trace import Trace, active, usage
 
 RECORD_VERSION = 4  # 2: scorer_version; 3: trace, usage, wall_s; 4: requested_model
-Scorer = Callable[[Case, Answer], dict[str, bool | None]]
+Scorer = Callable[[Case, Answer], dict[str, bool | float | None]]
 EMPTY_ANSWER = {f.name: None for f in fields(Answer)}
 
 

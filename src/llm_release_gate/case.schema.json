@@ -2,20 +2,82 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Golden set case",
   "type": "object",
-  "required": ["id", "version", "input", "expected", "scoring"],
+  "required": [
+    "id",
+    "version",
+    "input",
+    "expected",
+    "scoring"
+  ],
   "additionalProperties": false,
   "properties": {
-    "id": {"type": "string", "pattern": "^[A-Za-z0-9._-]+$"},
-    "version": {"type": "integer", "minimum": 1},
-    "slices": {"type": "object", "additionalProperties": {"type": "string"}},
-    "source": {"type": "string"},
-    "input": {"type": "object", "minProperties": 1, "additionalProperties": {"type": "string"}},
-    "expected": {"type": "object", "minProperties": 1},
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._-]+$"
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "slices": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "source": {
+      "type": "string"
+    },
+    "input": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "expected": {
+      "type": "object",
+      "minProperties": 1
+    },
     "scoring": {
       "type": "object",
-      "required": ["method"],
-      "properties": {"method": {"type": "string"}}
+      "required": [
+        "method"
+      ],
+      "properties": {
+        "method": {
+          "type": "string"
+        },
+        "aggregate": {
+          "enum": [
+            "mean",
+            "all"
+          ]
+        },
+        "checks": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "kind"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "kind": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
     },
-    "note": {"type": "string"}
+    "note": {
+      "type": "string"
+    }
   }
 }

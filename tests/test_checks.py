@@ -254,10 +254,10 @@ def test_score_aggregates_checks_as_the_case_says():
     [
         ({"checks": []}, "non-empty"),
         ({"checks": [{"id": "a", "kind": "telepathy"}]}, "unknown kind"),
-        ({"checks": [{"kind": "active"}]}, "id and a kind"),
+        ({"checks": [{"kind": "active"}]}, "text id"),
         (
             {"checks": [{"id": "a", "kind": "active"}, {"id": "a", "kind": "active"}]},
-            "twice",
+            "clashes",
         ),
         ({"checks": [{"id": "a", "kind": "called"}]}, "missing tool"),
         ({"checks": [{"id": "a", "kind": "regex"}]}, "missing pattern"),
@@ -337,3 +337,147 @@ def test_the_runner_scores_a_case_as_its_aggregate_says(tmp_path):
     assert (
         r["hits"]["date"] is False and r["score"] == 0.0
     )  # 3 of 4 fields right, but `all`
+
+
+# review round 1 (25.10.)
+
+
+@pytest.mark.parametrize(
+    "spec, error",
+    [
+        ({"kind": "regex", "pattern": "("}, "bad pattern"),
+        ({"kind": "json_schema", "schema": {"type": 5}}, "bad schema"),
+        ({"kind": "actions", "actions": [{"args": {}}]}, "list of {tool, args}"),
+        ({"kind": "max_steps", "max": "15"}, "whole number"),
+        (
+            {"kind": "order", "first": "a", "then": "cancel_booking"},
+            "list of tool names",
+        ),
+        (
+            {
+                "kind": "not_called",
+                "tool": "issue_credit",
+                "args": {"amount_eur": {"ge": 30}},
+            },
+            "operators",
+        ),
+        ({"kind": "active", "actor": "agnet"}, "actor"),
+        ({"kind": "called", "tool": "x", "args": ["amount"]}, "args must be a mapping"),
+        ({"kind": "number", "field": "total", "value": 1, "tol": "abc"}, "tol"),
+        ({"kind": "exact", "field": "reply", "expected": "rply"}, "no 'rply'"),
+        ({"kind": "state", "key": "final_state"}, "no 'final_state'"),
+        ({"kind": "doc_found", "ids": "d1"}, "list of document ids"),
+        ({"kind": "function", "function": "math:pi"}, "not callable"),
+    ],
+)
+def test_validation_catches_a_bad_config_without_running_it(spec, error):
+    found = checks.validate(EXPECTED, {"checks": [{"id": "c", **spec}]})
+    assert any(error in f for f in found), found
+
+
+def test_validation_does_not_call_a_team_function(tmp_path, monkeypatch):
+    (tmp_path / "picky.py").write_text(
+        "def reply(expected, output, trace, spec):\n    return output['reply']\n"
+    )
+    monkeypatch.syspath_prepend(str(tmp_path))
+    assert (
+        checks.validate(
+            EXPECTED,
+            {"checks": [{"id": "c", "kind": "function", "function": "picky:reply"}]},
+        )
+        == []
+    )
+
+
+def test_id_clashes_are_found_in_any_order():
+    for ids in (["a", "a.x"], ["a.x", "a"]):
+        found = checks.validate(
+            EXPECTED, {"checks": [{"id": i, "kind": "active"} for i in ids]}
+        )
+        assert any("clashes" in f for f in found)
+
+
+def test_a_refused_forbidden_call_still_counts_as_tried():
+    tried = {
+        **TRACE,
+        "steps": [
+            step(
+                0,
+                "tool",
+                name="issue_credit",
+                args={"amount_eur": "60"},
+                status="error",
+            )
+        ],
+    }
+    assert check(
+        "not_called", trace=tried, tool="issue_credit", args={"amount_eur": {"gt": 30}}
+    ) == {"c": False}
+    assert check("called", trace=tried, tool="issue_credit") == {
+        "c": False
+    }  # it did not go through
+
+
+def test_no_answer_is_not_a_refusal():
+    assert check("refusal", None, expected="refuse") == {"c": False}
+    assert check("refusal", {}, expected="refuse") == {"c": False}
+
+
+def test_plain_numbers_compare_by_value():
+    assert check("number", {"total": "1e-07"}, field="total", value=0.0000001) == {
+        "c": True
+    }
+    assert check("number", {"total": 45}, field="total", value="45.00") == {"c": True}
+
+
+def test_the_runner_and_the_gate_give_the_same_verdicts_on_a_trace(tmp_path):
+    from agent_pipeline import Adapter, default_script
+
+    from llm_release_gate import gate, runner
+    from llm_release_gate.compare import load_arm
+    from llm_release_gate.golden import load_cases
+
+    golden = tmp_path / "golden"
+    (golden / "inputs").mkdir(parents=True)
+    for name in ("synth-001.txt", "synth-001.jpg"):
+        (golden / "inputs" / name).write_bytes(b"x")
+    case = yaml.safe_load(
+        (Path(__file__).parent / "fixtures" / "golden" / "synth-001.yaml").read_text()
+    )
+    case["expected"] = {"state_change": {"balance": 5}}
+    case["scoring"] = {
+        "method": "checks",
+        "aggregate": "all",
+        "checks": [
+            {"id": "state", "kind": "state", "key": "state_change"},
+            {"id": "acted", "kind": "active"},
+            {
+                "id": "added",
+                "kind": "called",
+                "tool": "add",
+                "args": {"amount": {"gte": 5}},
+            },
+        ],
+    }
+    (golden / "synth-001.yaml").write_text(yaml.safe_dump(case))
+    set_hash, errors = validate(golden)
+    assert not errors
+    out = tmp_path / "runs.jsonl"
+    runner.run(
+        Adapter({"synth-001": default_script}),
+        load_cases(golden),
+        1,
+        out,
+        config_hash="c" * 64,
+        set_hash=set_hash,
+        score=metrics.hits,
+        workers=1,
+    )
+    arm = load_arm(out)
+    [record] = arm.records.values()
+    assert (
+        record["hits"] == {"state": True, "acted": True, "added": True}
+        and record["score"] == 1.0
+    )
+    [again] = gate.rescored(arm, golden).records.values()
+    assert again["hits"] == record["hits"] and again["score"] == record["score"]

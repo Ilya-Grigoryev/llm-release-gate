@@ -1,5 +1,6 @@
 """Scoring: compare one answer with a case's expected values, as the case's `scoring` block says."""
 
+import json
 import re
 from collections.abc import Callable
 from datetime import date
@@ -224,13 +225,42 @@ def score(
     return {"score": aggregate(per_field, how), "per_field": per_field}
 
 
+def problems(expected: dict, case_config: Any) -> list[str]:
+    """What is wrong with a case's scoring block, found without scoring an answer."""
+    if not isinstance(case_config, dict):
+        return [f"scoring must be a mapping, got {case_config!r}"]
+    method = case_config.get("method")
+    if method not in METHODS:
+        return [f"unknown scoring method {method!r}, known: {sorted(METHODS)}"]
+    if case_config.get("aggregate", "mean") not in AGGREGATES:
+        return [
+            f"aggregate must be one of {AGGREGATES}, got {case_config.get('aggregate')!r}"
+        ]
+    if method == "checks":
+        from llm_release_gate import checks
+
+        return checks.validate(expected, case_config)
+    try:
+        field_match(expected, {}, case_config)
+    except (ValueError, TypeError) as e:
+        return [str(e)]
+    return []
+
+
 def hits(case: Case, answer: Answer, trace: dict | None = None) -> dict[str, Any]:
-    """Per-field (or per-check) verdicts for the runner; the runner's current trace if none is given."""
+    """Per-field (or per-check) verdicts for the runner; the runner's current trace if none is given.
+
+    The trace is scored as JSON would bring it back, so `gate --golden` later gives the same verdicts.
+    """
     if trace is None:
         from llm_release_gate.trace import current
 
         t = current()
-        trace = None if t is None or t.empty() else t.to_dict()
+        trace = (
+            None
+            if t is None or t.empty()
+            else json.loads(json.dumps(t.to_dict(), default=repr))
+        )
     return score(case.expected, answer.output, case.scoring, trace)["per_field"]
 
 

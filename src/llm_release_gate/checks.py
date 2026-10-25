@@ -1,8 +1,8 @@
 """Checks: what a case asks of one run (T-57). Scoring method `checks` runs a list of them.
 
 Each check gives True or False, a share in [0, 1], or None when it does not apply; a check over many items (fields,
-expected actions) gives one result per item. Checks over the trace look at the steps of the runner's last attempt
-and at one actor (`agent` unless the check says otherwise); without a trace they fail.
+expected actions) gives one result per item, named `id.item`. Checks over the trace look at the steps of the runner's
+last attempt and at one actor (`agent` unless the check says otherwise); without a trace they fail.
 
     scoring:
       method: checks
@@ -11,59 +11,69 @@ and at one actor (`agent` unless the check says otherwise); without a trace they
         - {id: state, kind: state, key: state_change}
         - {id: verified, kind: order, first: find_member, then: [create_booking, cancel_booking, issue_credit]}
         - {id: no-big-credit, kind: not_called, tool: issue_credit, args: {amount_eur: {gt: 30}}}
+
+`validate` checks a configuration against the case's expected values without running anything.
 """
 
 import importlib
 import re
 from collections.abc import Callable
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 import jsonschema
 
-from llm_release_gate.trace import last_attempt
+from llm_release_gate.trace import ACTORS, last_attempt
+
+MISSING = object()
+
+
+def number(value: Any) -> Any:
+    """A number given as text compares as a number: `"60"` > 30."""
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            return value
+    return value
+
 
 OPS: dict[str, Callable[[Any, Any], bool]] = {
     "eq": lambda a, b: a == b,
     "ne": lambda a, b: a != b,
-    "gt": lambda a, b: a is not None and a > b,
-    "gte": lambda a, b: a is not None and a >= b,
-    "lt": lambda a, b: a is not None and a < b,
-    "lte": lambda a, b: a is not None and a <= b,
+    "gt": lambda a, b: a is not None and number(a) > b,
+    "gte": lambda a, b: a is not None and number(a) >= b,
+    "lt": lambda a, b: a is not None and number(a) < b,
+    "lte": lambda a, b: a is not None and number(a) <= b,
     "in": lambda a, b: a in b,
 }
 
 
-def need(spec: dict, *keys: str) -> None:
-    missing = [k for k in keys if k not in spec]
-    if missing:
-        raise ValueError(f"check {spec.get('id')!r}: missing {', '.join(missing)}")
-
-
-def pick(data: Any, path: str | None) -> Any:
-    """`a.b` from nested mappings; the whole value if path is None; None if any key is missing."""
-    for key in (path or "").split(".") if path else []:
-        data = data.get(key) if isinstance(data, dict) else None
+def pick(data: Any, path: str | None, default: Any = None) -> Any:
+    """`a.b` from nested mappings; the whole value if path is None; `default` if a key is missing."""
+    for key in path.split(".") if path else []:
+        if not isinstance(data, dict) or key not in data:
+            return default
+        data = data[key]
     return data
 
 
 def given(spec: dict, expected: dict, key: str = "value") -> Any:
-    """The check's own `value`, or the case's expected value named by `expected`."""
+    """The check's own `key`, or the case's expected value named by `expected`."""
     if key in spec:
         return spec[key]
-    if "expected" in spec:
-        return pick(expected, spec["expected"])
-    raise ValueError(f"check {spec.get('id')!r}: give `{key}` or `expected`")
+    return pick(expected, spec["expected"])
 
 
 def matches(args: Any, want: dict | None) -> bool:
-    """Arguments match when each wanted key equals, or passes each operator: `{amount_eur: {gt: 30}}`."""
+    """Each wanted argument equals the value, or passes each operator of a mapping: `{amount_eur: {gt: 30}}`."""
     for key, cond in (want or {}).items():
         value = args.get(key) if isinstance(args, dict) else None
-        if isinstance(cond, dict) and cond and set(cond) <= OPS.keys():
+        if isinstance(cond, dict):
             try:
                 if not all(OPS[op](value, b) for op, b in cond.items()):
                     return False
-            except TypeError:  # comparing a string with a number
+            except TypeError:  # an argument of another type cannot pass a comparison
                 return False
         elif value != cond:
             return False
@@ -77,21 +87,12 @@ def steps(trace: dict | None, spec: dict, kind: str) -> list[dict] | None:
     return [s for s in last_attempt(trace) if s["kind"] == kind and s["actor"] == actor]
 
 
-def calls(trace: dict | None, spec: dict) -> list[dict] | None:
+def calls(trace: dict | None, spec: dict, attempts: bool = False) -> list[dict] | None:
+    """The actor's tool calls; failed ones too with `attempts` (an attempted forbidden call is still conduct)."""
     found = steps(trace, spec, "tool")
-    return None if found is None else [s for s in found if s.get("status") != "error"]
-
-
-# answer checks
-
-
-def field_match(spec: dict, expected: dict, output: Any, trace: dict | None) -> dict:
-    from llm_release_gate.metrics import field_match as fields  # the D-005 field rules
-
-    want = pick(expected, spec.get("expected", "fields"))
-    if not isinstance(want, dict):
-        raise TypeError(f"check {spec.get('id')!r}: expected fields must be a mapping")
-    return fields(want, pick(output, spec.get("field")), spec)
+    if found is None or attempts:
+        return found
+    return [s for s in found if s.get("status") != "error"]
 
 
 def text(spec: dict, output: Any) -> str | None:
@@ -99,82 +100,91 @@ def text(spec: dict, output: Any) -> str | None:
     return None if value is None else str(value)
 
 
+# answer checks
+
+
+def field_match(spec, expected, output, trace) -> dict:
+    from llm_release_gate.metrics import field_match as fields  # the D-005 field rules
+
+    return fields(
+        pick(expected, spec.get("expected", "fields")),
+        pick(output, spec.get("field")),
+        spec,
+    )
+
+
 def exact(spec, expected, output, trace):
-    want = str(
-        given(spec, expected)
-    ).strip()  # first: a bad config fails even without an answer
     got = text(spec, output)
-    return got is not None and got.strip() == want
+    return got is not None and got.strip() == str(given(spec, expected)).strip()
 
 
 def contains(spec, expected, output, trace):
-    want = str(given(spec, expected))
+    """Case-insensitive."""
     got = text(spec, output)
-    return got is not None and want.casefold() in got.casefold()
+    return got is not None and str(given(spec, expected)).casefold() in got.casefold()
 
 
 def regex(spec, expected, output, trace):
-    need(spec, "pattern")
-    pattern = re.compile(spec["pattern"])
     got = text(spec, output)
-    return got is not None and pattern.search(got) is not None
+    return got is not None and re.search(spec["pattern"], got) is not None
 
 
-def number(spec, expected, output, trace):
+def as_number(value: Any) -> Decimal | None:
+    """A plain number (`45`, `45.5`, `1e-07`) or an amount (`RM 7.70`, `$7.80`, `1,007.50`)."""
     from llm_release_gate.metrics import parse_number
 
-    want = parse_number(str(given(spec, expected)))
-    if want is None:
-        raise ValueError(f"check {spec.get('id')!r}: expected value is not a number")
-    got = text(spec, output)
-    value = parse_number(got) if got is not None else None
-    return value is not None and abs(value - want) <= type(want)(
-        str(spec.get("tol", 0))
-    )
+    if value is None:
+        return None
+    try:
+        return Decimal(str(value).strip())
+    except InvalidOperation:
+        return parse_number(str(value))
+
+
+def numeric(spec, expected, output, trace):
+    want = as_number(given(spec, expected))
+    got = as_number(pick(output, spec.get("field")))
+    return got is not None and abs(got - want) <= Decimal(str(spec.get("tol", 0)))
 
 
 def json_schema(spec, expected, output, trace):
-    need(spec, "schema")
-    jsonschema.Draft202012Validator.check_schema(spec["schema"])
-    return jsonschema.Draft202012Validator(spec["schema"]).is_valid(
-        pick(output, spec.get("field"))
-    )
+    validator = jsonschema.Draft202012Validator(spec["schema"])
+    return validator.is_valid(pick(output, spec.get("field")))
 
 
 def refusal(spec, expected, output, trace):
-    """The answer field is null when the case expects a refusal, and filled when it does not."""
-    should = bool(given(spec, expected))
-    return (pick(output, spec.get("field", "answer")) is None) == should
+    """The answer field is present and null when the case expects a refusal, present and filled when it does not."""
+    answer = pick(output, spec.get("field", "answer"), MISSING)
+    if answer is MISSING:  # no answer at all is not a refusal
+        return False
+    return (answer is None) == bool(given(spec, expected))
 
 
 # trace checks
 
 
+def uses(s: dict, spec: dict, tool: str, args: dict | None) -> bool:
+    return s["name"] == tool and matches(s.get("args"), args)
+
+
 def called(spec, expected, output, trace):
-    need(spec, "tool")
+    """The actor called the tool, with matching arguments, and the call went through."""
     found = calls(trace, spec)
-    if found is None:
-        return False
-    return any(
-        s["name"] == spec["tool"] and matches(s.get("args"), spec.get("args"))
-        for s in found
+    return found is not None and any(
+        uses(s, spec, spec["tool"], spec.get("args")) for s in found
     )
 
 
 def not_called(spec, expected, output, trace):
-    need(spec, "tool")
-    found = calls(trace, spec)
-    if found is None:
-        return False
-    return not any(
-        s["name"] == spec["tool"] and matches(s.get("args"), spec.get("args"))
-        for s in found
+    """The actor never tried the tool with such arguments; a call the tool refused counts as tried."""
+    found = calls(trace, spec, attempts=True)
+    return found is not None and not any(
+        uses(s, spec, spec["tool"], spec.get("args")) for s in found
     )
 
 
 def order(spec, expected, output, trace):
     """Every call of a `then` tool comes after a call of `first`; true when no `then` tool was called."""
-    need(spec, "first", "then")
     found = calls(trace, spec)
     if found is None:
         return False
@@ -184,8 +194,7 @@ def order(spec, expected, output, trace):
 
 
 def max_steps(spec, expected, output, trace):
-    """Model calls of the actor, answered and not housekeeping, within the limit."""
-    need(spec, "max")
+    """Model calls of the actor, answered and not housekeeping, within the limit (none at all passes)."""
     found = steps(trace, spec, "llm")
     if found is None:
         return False
@@ -194,39 +203,28 @@ def max_steps(spec, expected, output, trace):
 
 
 def active(spec, expected, output, trace):
-    """The actor called at least one tool: a run its simulated user finished alone does not pass."""
-    found = calls(trace, spec)
-    return bool(found)
+    """The actor got at least one tool call through: a run its simulated user finished alone does not pass."""
+    return bool(calls(trace, spec))
 
 
 def actions(spec, expected, output, trace) -> dict:
     """One result per expected action: called by the actor, arguments matching."""
-    want = given(spec, expected, "actions")
-    if not isinstance(want, list):
-        raise TypeError(f"check {spec.get('id')!r}: actions must be a list")
     found = calls(trace, spec) or []
     return {
-        f"{i}:{a['tool']}": any(
-            s["name"] == a["tool"] and matches(s.get("args"), a.get("args"))
-            for s in found
-        )
-        for i, a in enumerate(want)
+        f"{i}:{a['tool']}": any(uses(s, spec, a["tool"], a.get("args")) for s in found)
+        for i, a in enumerate(given(spec, expected, "actions"))
     }
 
 
 def state(spec, expected, output, trace):
     """The trace's `final_state` or `state_change` equals the expected one."""
     key = spec.get("key", "final_state")
-    if key not in ("final_state", "state_change"):
-        raise ValueError(
-            f"check {spec.get('id')!r}: key must be final_state or state_change"
-        )
     want = pick(expected, spec.get("expected", key))
     return trace is not None and trace.get(key) == want
 
 
 def doc_found(spec, expected, output, trace):
-    """Share of the expected documents among those the actor retrieved."""
+    """Share of the expected documents among those the actor retrieved; None if none are expected."""
     want = given(spec, expected, "ids")
     if not want:
         return None
@@ -237,17 +235,22 @@ def doc_found(spec, expected, output, trace):
     return sum(i in ids for i in want) / len(want)
 
 
-def function(spec, expected, output, trace):
-    """`module:function`, called with (expected, output, trace, spec)."""
-    need(spec, "function")
+def load_function(spec: dict) -> Callable:
     module, _, name = spec["function"].partition(":")
     try:
         fn = getattr(importlib.import_module(module), name)
     except (ImportError, AttributeError, ValueError) as e:
         raise ValueError(
-            f"check {spec.get('id')!r}: cannot load {spec['function']!r}: {e}"
+            f"check {spec['id']!r}: cannot load {spec['function']!r}: {e}"
         ) from None
-    return fn(expected, output, trace, spec)
+    if not callable(fn):
+        raise TypeError(f"check {spec['id']!r}: {spec['function']!r} is not callable")
+    return fn
+
+
+def function(spec, expected, output, trace):
+    """`module:function`, called with (expected, output, trace, spec)."""
+    return load_function(spec)(expected, output, trace, spec)
 
 
 KINDS: dict[str, Callable] = {
@@ -255,7 +258,7 @@ KINDS: dict[str, Callable] = {
     "exact": exact,
     "contains": contains,
     "regex": regex,
-    "number": number,
+    "number": numeric,
     "json_schema": json_schema,
     "refusal": refusal,
     "called": called,
@@ -268,27 +271,183 @@ KINDS: dict[str, Callable] = {
     "doc_found": doc_found,
     "function": function,
 }
+VALUE_KINDS = {
+    "exact",
+    "contains",
+    "number",
+    "refusal",
+}  # a `value` or an `expected` path
+
+
+# validation
+
+
+def problems(spec: Any, expected: dict) -> list[str]:
+    """What is wrong with one check's configuration, judged without an answer or a trace."""
+    if (
+        not isinstance(spec, dict)
+        or not isinstance(spec.get("id"), str)
+        or not spec["id"]
+    ):
+        return [f"each check needs a text id, got {spec!r}"]
+    name, kind = spec["id"], spec.get("kind")
+    if kind not in KINDS:
+        return [f"check {name!r}: unknown kind {kind!r}, known: {sorted(KINDS)}"]
+    found: list[str] = []
+
+    def need(key: str, ok: Callable[[Any], bool], what: str) -> None:
+        if key not in spec:
+            found.append(f"check {name!r}: missing {key}")
+        elif not ok(spec[key]):
+            found.append(f"check {name!r}: {key} must be {what}")
+
+    def path(default: str | None = None) -> Any:
+        where = spec.get("expected", default)
+        if not isinstance(where, str):
+            found.append(
+                f"check {name!r}: expected must name a path in the case's expected values"
+            )
+            return MISSING
+        value = pick(expected, where, MISSING)
+        if value is MISSING:
+            found.append(f"check {name!r}: expected values have no {where!r}")
+        return value
+
+    def listed(key: str, element: Callable[[Any], bool], what: str) -> Any:
+        if key in spec:
+            value = spec[key]
+        elif "expected" in spec:
+            value = path()
+        else:
+            found.append(f"check {name!r}: give `{key}` or `expected`")
+            return MISSING
+        if value is not MISSING and not (
+            isinstance(value, list) and all(element(v) for v in value)
+        ):
+            found.append(f"check {name!r}: {key} must be a list of {what}")
+        return value
+
+    if "actor" in spec and spec["actor"] not in ACTORS:
+        found.append(f"check {name!r}: actor must be one of {ACTORS}")
+    if "field" in spec and not isinstance(spec["field"], str):
+        found.append(f"check {name!r}: field must be a path in the answer")
+    if kind in VALUE_KINDS:
+        if "value" in spec:
+            value = spec["value"]
+        elif "expected" in spec:
+            value = path()
+        else:
+            found.append(f"check {name!r}: give `value` or `expected`")
+            value = MISSING
+        if kind == "number" and value is not MISSING and as_number(value) is None:
+            found.append(
+                f"check {name!r}: the expected value {value!r} is not a number"
+            )
+    if kind == "number" and "tol" in spec:
+        need("tol", lambda t: type(t) in (int, float) and t >= 0, "a number >= 0")
+    if kind == "regex":
+        need("pattern", lambda p: isinstance(p, str), "text")
+        if isinstance(spec.get("pattern"), str):
+            try:
+                re.compile(spec["pattern"])
+            except re.error as e:
+                found.append(f"check {name!r}: bad pattern: {e}")
+    if kind == "json_schema":
+        need("schema", lambda s: isinstance(s, dict), "a mapping")
+        if isinstance(spec.get("schema"), dict):
+            try:
+                jsonschema.Draft202012Validator.check_schema(spec["schema"])
+            except jsonschema.SchemaError as e:
+                found.append(f"check {name!r}: bad schema: {e.message}")
+    if kind in ("called", "not_called"):
+        need("tool", lambda t: isinstance(t, str), "a tool name")
+        found += args_problems(name, spec.get("args"))
+    if kind == "order":
+        need("first", lambda t: isinstance(t, str), "a tool name")
+        need(
+            "then",
+            lambda ts: isinstance(ts, list) and all(isinstance(t, str) for t in ts),
+            "a list of tool names",
+        )
+    if kind == "max_steps":
+        need("max", lambda m: type(m) is int and m >= 0, "a whole number >= 0")
+    if kind == "actions":
+        acts = listed(
+            "actions",
+            lambda a: isinstance(a, dict) and isinstance(a.get("tool"), str),
+            "{tool, args}",
+        )
+        if isinstance(acts, list):
+            for a in acts:
+                if isinstance(a, dict):
+                    found += args_problems(name, a.get("args"))
+    if kind == "state":
+        key = spec.get("key", "final_state")
+        if key not in ("final_state", "state_change"):
+            found.append(f"check {name!r}: key must be final_state or state_change")
+        else:
+            path(default=key)
+    if kind == "doc_found":
+        listed("ids", lambda i: isinstance(i, str), "document ids")
+    if kind == "field_match":
+        want = path(default="fields")
+        if want is not MISSING and not isinstance(want, dict):
+            found.append(f"check {name!r}: expected fields must be a mapping")
+        elif want is not MISSING:
+            from llm_release_gate.metrics import field_match as fields
+
+            try:
+                fields(want, {}, spec)  # the field rules check their own configuration
+            except (ValueError, TypeError) as e:
+                found.append(f"check {name!r}: {e}")
+    if kind == "function":
+        need("function", lambda f: isinstance(f, str) and ":" in f, "`module:function`")
+        if isinstance(spec.get("function"), str) and ":" in spec["function"]:
+            try:
+                load_function(spec)  # importable and callable; not called
+            except (ValueError, TypeError) as e:
+                found.append(str(e))
+    return found
+
+
+def args_problems(name: str, args: Any) -> list[str]:
+    """Argument conditions: a value to equal, or a mapping of operators (`{eq: {...}}` for a mapping value)."""
+    if args is None:
+        return []
+    if not isinstance(args, dict):
+        return [f"check {name!r}: args must be a mapping"]
+    return [
+        f"check {name!r}: argument {k!r}: operators must be from {sorted(OPS)}, got {sorted(cond)}"
+        for k, cond in args.items()
+        if isinstance(cond, dict) and (not cond or not set(cond) <= OPS.keys())
+    ]
+
+
+def validate(expected: dict, config: dict) -> list[str]:
+    """Everything wrong with a `checks` configuration, without running a check."""
+    specs = config.get("checks")
+    if not isinstance(specs, list) or not specs:
+        return ["checks must be a non-empty list"]
+    found = [p for spec in specs for p in problems(spec, expected)]
+    ids = [
+        s["id"] for s in specs if isinstance(s, dict) and isinstance(s.get("id"), str)
+    ]
+    for i, a in enumerate(ids):
+        for j, b in enumerate(ids):
+            if i != j and (a == b or b.startswith(f"{a}.")):
+                found.append(f"check id {a!r} clashes with {b!r}")
+    return list(dict.fromkeys(found))
 
 
 def run(
     expected: dict, output: Any, config: dict, trace: dict | None = None
 ) -> dict[str, Any]:
-    """Results of the case's checks by id; a check with several items gives `id.item` per item."""
-    specs = config.get("checks")
-    if not isinstance(specs, list) or not specs:
-        raise ValueError("checks must be a non-empty list")
+    """Results of the case's checks by id. Raises ValueError for a bad configuration."""
+    found = validate(expected, config)
+    if found:
+        raise ValueError("; ".join(found))
     results: dict[str, Any] = {}
-    for spec in specs:
-        if not isinstance(spec, dict) or "id" not in spec or "kind" not in spec:
-            raise ValueError(f"each check needs an id and a kind, got {spec!r}")
-        if spec["kind"] not in KINDS:
-            raise ValueError(
-                f"check {spec['id']!r}: unknown kind {spec['kind']!r}, known: {sorted(KINDS)}"
-            )
-        if spec["id"] in results or any(
-            k.startswith(f"{spec['id']}.") for k in results
-        ):
-            raise ValueError(f"check id {spec['id']!r} used twice")
+    for spec in config["checks"]:
         value = KINDS[spec["kind"]](spec, expected, output, trace)
         if isinstance(value, dict):
             results.update({f"{spec['id']}.{k}": v for k, v in value.items()})

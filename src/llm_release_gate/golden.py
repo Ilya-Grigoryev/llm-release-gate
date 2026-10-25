@@ -9,7 +9,7 @@ import jsonschema
 import yaml
 
 from llm_release_gate.hashing import canonical_hash, file_hash
-from llm_release_gate.metrics import score
+from llm_release_gate.metrics import problems
 from llm_release_gate.pipeline import Case
 
 SCHEMA = json.loads((Path(__file__).parent / "case.schema.json").read_text())
@@ -54,10 +54,9 @@ def validate(directory: Path) -> tuple[str | None, list[str]]:
         except TypeError:
             errors.append(f"{path.name}: non-JSON value, quote dates and times")
             continue
-        try:
-            score(raw["expected"], {}, raw["scoring"])
-        except (ValueError, TypeError) as e:
-            errors.append(f"{path.name}: scoring: {e}")
+        found = problems(raw["expected"], raw["scoring"])
+        if found:
+            errors.append(f"{path.name}: scoring: {'; '.join(found)}")
             continue
         if raw["id"] in seen:
             errors.append(f"{path.name}: id {raw['id']} also in {seen[raw['id']]}")
