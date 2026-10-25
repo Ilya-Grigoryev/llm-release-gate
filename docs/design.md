@@ -17,7 +17,7 @@ target architecture.
 | Scoring | `metrics.py`, `checks.py` | turns an answer and its trace into per-check results and a case score | built |
 | Prices | `prices.py` | list prices per model prefix, cached input included | built |
 | Comparison | `compare.py` | pairs the records of two versions case by case, refuses what cannot be compared | built |
-| Criterion | `gate.py` | the verdict and its exit code | built (naive rule: pass, quality fail); planned (statistical rules, inconclusive) |
+| Criterion | `gate.py`, `criterion.py` | the verdict and its exit code | built (naive rule; the rule on checks as a library function); planned (the rule on the mean, inconclusive, the rule on checks in the gate's verdict) |
 | Budget | `budget.py`, `gate.py` | cost of the decision; cost and latency limits | built |
 | Report and comment | `gate.py`, `comment.py` | Markdown and JSON verdict; one comment on the pull or merge request, edited on later pushes | built |
 | CI adapter | `ci/gate.sh`, `.github/workflows/ci.yml`, `.gitlab-ci.yml` | runs both versions of a request and posts the verdict | built (this repository); planned (reusable action and template) |
@@ -121,9 +121,15 @@ runner's scorer is `hits(case, answer, trace=None)` (by default the run's trace,
   `outcome`, `exit_code`, `base_mean`, `candidate_mean`, `diff_pp`, `limit_pp`, `rule`, `cases` and the cases that got
   worse. It gives `pass` (0) or `quality fail` (10); a budget can turn a pass into `budget fail` (12); `inconclusive` (11)
   is reserved for the planned rules; `infra error` (20) is any failure to compare.
+- **Built — the rule on checks (library; not yet in the gate's verdict).** `per_check(base, candidate, alpha, sides, mode,
+  threshold) -> CheckVerdict`, a pure function over the results of each (case, check) per repetition: Fisher's exact test
+  on k of K passes in each version, computed in exact fractions; Tarone's correction (only checks that could reach
+  significance count, m the smallest number with at most m of them) and Bonferroni over those; a two-sided test blocks
+  only a check that got worse; a share passes at `threshold`, None is left out; `block` or `report` mode. Defaults —
+  one-sided, alpha 0.025 — wait on D-003's open choice (M-12); the list by a discrete BH is not built.
 - **Planned — statistical rules.** A paired test on the mean with a margin δ and three outcomes (pass, block, buy more
-  runs and leave it to a human); a per-check test that blocks a check that breaks consistently, with a correction for
-  multiple comparisons; a second comparison against an anchor version, so that many small losses cannot add up unseen;
+  runs and leave it to a human); the rule on checks in the gate's verdict and report; a second comparison against an
+  anchor version, so that many small losses cannot add up unseen;
   an adaptive runner that pays for repeated runs only where the versions disagree. Each takes a seed as an argument and
   reports it in the verdict.
 
@@ -173,7 +179,7 @@ flowchart LR
         scoring[scoring<br/>field_match, checks]
         store[(store: records JSONL<br/>+ raw responses)]
         compare[compare]
-        criterion[criterion<br/>naive rule]
+        criterion[criterion<br/>naive rule, rule on checks]
         prices[prices]
         report[report]
     end
