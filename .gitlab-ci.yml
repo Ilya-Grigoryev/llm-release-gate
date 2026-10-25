@@ -26,16 +26,14 @@ validate:
 # Each example installs the gate the way another project would.
 example-test:
   extends: .python
-  image: python:3.12  # git: tau2 installs from git, its data comes by fetch_data.sh
   parallel:
     matrix:
-      - EXAMPLE: [sroie, tau2]
+      - EXAMPLE: [sroie]
   before_script:
     - pip install --quiet uv==0.11.25
     - cd examples/$EXAMPLE
     - uv sync --locked
   script:
-    - if [ "$EXAMPLE" = tau2 ]; then sh fetch_data.sh; fi
     - uv run pytest
 
 # Base version (the target branch) against the candidate (this merge request) on the golden set from

@@ -24,8 +24,10 @@ target architecture.
 | Dashboard | — | history of merge requests, base against candidate down to a trace step | planned |
 
 Projects use the gate as a dependency: `examples/sroie` (receipt extraction from OCR text or a scan, in one model call or
-two) in this repository, and [workbench-support](https://github.com/Ilya-Grigoryev/workbench-support) in its own (a
-tool-using agent over a booking system, alone on a ticket or in a chat with a simulated user).
+two) in this repository, and two in their own: [workbench-support](https://github.com/Ilya-Grigoryev/workbench-support) (a tool-using agent
+over a booking system, alone on a ticket or in a chat with a simulated user) and
+[telecom-support](https://github.com/Ilya-Grigoryev/telecom-support) (tau2-bench's telecom agent, tools, tasks and
+evaluator, unchanged).
 
 ### Pipeline interface (built)
 

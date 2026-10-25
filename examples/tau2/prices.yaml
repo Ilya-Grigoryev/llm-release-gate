@@ -1,4 +1,0 @@
-# USD per 1M tokens: [input, output, cached input]. OpenAI list prices, 24.10.2026.
-gpt-5.4-mini: [0.75, 4.50, 0.075]
-gpt-4.1-mini: [0.40, 1.60, 0.10]
-gpt-6-luna: [0.10, 0.50, 0.01]
