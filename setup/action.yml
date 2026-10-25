@@ -8,8 +8,10 @@ inputs:
     description: A read-only deploy key of Ilya-Grigoryev/llm-release-gate, as long as that repository is private.
     default: ""
   python-version:
+    description: Python for uv to find; the project's own pin wins.
     default: "3.12"
   uv-version:
+    description: The uv release to install.
     default: "0.11.25"
 runs:
   using: composite
@@ -28,8 +30,9 @@ runs:
       run: |
         mkdir -p ~/.ssh && printf '%s\n' "$GATE_KEY" > ~/.ssh/llm-release-gate && chmod 600 ~/.ssh/llm-release-gate
         echo "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl" >> ~/.ssh/known_hosts
-        git config --global core.sshCommand "ssh -i ~/.ssh/llm-release-gate -o IdentitiesOnly=yes"
-        git config --global url."ssh://git@github.com/Ilya-Grigoryev/llm-release-gate".insteadOf \
+        # an alias host, so the key serves this one repository and other SSH remotes keep their own
+        printf 'Host llm-release-gate\n  HostName github.com\n  HostKeyAlias github.com\n  User git\n  IdentityFile ~/.ssh/llm-release-gate\n  IdentitiesOnly yes\n' >> ~/.ssh/config
+        git config --global url."ssh://llm-release-gate/Ilya-Grigoryev/llm-release-gate".insteadOf \
           https://github.com/Ilya-Grigoryev/llm-release-gate
     - shell: bash
       working-directory: ${{ inputs.project-dir }}

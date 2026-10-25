@@ -286,7 +286,7 @@ about 25-fold for a long dialog.
 
 - **Statistical gate** (see Criterion), interleaved arms in the runner, latency budgets, the anchor comparison.
 - **Adoption**: a `gate.yaml` at the root of an application project, a `pr` command that runs only the versions whose
-  config hash changed, a reusable GitHub Action and GitLab template, a JUnit report.
+  config hash changed, a JUnit report.
 - **Adapters**: a benchmark adapter (τ²-bench telecom), a harness agent in a container through `pipeline: command`,
   retrieval-augmented generation (to be decided), import of OpenTelemetry traces.
 - **Dashboard**: `llm-release-gate serve` (FastAPI and SQLite, in a Docker image): the history of merge requests and of the

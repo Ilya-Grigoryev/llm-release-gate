@@ -195,10 +195,13 @@ A check compares against its own `value` or against the case's expected value at
 
 ## Use it in your project
 
-1. Add the gate as a dependency, pinned to a release:
+1. Add the gate as a dependency, pinned to a release (`uv add` writes both parts):
    ```toml
+   [project]
+   dependencies = ["llm-release-gate"]
+
    [tool.uv.sources]
-   llm-release-gate = { git = "https://github.com/Ilya-Grigoryev/llm-release-gate", tag = "v0.1.0-dev.2" }
+   llm-release-gate = { git = "https://github.com/Ilya-Grigoryev/llm-release-gate", tag = "v0.1.0-dev.3" }
    ```
 2. Write an adapter (`build(config)` and `run(case)`, [Your pipeline](#your-pipeline)), a config for the version in
    production and a golden set.
@@ -213,10 +216,10 @@ A check compares against its own `value` or against the case's expected value at
          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
        steps:
          - uses: actions/checkout@v7
-         - uses: Ilya-Grigoryev/llm-release-gate/setup@v0.1.0-dev.2
+         - uses: Ilya-Grigoryev/llm-release-gate/setup@v0.1.0-dev.3
            with:
              gate-ssh-key: ${{ secrets.LLM_RELEASE_GATE_KEY }}  # while this repository is private
-         - uses: Ilya-Grigoryev/llm-release-gate@v0.1.0-dev.2
+         - uses: Ilya-Grigoryev/llm-release-gate@v0.1.0-dev.3
            with:
              config: configs/production.yaml
              golden: golden/smoke
@@ -227,8 +230,11 @@ the golden set (against a `manifest` if given), runs the version from the target
 it, in parallel and each with its own code, compares them and posts the verdict as one comment, edited on later pushes
 (one per `name` when a request gates several pipelines). It keeps the records as an artifact and fails the job with the
 gate's verdict; the job only advises until it is made a required check. A golden set that stays out of git is fetched or
-built in a step between the two. While this repository is private, a project needs read access to it: a read-only
-deploy key passed as `gate-ssh-key`, and the owner's setting that lets other repositories use its actions.
+built in a step between the two; if that step fails, the gate does not run and the request gets no comment.
+
+While this repository is private, only repositories of its owner can use it: the owner shares its actions with them
+(Settings → Actions → Access) and gives each a read-only deploy key, passed as `gate-ssh-key`. Other projects wait for
+the public release.
 
 Three projects use it, each with its own `.github/workflows/ci.yml`: [receipt-intake](https://github.com/Ilya-Grigoryev/receipt-intake)
 (about $0.06 a pull request), [workbench-support](https://github.com/Ilya-Grigoryev/workbench-support) ($0.04) and

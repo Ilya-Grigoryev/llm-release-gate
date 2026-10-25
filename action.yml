@@ -43,8 +43,9 @@ runs:
         PROJECT: ${{ inputs.project-dir }}
         CONFIG: ${{ inputs.config }}
         GOLDEN: ${{ inputs.golden }}
-        OUT: ${{ runner.temp }}/llm-release-gate
+        OUT: ${{ runner.temp }}/llm-release-gate${{ inputs.name != '' && format('-{0}', inputs.name) || '' }}
       run: |
+        rm -rf "$OUT"  # a second gate in the job starts from scratch
         git fetch --depth=1 origin "$GITHUB_BASE_REF"
         uv run --project "$PROJECT" python -m llm_release_gate.pr FETCH_HEAD "$PROJECT" "$CONFIG" "$PROJECT/$GOLDEN" "$OUT"
     - name: comment
@@ -54,14 +55,14 @@ runs:
         GITHUB_TOKEN: ${{ inputs.github-token }}
         PROJECT: ${{ inputs.project-dir }}
         NAME: ${{ inputs.name }}
-        OUT: ${{ runner.temp }}/llm-release-gate
+        OUT: ${{ runner.temp }}/llm-release-gate${{ inputs.name != '' && format('-{0}', inputs.name) || '' }}
       run: uv run --project "$PROJECT" python -m llm_release_gate.comment "$OUT/comment.md" ${NAME:+--name "$NAME"}
     - uses: actions/upload-artifact@v7
       if: ${{ !cancelled() }}
       with:
         name: release-gate${{ inputs.name != '' && format('-{0}', inputs.name) || '' }}-${{ github.run_attempt }}
         path: |
-          ${{ runner.temp }}/llm-release-gate/*.jsonl
-          ${{ runner.temp }}/llm-release-gate/*.json
-          ${{ runner.temp }}/llm-release-gate/*.md
-          ${{ runner.temp }}/llm-release-gate/*.log
+          ${{ runner.temp }}/llm-release-gate${{ inputs.name != '' && format('-{0}', inputs.name) || '' }}/*.jsonl
+          ${{ runner.temp }}/llm-release-gate${{ inputs.name != '' && format('-{0}', inputs.name) || '' }}/*.json
+          ${{ runner.temp }}/llm-release-gate${{ inputs.name != '' && format('-{0}', inputs.name) || '' }}/*.md
+          ${{ runner.temp }}/llm-release-gate${{ inputs.name != '' && format('-{0}', inputs.name) || '' }}/*.log
