@@ -3,7 +3,7 @@
 The telecom domain of [tau2-bench](https://github.com/sierra-research/tau2-bench) v1.0.1 behind the gate: tau2's own
 agent helps a customer fix their phone, with tools on the operator's database while the customer acts on the phone.
 tau2's evaluator checks the phone and the database at the end, without an LLM judge. Published success rates exist for
-this domain, so it serves as an outside check of the gate next to `examples/support-agent`.
+this domain, so it serves as an outside check of the gate next to [workbench-support](https://github.com/Ilya-Grigoryev/workbench-support).
 
 | Path | What |
 |---|---|

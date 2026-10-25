@@ -20,12 +20,12 @@ target architecture.
 | Criterion | `gate.py`, `criterion.py` | the verdict and its exit code | built (naive rule; the rule on checks as a library function); planned (the rule on the mean, inconclusive, the rule on checks in the gate's verdict) |
 | Budget | `budget.py`, `gate.py` | cost of the decision; cost and latency limits | built |
 | Report and comment | `gate.py`, `comment.py` | Markdown and JSON verdict; one comment on the pull or merge request, edited on later pushes | built |
-| CI adapter | `ci/gate.sh`, `.github/workflows/ci.yml`, `.gitlab-ci.yml` | runs both versions of a request and posts the verdict | built (this repository); planned (reusable action and template) |
+| CI adapter | `pr.py` + `pr.sh`, `.github/workflows/ci.yml`, `.gitlab-ci.yml` | runs both versions of a request and posts the verdict | built (any repository); planned (reusable action and template) |
 | Dashboard | — | history of merge requests, base against candidate down to a trace step | planned |
 
-Two example projects use the gate the way another project would, with the gate as a dependency: `examples/sroie`
-(receipt extraction from OCR text or a scan, in one model call or two) and `examples/support-agent` (a tool-using agent
-over a mock database, alone on a ticket or in a chat with a simulated user).
+Projects use the gate as a dependency: `examples/sroie` (receipt extraction from OCR text or a scan, in one model call or
+two) in this repository, and [workbench-support](https://github.com/Ilya-Grigoryev/workbench-support) in its own (a
+tool-using agent over a booking system, alone on a ticket or in a chat with a simulated user).
 
 ### Pipeline interface (built)
 
@@ -156,15 +156,16 @@ runner's scorer is `hits(case, answer, trace=None)` (by default the run's trace,
   quality comes first. CLI: `--max-cost-per-run USD` (needs `--prices`), `--max-latency S`, `--latency-quantile Q`.
 - **Planned.** A JUnit report.
 
-### CI adapter (built for this repository)
+### CI adapter (built)
 
-On GitHub the job runs once per example (SROIE, the support agent) and skips an example when `git diff` against the
-target branch shows no change to the example, the gate's code or the CI files; when the diff fails, it runs. The job
+In this repository the job gates SROIE and, on GitHub, skips it when `git diff` against the target branch shows no
+change to the example, the gate's code or the CI files; when the diff fails, it runs. The job
 checks that it can comment, gets the golden set (from the repository, a GitHub release or a GitLab package) and validates
-it, then runs `ci/gate.sh BASE_REV EXAMPLE_DIR CONFIG GOLDEN_DIR OUT_DIR`: it checks out the target
+it, then runs `python -m llm_release_gate.pr BASE_REV PROJECT_DIR CONFIG GOLDEN_DIR OUT_DIR` from the repository's
+root: it checks out the target
 branch in a worktree, runs both versions in parallel, each with its own code (one run per case: the runner's default `-k
 1`), runs the gate and writes `comment.md` and `verdict.json`. If a version cannot run, it writes an infra-error comment
-and exits 20; otherwise it exits with the gate's code. The job posts the comment, one per example, and keeps the records as artifacts. It
+and exits 20; otherwise it exits with the gate's code. The job posts the comment and keeps the records as artifacts. It
 advises: on GitHub until the check is made required, on GitLab while the job has `allow_failure: true`.
 
 ```mermaid
@@ -186,7 +187,7 @@ flowchart LR
         report[report]
     end
     subgraph ci[CI adapter]
-        gatesh[ci/gate.sh]
+        gatesh[pr.sh]
         comment[comment.py]
     end
     provider[(model provider)]
@@ -210,7 +211,7 @@ flowchart LR
 sequenceDiagram
     participant CI as CI job
     participant C as comment.py
-    participant SH as ci/gate.sh
+    participant SH as pr.sh
     participant RB as runner (base, target branch)
     participant RC as runner (candidate, this request)
     participant AD as adapter + model

@@ -197,7 +197,9 @@ A check compares against its own `value` or against the case's expected value at
 
 `.gitlab-ci.yml` and `.github/workflows/ci.yml` run the same checks on every push: lint, the tests of the gate and of each example, and a validation of the test golden set.
 
-On a pull or merge request, `release-gate` gates the SROIE example, and on GitHub also the support agent; there it skips an example the request does not touch (neither the example, the gate's code nor the CI files). `ci/gate.sh` runs the version from the target branch and the one from the request on the golden set, in parallel and each with its own code, then the gate. `python -m llm_release_gate.comment` posts the verdict as one comment per example (`--name`) and edits it on later pushes. The job only advises until you make it a required check (GitHub) or drop `allow_failure` (GitLab). A run costs about $0.06 for SROIE (30 scans per version) and about $0.04 for the support agent (10 tickets per version).
+On a pull or merge request, `release-gate` gates the SROIE example; on GitHub it skips a request that touches neither the example, the gate's code nor the CI files. `python -m llm_release_gate.pr BASE_REV PROJECT_DIR CONFIG GOLDEN_DIR OUT_DIR`, run from the repository's root, runs the version from the target branch and the one from the request on the golden set, in parallel and each with its own code, then the gate. `python -m llm_release_gate.comment` posts the verdict as one comment (one per name with `--name`) and edits it on later pushes. The job only advises until you make it a required check (GitHub) or drop `allow_failure` (GitLab). A run costs about $0.06 for SROIE (30 scans per version).
+
+A project in its own repository uses the same two commands: [workbench-support](https://github.com/Ilya-Grigoryev/workbench-support), a support agent of a coworking space, installs the gate from git and gates every pull request for about $0.04.
 
 It needs:
 

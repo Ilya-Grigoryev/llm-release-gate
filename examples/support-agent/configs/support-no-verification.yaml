@@ -1,8 +1,0 @@
-# Variant `no-verification` of the support agent (experiment E-004, demo pull requests). Alone or in a chat is the golden set's choice: golden/solo or golden/chat.
-pipeline: support_agent.gate_adapter
-model: gpt-5.4-mini-2026-03-17
-prompt: {policy: ../variants/no-verification/policy.md, tools: ../tools.yaml}
-input: case
-params: {temperature: 0}
-max_retries: 3
-timeout_s: 60
