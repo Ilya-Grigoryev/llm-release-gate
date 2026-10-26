@@ -22,14 +22,16 @@ const PLOT = H - PAD.top - PAD.bottom;
 /** The score range to draw: the data with some air, on round steps, at least 0.2 wide, inside 0–1. */
 function domain(points: Point[]): { lo: number; hi: number; step: number } {
   const values = points.flatMap((p) => [p.base, p.candidate]);
-  let lo = Math.max(0, Math.floor((Math.min(...values) - 0.05) * 10) / 10);
-  let hi = Math.min(1, Math.ceil((Math.max(...values) + 0.05) * 10) / 10);
+  const low = Math.max(0, Math.min(...values) - 0.05);
+  const high = Math.min(1, Math.max(...values) + 0.05);
+  const step = high - low <= 0.25 ? 0.05 : high - low <= 0.5 ? 0.1 : 0.25;
+  let lo = Math.max(0, Math.floor(low / step + 1e-9) * step);
+  let hi = Math.min(1, Math.ceil(high / step - 1e-9) * step);
   if (hi - lo < 0.2) {
     hi = Math.min(1, lo + 0.2);
     lo = Math.max(0, hi - 0.2);
   }
-  const range = hi - lo;
-  return { lo, hi, step: range <= 0.3 ? 0.05 : range <= 0.6 ? 0.1 : 0.25 };
+  return { lo, hi, step };
 }
 
 /**
@@ -47,7 +49,7 @@ export function RunsChart({ points }: { points: Point[] }) {
     return () => observer.disconnect();
   }, []);
   const { lo, hi, step } = domain(points);
-  const ticks = Array.from({ length: Math.round((hi - lo) / step) + 1 }, (_, i) => lo + i * step);
+  const ticks = Array.from({ length: Math.floor((hi - lo) / step + 1e-9) + 1 }, (_, i) => lo + i * step);
   const col = (W - PAD.left - PAD.right) / points.length;
   const x = (i: number) => PAD.left + (i + 0.5) * col;
   const y = (v: number) => PAD.top + ((hi - v) / (hi - lo)) * PLOT;
@@ -106,7 +108,7 @@ export function RunsChart({ points }: { points: Point[] }) {
           <g key={t}>
             <line x1={PAD.left} x2={W - PAD.right} y1={y(t)} y2={y(t)} stroke="var(--line)" strokeWidth={1} />
             <text x={PAD.left - 10} y={y(t)} dy="0.32em" textAnchor="end" fontSize={11} fill="var(--ink-3)" className="tabular-nums">
-              {t.toFixed(step < 0.1 ? 2 : 1)}
+              {t.toFixed(step === 0.1 ? 1 : 2)}
             </text>
           </g>
         ))}
