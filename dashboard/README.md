@@ -45,6 +45,13 @@ the CI for the database: install the App only on repositories whose runs may lea
 | `GITHUB_WEBHOOK_SECRET` | to check that a webhook comes from GitHub |
 | `SESSION_SECRET` | a long random string; encrypts the session cookie |
 
+## Deploy
+
+The Vercel project builds from the GitHub mirror, with `dashboard/` as its root directory. A push to `main` deploys the
+site. A push to any other branch starts a deployment, and the project's ignored build step
+(`[ "$VERCEL_ENV" != "production" ]`) cancels it before the build. To deploy without a push, redeploy the latest `main`
+deployment in Vercel: `vercel deploy` from a checkout uploads untracked files as well, `data/` and `.env` included.
+
 ## Develop
 
 ```sh
