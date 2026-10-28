@@ -8,8 +8,9 @@ describe("seal", () => {
     const value = seal({ login: "octo", token: "t" }, "s1");
     expect(unseal(value, "s1")).toEqual({ login: "octo", token: "t" });
     expect(unseal(value, "s2")).toBeNull();
-    const flipped = value.slice(0, -2) + (value.endsWith("A") ? "B" : "A") + value.slice(-1);
-    expect(unseal(flipped, "s1")).toBeNull();
+    const flipped = Buffer.from(value, "base64url");
+    flipped[flipped.length - 1] ^= 1;
+    expect(unseal(flipped.toString("base64url"), "s1")).toBeNull();
     expect(unseal("", "s1")).toBeNull();
   });
 
