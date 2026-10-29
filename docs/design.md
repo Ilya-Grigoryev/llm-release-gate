@@ -39,7 +39,7 @@ agent over a booking system, alone on a ticket or in a chat with a simulated use
 - **Version** (`PipelineConfig`, `load_config(path)`): `pipeline`, `model`, `prompt` (a file or named files), `input`,
   `params`, `max_retries`, `timeout_s`, and `command` for `pipeline: command`. `config_hash(config)` covers every field,
   the bytes of each prompt file and the module's `VERSION`.
-- **Any program** (`pipeline: command`, `command: [program, args]`): one JSON request on stdin (case id, input paths, the
+- **Any program** (`pipeline: command`, `command: [program, args]`; [protocol.md](protocol.md), `protocol.schema.json`): one JSON request on stdin (case id, input paths, the
   version; never the expected values), one JSON answer on stdout (`output`, optionally tokens, model and a trace). Exit 75
   and a timeout retry; 78, 126, 127 and a program that cannot start stop the run; any other non-zero code fails the run.
   A trace printed before a failed exit is kept. On timeout the gate kills the program's process group (POSIX) and that

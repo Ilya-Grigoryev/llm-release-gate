@@ -48,41 +48,14 @@ prompt: prompts/system.md
 input: text
 ```
 
-For each run the gate starts the program in the runner's working directory (relative paths in `command` resolve from
-there) and writes one JSON request to its stdin:
-
-```json
-{"case": {"id": "synth-001", "inputs": {"text": "/abs/path/synth-001.txt"}},
- "config": {"model": "gpt-5.4-mini-2026-03-17", "prompt": "/abs/path/system.md", "input": "text", "params": {}}}
-```
-
-`prompt` is a path, or a map of paths when the config names several prompts. The program never gets the expected
-values. It writes one JSON object to stdout and its logs to stderr:
-
-```json
-{"output": {"total": "12.50"}, "raw": "...", "input_tokens": 0, "output_tokens": 0, "model": "...",
- "trace": {"steps": [], "final_state": null, "state_change": null, "stop": "done"}}
-```
-
-Only `output` (an object or `null`) is required. `raw` defaults to `output` as JSON. Report `model` as the provider
-returned it; a run with neither `model` nor model steps in its trace stays unpriced. The trace uses the format below; the
-runner numbers its steps. The exit code decides the rest:
-
-| Exit | Meaning |
-|---|---|
-| 0 | the answer |
-| 75 | try again later (rate limit, upstream timeout): the runner backs off and retries |
-| 78, 126, 127 | stop the whole run (no quota, wrong key, program not found) |
-| any other | this run fails |
-
-The gate keeps a trace the program printed before a failed exit, so paid steps count. `timeout_s` bounds the whole
-program. The program runs in its own process group (POSIX only); on timeout the gate kills the group, loses that
-attempt's trace and retries. A child that leaves the group (`setsid`, a container started with `docker run`) survives
-the kill: stop it in the program.
+For each run the gate writes one JSON request to the program's stdin: the case's id and input paths and the version's
+model, prompt and params, never the expected values. It reads one JSON answer from stdout: `output`, optionally tokens,
+the model and a trace. Exit 75 retries the run, 78 stops the whole run, any other non-zero code fails it.
+[docs/protocol.md](docs/protocol.md) has every field, the trace steps, the exit codes and an example in Node;
+[`protocol.schema.json`](src/llm_release_gate/protocol.schema.json) is the schema the gate checks each answer against.
 
 `command` is part of the version and its hash; the program's code is not. When you change the code in a way that
 changes what the model gets, bump a number in `params` (`params: {version: 2}`), as a Python module bumps `VERSION`.
-[`tests/fixtures/command/agent.sh`](tests/fixtures/command/agent.sh) is a small example in shell.
 
 ## Traces
 
@@ -106,7 +79,7 @@ class Adapter:
         return Answer(...)
 ```
 
-Each step has a kind (`llm`, `tool`, `message`, `retrieval`) and an actor (`agent`, `user`, `system`, `env`). A model step
+Each step has a kind (`llm`, `tool`, `message`, `retrieval`) and an actor (`agent`, `user`, `system`, `env`). [docs/protocol.md](docs/protocol.md#trace) lists the fields of each. A model step
 holds the model the API reported, tokens, cost, the finish reason and the new output; a tool step holds the name, the
 arguments, a status and the result or error. Wrap a user simulator's client with `actor="user"` to keep its cost apart from
 the agent's. Record what the wrappers cannot see with `trace.current().step(kind, actor, ...)`. Tool calls you do not wrap
