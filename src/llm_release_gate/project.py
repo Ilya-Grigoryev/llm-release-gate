@@ -1,7 +1,7 @@
 """A project's gate.yaml (`project.schema.json`): its pipelines and how the gate runs them."""
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import yaml
@@ -31,6 +31,14 @@ class Pipeline:
 class Project:
     prepare: tuple[str, ...] | None
     pipelines: dict[str, Pipeline]
+    defaults: dict = field(default_factory=dict)  # the settings at the top
+
+    def rules(self, p: Pipeline) -> Pipeline:
+        """`p` under this project's rules (D-024): its own entry's settings, or the top ones for a pipeline it lacks."""
+        own = self.pipelines.get(p.name) or Pipeline(
+            p.name, p.config, p.golden, **self.defaults
+        )
+        return replace(p, **{k: getattr(own, k) for k in SETTINGS})
 
 
 def load(directory: Path) -> Project:
@@ -63,4 +71,4 @@ def load(directory: Path) -> Project:
             p.get("inputs-url"),
             **settings,
         )
-    return Project(tuple(raw["prepare"]) if "prepare" in raw else None, pipelines)
+    return Project(tuple(raw["prepare"]) if "prepare" in raw else None, pipelines, top)

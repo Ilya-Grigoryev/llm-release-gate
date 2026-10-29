@@ -262,6 +262,45 @@ def markdown(
     return "\n".join(lines) + "\n"
 
 
+def alone(candidate: Arm, prices: Prices | None) -> tuple[str, dict]:
+    """No base version yet: the candidate's mean score and cost as a comment and a report, for a neutral verdict."""
+    runs: dict[str, list[dict]] = {}
+    for (case, _), r in sorted(candidate.records.items()):
+        runs.setdefault(case, []).append(r)
+    mean = float(sum(exact(first_run(rs)) for rs in runs.values()) / len(runs))
+    spent = cost(candidate, prices) if prices else None
+    lines = [
+        "**Release gate: 🆕 no base version**",
+        "",
+        "The target branch has no version of this pipeline yet, so there is nothing to compare with.",
+        (
+            f"The candidate scores {mean:.3f} on {len(runs)} cases (first run of each) · config "
+            f"{candidate.config_hash[:8]} · set {candidate.set_hash[:8]}"
+        ),
+    ]
+    if prices:
+        lines.append(
+            "Cost: a model in these runs has no price."
+            if spent is None
+            else f"Cost of these runs ${spent:.3f} (successful calls, list prices)."
+        )
+    report = {
+        "outcome": "no base",
+        "exit_code": PASS,
+        "base_mean": None,
+        "candidate_mean": mean,
+        "diff_pp": None,
+        "base_config": None,
+        "candidate_config": candidate.config_hash,
+        "set_hash": candidate.set_hash,
+        "scorer_version": candidate.scorer_version,
+        "cost_usd": {"base": None, "candidate": spent} if prices else None,
+        "prices_hash": canonical_hash(prices) if prices else None,
+        "runs_per_case": {"base": 0, "candidate": max(map(len, runs.values()))},
+    }
+    return "\n".join(lines) + "\n", report
+
+
 def write_all(files: dict[Path | None, str]) -> None:
     """Write every report or none: a comment must not survive a verdict that failed to save."""
     written = []
@@ -279,7 +318,9 @@ def write_all(files: dict[Path | None, str]) -> None:
 def main(argv: Sequence[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument(
-        "--base", type=Path, required=True, help="runs of the current version (JSONL)"
+        "--base",
+        type=Path,
+        help="runs of the current version (JSONL); without it, the candidate's score and a neutral exit",
     )
     p.add_argument(
         "--candidate", type=Path, required=True, help="runs of the new version (JSONL)"
@@ -325,6 +366,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     p.add_argument("--markdown", type=Path, help="write the merge request comment")
     args = p.parse_args(argv)
     try:
+        if args.base is None:
+            candidate = load_arm(args.candidate)
+            if args.golden:
+                candidate = rescored(candidate, args.golden)
+            text, report = alone(
+                candidate, load_prices(args.prices) if args.prices else None
+            )
+            write_all(
+                {args.markdown: text, args.json: json.dumps(report, indent=2) + "\n"}
+            )
+            print(text, end="")
+            return PASS
         base, candidate = load_arm(args.base), load_arm(args.candidate)
         if args.golden:
             base, candidate = (

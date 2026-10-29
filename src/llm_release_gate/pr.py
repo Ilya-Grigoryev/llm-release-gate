@@ -172,22 +172,24 @@ def one(
     golden: Path,
     set_hash: str,
     candidate: Path,
-    base: Path,
+    base: Path | None,
+    prices: str | None,
     dest: Path,
 ) -> int:
+    """Compare the two versions; without a base (the target branch has no version of the pipeline) only the candidate
+    runs, for its score and a neutral exit."""
     if not (candidate / p.config).is_file():
         raise Infra(f"There is no {p.config}.")
-    if not (base / p.config).is_file():
-        raise Infra(
-            f"The target branch has no {p.config}, so there is no base version to compare with."
-        )
+    if base is not None and not (base / p.config).is_file():
+        base = None
     logs = dest / "base.log", dest / "candidate.log"
-    hashes = both(
-        lambda: version(base, p.config, logs[0]),
-        lambda: version(candidate, p.config, logs[1]),
-    )
-    if hashes[0] and hashes[0] == hashes[1]:
-        return unchanged(p, hashes[0], set_hash, dest)
+    if base is not None:
+        hashes = both(
+            lambda: version(base, p.config, logs[0]),
+            lambda: version(candidate, p.config, logs[1]),
+        )
+        if hashes[0] and hashes[0] == hashes[1]:
+            return unchanged(p, hashes[0], set_hash, dest)
     runs = [
         *PYTHON,
         "-m",
@@ -200,7 +202,11 @@ def one(
         str(p.k),
     ]
     codes = both(
-        lambda: call([*runs, "--out", str(dest / "base.jsonl")], base, logs[0]),
+        lambda: (
+            call([*runs, "--out", str(dest / "base.jsonl")], base, logs[0])
+            if base
+            else 0
+        ),
         lambda: call(
             [*runs, "--out", str(dest / "candidate.jsonl")], candidate, logs[1]
         ),
@@ -210,15 +216,38 @@ def one(
             raise Infra(f"The {arm} did not finish its runs.", log)
     decide = [
         *PYTHON, "-m", "llm_release_gate.gate",
-        "--base", str(dest / "base.jsonl"), "--candidate", str(dest / "candidate.jsonl"), "--golden", str(golden),
-        "--threshold", str(p.delta), "--markdown", str(dest / "comment.md"), "--json", str(dest / "verdict.json"),
-        *(["--prices", p.prices] if p.prices else []),
+        *(["--base", str(dest / "base.jsonl")] if base else []), "--candidate", str(dest / "candidate.jsonl"),
+        "--golden", str(golden), "--threshold", str(p.delta),
+        "--markdown", str(dest / "comment.md"), "--json", str(dest / "verdict.json"),
+        *(["--prices", prices] if prices else []),
         *(a for k, flag in BUDGETS.items() if k in p.budgets for a in (flag, str(p.budgets[k]))),
     ]  # fmt: skip
     code = call(decide, candidate, dest / "gate.log")
     if code not in WORST or code == INFRA_ERROR or not (dest / "comment.md").is_file():
         raise Infra("The gate could not compare the runs.", dest / "gate.log")
     return code
+
+
+def ruled(
+    p: project.Pipeline,
+    rules: project.Project | None,
+    candidate: Path,
+    base: Path | None,
+) -> tuple[project.Pipeline, str | None, bool]:
+    """`p` under the target branch's rules when it has a gate.yaml (D-024), the path of its prices, and whether the
+    request changes those rules."""
+    if rules is None or base is None:
+        return p, str(candidate / p.prices) if p.prices else None, False
+    r = rules.rules(p)
+    changed = any(getattr(r, k) != getattr(p, k) for k in project.SETTINGS)
+    if r.prices and p.prices and not changed:
+        mine, theirs = candidate / p.prices, base / r.prices
+        changed = not (
+            mine.is_file()
+            and theirs.is_file()
+            and mine.read_bytes() == theirs.read_bytes()
+        )
+    return r, str(base / r.prices) if r.prices else None, changed
 
 
 def show(dest: Path) -> None:
@@ -295,7 +324,7 @@ def main(argv: list[str] | None = None) -> int:
         subprocess.run(
             ["git", "worktree", "prune"], cwd=root, capture_output=True, check=False
         )
-        problem = None
+        problem, rules, rules_problem = None, None, None
         if subprocess.run(
             ["git", "worktree", "add", "--detach", str(tree), args.base],
             cwd=root,
@@ -303,13 +332,16 @@ def main(argv: list[str] | None = None) -> int:
             check=False,
         ).returncode:
             problem = Infra(f"Cannot check out the target branch ({args.base}).")
-        elif not base.is_dir():
-            problem = Infra(
-                f"The target branch has no {candidate.relative_to(root)}, so there is no base version to compare with."
-            )
         else:
+            if not base.is_dir():  # the request adds the project: every pipeline is new
+                base = None
+            elif (base / project.FILE).is_file():
+                try:
+                    rules = project.load(base)
+                except ValueError as e:
+                    rules_problem = f"The target branch's gate.yaml is not valid, so this run uses the request's rules: {e}"
             done = both(
-                lambda: ready(base, settings.prepare, logs[0]),
+                lambda: ready(base, settings.prepare, logs[0]) if base else True,
                 lambda: ready(candidate, settings.prepare, logs[1]),
             )
             for arm, ok, log in zip(
@@ -328,9 +360,18 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 if problem:
                     raise problem
-                codes[name] = one(
-                    settings.pipelines[name], golden, set_hash, candidate, base, dest
+                p, prices, changed = ruled(
+                    settings.pipelines[name], rules, candidate, base
                 )
+                codes[name] = one(p, golden, set_hash, candidate, base, prices, dest)
+                with (dest / "comment.md").open("a") as f:
+                    if changed:
+                        f.write(
+                            f"\n⚙️ This request changes the gate's rules for `{name}` (gate.yaml or its prices). They "
+                            "apply after merge; this run used the target branch's.\n"
+                        )
+                    if rules_problem:
+                        f.write(f"\n⚠️ {rules_problem}\n")
             except Infra as e:
                 write_comment(
                     dest, "⚠️ infra error", str(e), e.log and dest / e.log.name

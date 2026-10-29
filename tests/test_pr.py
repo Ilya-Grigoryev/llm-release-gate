@@ -72,6 +72,9 @@ def test_settings_reach_the_runs_and_the_gate(repo):
     gate_yaml = (
         GATE + "k: 2\nprices: prices.yaml\nbudgets: {cost_per_run_usd: 0.000001}\n"
     )
+    (repo / "gate.yaml").write_text(gate_yaml)  # the rules come from the target branch
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "rules")
     version(repo, "answer-again", gate_yaml)  # the same answers from another version
     code, out = gate(repo)
     assert code == pr.BUDGET_FAIL
@@ -103,14 +106,80 @@ def test_a_failed_prepare_is_an_infra_error(repo):
     assert "could not be prepared" in comment and "no network" in comment
 
 
-def test_a_target_branch_without_the_version_is_an_infra_error(repo):
+def test_without_a_base_version_the_candidate_alone_runs_and_passes(repo):
     (repo / "demo.yaml").rename(repo / "new.yaml")
     git(repo, "add", "-A")
     git(repo, "commit", "-q", "-m", "renamed")
     (repo / "new.yaml").rename(repo / "demo.yaml")
     code, out = gate(repo)
-    assert code == pr.INFRA_ERROR
+    assert code == pr.PASS
+    verdict = json.loads((out / "verdict.json").read_text())
+    assert verdict["outcome"] == "no base" and verdict["candidate_mean"] == 1.0
     assert "no base version" in (out / "comment.md").read_text()
+    assert [p.name for p in out.glob("*.jsonl")] == ["candidate.jsonl"]
+
+
+def test_a_request_that_adds_the_project_runs_the_candidate_alone(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(pr, "SYNC", None)
+    monkeypatch.setattr(pr, "PYTHON", [sys.executable])
+    repo = tmp_path / "repo"
+    (repo / "app").mkdir(parents=True)
+    git(repo, "init", "-q")
+    git(repo, "commit", "-q", "--allow-empty", "-m", "empty")
+    shutil.copytree(FIXTURES / "golden", repo / "app" / "golden")
+    shutil.copy(FIXTURES / "prompt.md", repo / "app" / "prompt.md")
+    version(repo / "app", "answer")
+    monkeypatch.chdir(repo)
+    out = tmp_path / "out"
+    assert pr.main(["--base", "HEAD", "--project", "app", "--out", str(out)]) == pr.PASS
+    assert "no base version" in (out / "demo" / "comment.md").read_text()
+
+
+def test_the_rules_come_from_the_target_branch(repo):
+    version(
+        repo, "bare", GATE + "delta: 100\n"
+    )  # worse, and a request that loosens its own gate
+    code, out = gate(repo)
+    assert code == pr.QUALITY_FAIL
+    assert json.loads((out / "verdict.json").read_text())["threshold_pp"] == 5
+    assert "changes the gate's rules for `demo`" in (out / "comment.md").read_text()
+
+
+def test_new_prices_in_the_request_wait_for_merge(repo):
+    (repo / "prices.yaml").write_text("fake-model-2026-01-01: [1, 1]\n")
+    (repo / "gate.yaml").write_text(GATE + "prices: prices.yaml\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "prices")
+    (repo / "prices.yaml").write_text("fake-model-2026-01-01: [0, 0]\n")
+    version(repo, "answer-again", GATE + "prices: prices.yaml\n")
+    code, out = gate(repo)
+    assert code == pr.PASS
+    assert json.loads((out / "verdict.json").read_text())["cost_usd"]["candidate"] > 0
+    assert "changes the gate's rules" in (out / "comment.md").read_text()
+
+
+def test_without_a_gate_yaml_on_the_target_branch_the_requests_rules_hold(repo):
+    (repo / "gate.yaml").unlink()
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "no gate yet")
+    version(repo, "bare", GATE + "delta: 100\n")
+    code, out = gate(repo)
+    assert (
+        code == pr.PASS
+        and "changes the gate's rules" not in (out / "comment.md").read_text()
+    )
+
+
+def test_a_broken_gate_yaml_on_the_target_branch_is_named(repo):
+    (repo / "gate.yaml").write_text("pipelines: [\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "broken")
+    version(repo, "bare")
+    code, out = gate(repo)
+    assert code == pr.QUALITY_FAIL
+    assert "target branch's gate.yaml is not valid" in (out / "comment.md").read_text()
 
 
 def test_a_missing_target_branch_is_an_infra_error_but_the_cases_are_kept(repo):
