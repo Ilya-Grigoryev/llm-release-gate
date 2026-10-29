@@ -167,12 +167,17 @@ the repository, a GitHub release or a GitLab package), then runs `llm-release-ga
 repository's root. For each pipeline `pr` first copies the golden set's text files (cases and text inputs, never
 images; links followed) to `OUT/NAME/cases`, so even a run without a verdict shows what it was given, and checks the set
 against its manifest. It checks out the target branch in a worktree, runs `prepare` and syncs the environment in both
-trees, and asks each tree's own gate for the version's config hash. Equal hashes give `unchanged` (exit 0, no runs);
+trees, and asks each tree's own gate for the version's config hash. The rules (`delta`, `k`, `budgets`, `prices`) come
+from the target branch's `gate.yaml` when it has one (D-024), so a request cannot loosen its own gate; the comment says
+when it changes them. A target branch without the pipeline gives `no base version`: only the candidate runs, for its
+score, exit 0. Equal hashes give `unchanged` (exit 0, no runs);
 otherwise both versions run in parallel, each with its own code, `k` runs per case, and the gate writes `comment.md` and
 `verdict.json`. A step that cannot run gives an infra-error comment and 20; `pr` exits with the worst outcome of its
 pipelines. The action gates one pipeline per step (`pipeline:`, or the only one), posts the comment and keeps the
 records as an artifact (`release-gate-NAME-ATTEMPT`) and the text files as a second one (`…-cases`, 30 days). It
-advises: on GitHub until the check is made required, on GitLab while the job has `allow_failure: true`.
+advises: on GitHub until the check is made required, on GitLab while the job has `allow_failure: true`. On a pull
+request from a fork GitHub passes no secrets: the action runs nothing and fails as `not checked`, so a required check
+never passes an unchecked request.
 
 ```mermaid
 flowchart LR
@@ -310,7 +315,7 @@ about 25-fold for a long dialog.
 
 - **Statistical gate** (see Criterion), interleaved arms in the runner, latency budgets, the anchor comparison.
 - **Adoption** (D-023): the protocol's schema for any program (built), `gate.yaml` and `llm-release-gate pr` (built), a
-  neutral verdict without a base version, Python adapters in a worker process, the engine through `uvx`, `init` and
+  verdict without a base version and forks (built), a maintainer's run of a fork's request, Python adapters in a worker process, the engine through `uvx`, `init` and
   `doctor`, a recording proxy for traces, a GitLab component and a pytest plugin; a JUnit report.
 - **Adapters**: a benchmark adapter (τ²-bench telecom), a harness agent in a container through `pipeline: command`,
   retrieval-augmented generation (to be decided), import of OpenTelemetry traces.

@@ -220,7 +220,12 @@ apply to every pipeline, and a pipeline's own win:
 `setup` installs Python, uv and the project's locked environment. The gate action checks that it can comment, checks
 the golden set (against its manifest, if any), and compares the version from the target branch with the one from the
 request, in parallel and each with its own code. A request that leaves a pipeline's config, prompts and `VERSION` as
-they are gets `unchanged` and costs nothing. The verdict comes as one comment, edited on later pushes. The action keeps
+they are gets `unchanged` and costs nothing. A request that adds a pipeline (the target branch has no version of it)
+gets `no base version`: the candidate's score, and the check passes. The rules (`delta`, `k`, `budgets`, `prices`) come
+from the target branch's `gate.yaml`, so a request cannot loosen its own gate: new rules apply after merge, and the
+comment says when a request changes them; protect `gate.yaml` with CODEOWNERS if needed. A pull request from a fork
+gets no secrets on GitHub, so the gate cannot call the model: the job fails as `not checked` and says why, and a
+maintainer gates it by pushing its branch to the repository. The verdict comes as one comment, edited on later pushes. The action keeps
 the records as an artifact, and the golden set's case files and text inputs as a second one for 30 days
 (`cases: false` leaves it out), so the [dashboard](#dashboard) can show what each case asked. It fails the job with the
 gate's verdict; the job only advises until it is made a required check. With several pipelines in `gate.yaml`, add one
