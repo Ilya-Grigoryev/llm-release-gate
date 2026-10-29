@@ -427,3 +427,24 @@ def test_a_changed_test_set_alone_keeps_the_version(repo):
     _, out = gate(repo)
     comment = (out / "comment.md").read_text()
     assert "unchanged" in comment and "changes the test set of `demo`." in comment
+
+
+def test_another_pipeline_cannot_declare_code_as_its_prompt(repo):
+    two = GATE + "  other: {config: other.yaml, golden: golden}\n"
+    (repo / "other.yaml").write_text((repo / "demo.yaml").read_text())
+    (repo / "gate.yaml").write_text(two)
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "two pipelines")
+    (repo / "plugins").mkdir()
+    (repo / "plugins" / "evil.py").write_text("print('hidden')\n")
+    git(repo, "add", "plugins")
+    text = (
+        (repo / "other.yaml")
+        .read_text()
+        .replace(
+            "prompt: prompt.md", "prompt: {main: prompt.md, extra: plugins/evil.py}"
+        )
+    )
+    (repo / "other.yaml").write_text(text)
+    _, out = gate(repo, "--pipeline", "demo")
+    assert "unchanged" not in (out / "comment.md").read_text()

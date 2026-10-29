@@ -95,7 +95,7 @@ runner's backoff between attempts. A pipeline that records nothing writes `trace
 
 ## Running a version
 
-Each pipeline version is a YAML file: pipeline module, model (a dated snapshot if there is one), prompt file (or named prompt files for a pipeline with several steps), input, API parameters and, optionally, `max_retries` (default 5) and `timeout_s` (default 60). Its hash covers every field and the bytes of each prompt; key order, YAML formatting and `0` versus `0.0` do not change it. A version is its config, the bytes of its prompts and the repository's code: every file git tracks, by the id git gives its content (uncommitted edits count; Git LFS, line endings and links read alike in every checkout), but documentation (`README*`, `CHANGELOG*`, `CONTRIBUTING*`, `LICENSE*` in any case, `docs/`), CI (`.github/`), `gate.yaml` and the price files it names, the paths in its `ignore`, its test sets and the files of its other pipelines. A code change gives a new version by itself, in a monorepo a change to shared code or the root lock file too; a change to the README does not. Untracked files (run records, data) do not count, so writing results never changes the version; a run record you commit does. Each record carries the commit too, with `+dirty` for uncommitted edits. A test set that `gate.yaml` does not name is code: name it, or put it in `ignore`.
+Each pipeline version is a YAML file: pipeline module, model (a dated snapshot if there is one), prompt file (or named prompt files for a pipeline with several steps), input, API parameters and, optionally, `max_retries` (default 5) and `timeout_s` (default 60). Its hash covers every field and the bytes of each prompt; key order, YAML formatting and `0` versus `0.0` do not change it. A version is its config, the bytes of its prompts and the repository's code: every file git tracks, by the id git gives its content (uncommitted edits count; Git LFS, line endings and links read alike in every checkout), but documentation (`README`, `CHANGELOG`, `CONTRIBUTING`, `LICENSE`, bare or as `.md`, `.rst`, `.txt`, `.adoc`, in any case; `docs/`), CI (`.github/`), `gate.yaml` and the price files it names, the paths in its `ignore`, its test sets and the files of its other pipelines (so code that reads another pipeline's prompt does not see it change). A code change gives a new version by itself, in a monorepo a change to shared code or the root lock file too; a change to the README does not. Untracked files (run records, data) do not count, so writing results never changes the version; a run record you commit does. Each record carries the commit too, with `+dirty` for uncommitted edits. A test set that `gate.yaml` does not name is code: name it, or put it in `ignore`.
 
 The runner calls the pipeline K times per case of a golden set and appends one JSON record per call, stamped with the version's hash (`config_hash`), the set hash and the scorer version. A rerun pays only for what is missing. The runner retries rate limits, timeouts and server errors with backoff 1, 2, 4... s and stops when the account is out of quota. `--prices` puts a list price on each model step of a trace; the raw provider responses go to `<stem>.native.jsonl`.
 
@@ -216,14 +216,15 @@ apply to every pipeline, and a pipeline's own win:
 | `prices` | YAML of `model: [input, output]` USD per 1M tokens, for costs and the cost budget |
 | `budgets` | `cost_per_run_usd` (needs `prices`), `latency_s` and `latency_quantile` (default 0.95) |
 | `prepare` | a command that readies the project in both trees before their runs, such as `[npm, ci]` |
-| `ignore` | glob patterns, from the project's directory, of files that never change what the model gets, such as `web/` (a trailing `/` takes the directory, `**` crosses directories); on top of documentation and CI |
+| `ignore` | glob patterns, from the project's directory, of files that never change what the model gets, such as `web/` (a trailing `/` takes the directory, `**` crosses directories); on top of documentation and CI; `!docs/kb/` takes files back, for an app that reads them |
 
 `setup` installs Python, uv and the project's locked environment. The gate action checks that it can comment, checks
 the golden set (against its manifest, if any), and compares the version from the target branch with the one from the
 request, in parallel and each with its own code. A request that leaves a pipeline's version as it is (config,
 prompts and code, see [Running a version](#running-a-version)) gets `unchanged` and costs nothing; a pipeline's own
 files (another pipeline's prompt, say) do not count for the others. A request that changes `ignore` or which files
-belong to which pipeline runs every pipeline, so it cannot hide new code from its own gate. The verdict comes as one comment, edited on later pushes.
+belong to which pipeline (the prompts its configs name included) runs every pipeline, so it cannot hide new code from
+its own gate. The verdict comes as one comment, edited on later pushes.
 
 The rules (`delta`, `k`, `budgets`, `prices`) come from the target branch's `gate.yaml`, so editing the rules in a
 request does not loosen that request's gate: new rules apply after merge, and the comment says when a request changes

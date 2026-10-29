@@ -25,6 +25,7 @@ from llm_release_gate.gate import (
     QUALITY_FAIL,
 )
 from llm_release_gate.golden import check
+from llm_release_gate.version import own_files
 
 SYNC = [
     "uv",
@@ -218,13 +219,14 @@ def one(
     return code
 
 
-def layout(settings: project.Project) -> tuple:
-    """What decides which files are a version's code (D-025): a request must not change it and skip its own runs."""
-    files = {
-        n: (p.config, p.golden, p.manifest, p.prices)
-        for n, p in settings.pipelines.items()
-    }
-    return sorted(settings.ignore), files, settings.defaults.get("prices")
+def layout(settings: project.Project, directory: Path) -> tuple:
+    """What decides which files are a version's code (D-025), the prompts each config names included: a request must
+    not change it and skip its own runs."""
+    return (
+        sorted(settings.ignore),
+        own_files(settings, directory),
+        settings.defaults.get("prices"),
+    )
 
 
 def snapshot(rules: project.Project, base: Path, to: Path) -> None:
@@ -394,7 +396,7 @@ def main(argv: list[str] | None = None) -> int:
                     rules = project.load(base)
                     snapshot(rules, base, prices_copy)
                     removed = sorted(set(rules.pipelines) - set(settings.pipelines))
-                    same_layout = layout(rules) == layout(settings)
+                    same_layout = layout(rules, base) == layout(settings, candidate)
                     if not same_layout:
                         rules_problem = (
                             "gate.yaml in this request changes what the gate ignores or which files belong to which "

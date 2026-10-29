@@ -159,3 +159,50 @@ def test_the_price_file_is_a_rule_not_code(repo):
 
 def test_documentation_is_found_in_any_case():
     assert matcher(["README*"], ignorecase=True)("src/readme.md")
+
+
+@pytest.mark.parametrize(
+    "name", ["src/changelog.py", "src/license_check.py", "kb/readme_faq.md"]
+)
+def test_code_named_like_documentation_counts(repo, name):
+    write(repo / name, "1\n")
+    git(repo, "add", "-A")
+    before = version_hash(repo / "a.yaml")
+    (repo / name).write_text("2\n")
+    assert version_hash(repo / "a.yaml") != before
+
+
+def test_an_odd_file_name_does_not_hide_other_edits(repo):
+    write(repo / '"q".py', "1\n")
+    git(repo, "add", "-A")
+    before = version_hash(repo / "a.yaml")
+    (repo / '"q".py').write_text("2\n")
+    (repo / "src" / "agent.py").write_text("print(2)\n")
+    after = version_hash(repo / "a.yaml")
+    (repo / '"q".py').write_text("1\n")
+    assert after != version_hash(repo / "a.yaml") != before
+
+
+def test_an_edit_git_cannot_read_stops_rather_than_passes_unseen(repo):
+    (repo / "src" / "agent.py").write_text("print(2)\n")
+    (repo / "src" / "agent.py").chmod(0)
+    try:
+        with pytest.raises(RuntimeError, match="git cannot read edited files"):
+            version_hash(repo / "a.yaml")
+    finally:
+        (repo / "src" / "agent.py").chmod(0o644)
+
+
+def test_gate_yaml_may_take_documentation_back_and_anchor_patterns(repo):
+    gate = (
+        (repo / "gate.yaml")
+        .read_text()
+        .replace("ignore: ['web/**']", "ignore: ['/web/', '!docs/guide.txt']")
+    )
+    (repo / "gate.yaml").write_text(gate)
+    before = version_hash(repo / "a.yaml")
+    (repo / "docs" / "guide.txt").write_text("the assistant answers from this\n")
+    assert version_hash(repo / "a.yaml") != before
+    before = version_hash(repo / "a.yaml")
+    (repo / "web" / "page.html").write_text("new look\n")
+    assert version_hash(repo / "a.yaml") == before

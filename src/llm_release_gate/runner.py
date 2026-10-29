@@ -30,7 +30,7 @@ from llm_release_gate.pipeline import (
 )
 from llm_release_gate.prices import Prices, load_prices
 from llm_release_gate.trace import Trace, active, usage
-from llm_release_gate.version import commit, version_hash
+from llm_release_gate.version import code_hash, commit, version_hash
 
 # 2: scorer_version; 3: trace, usage, wall_s; 4: requested_model; 5: prices_hash
 RECORD_VERSION = 6  # 6: config_hash covers the project's code (D-025), commit
@@ -296,12 +296,18 @@ def main(argv: Sequence[str] | None = None) -> None:
     try:
         config = load_config(args.config)
         hashes = {"config_hash": version_hash(args.config), "set_hash": set_hash}
+        if code_hash(args.config) is None:
+            print(
+                f"warning: {args.config} is not in git, so its version covers the config and prompts, not the code",
+                file=sys.stderr,
+            )
         pipeline = load_pipeline(config)
         prices = load_prices(args.prices) if args.prices else None
     except (
         ValueError,
         OSError,
-    ) as e:  # a bad config, a missing prompt file, a bad price table
+        RuntimeError,
+    ) as e:  # a bad config, a missing prompt file, a bad price table, an edited file git cannot read
         sys.exit(str(e))
     cases = load_cases(args.golden)
     try:

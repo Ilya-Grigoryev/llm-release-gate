@@ -4,10 +4,11 @@ Two runs are of the same version when the config, the prompts and every tracked 
 gets are the same. A file counts by the id git gives its content: an unmodified file by the id in the index, a modified
 one by the id of what is on disk, so uncommitted edits count, and Git LFS, line endings and links read alike in every
 checkout. Untracked files never count. The whole repository counts (a monorepo's shared code and lock file too), but
-documentation, CI, gate.yaml with the price files it names, the paths it ignores, its test sets and the files of its
-other pipelines.
+documentation, CI, gate.yaml with the price files it names, the paths it ignores (`!pattern` takes a path back), its
+test sets and the files of its other pipelines.
 """
 
+import os
 import re
 import subprocess
 from collections.abc import Callable
@@ -17,12 +18,12 @@ from llm_release_gate import project
 from llm_release_gate.hashing import canonical_hash
 from llm_release_gate.pipeline import config_hash, load_config
 
-DOCS = (
-    "README*",
-    "CHANGELOG*",
-    "CONTRIBUTING*",
-    "LICENSE*",
-)  # at any depth, in any case
+# documentation by its usual names only (a module such as changelog.py is code), at any depth, in any case
+DOCS = tuple(
+    f"{name}{ext}"
+    for name in ("README", "CHANGELOG", "CONTRIBUTING", "LICENSE")
+    for ext in ("", ".md", ".rst", ".txt", ".adoc")
+)
 DIRS = ("docs/", ".github/")  # at the root of the repository or of the project
 GITLINK = "160000"  # a submodule: git keeps its commit, not files
 
@@ -45,10 +46,9 @@ def matcher(
     return lambda path: any(r.fullmatch(path) for r in found)
 
 
-def git(directory: Path, *args: str, stdin: str | None = None) -> str | None:
+def git(directory: Path, *args: str) -> str | None:
     done = subprocess.run(
         ["git", "-C", str(directory), *args],
-        input=stdin,
         capture_output=True,
         text=True,
         check=False,
@@ -84,9 +84,29 @@ def prompts(config: Path) -> list[Path]:
     return [prompt] if isinstance(prompt, Path) else list(prompt.values())
 
 
-def left_out(config: Path, directory: Path) -> tuple[list[str], set[Path]]:
-    """gate.yaml's exclusions for this config: the patterns it ignores, and the files and directories that are not this
-    pipeline's code (gate.yaml, its price files, the test sets, the other pipelines' configs and prompts)."""
+def own_files(settings: project.Project, directory: Path) -> dict[str, tuple]:
+    """Per pipeline, its files that are not code, relative to the project: config, test set, manifest, prices, prompts.
+    `pr` compares this between the trees, so a request cannot move code into another pipeline's files."""
+
+    def rel(path: Path) -> str:
+        return Path(os.path.relpath(path, directory)).as_posix()
+
+    return {
+        name: (
+            p.config,
+            p.golden,
+            p.manifest,
+            p.prices,
+            tuple(sorted(rel(f) for f in prompts(directory / p.config))),
+        )
+        for name, p in settings.pipelines.items()
+    }
+
+
+def left_out(config: Path, directory: Path, root: Path) -> tuple[list[str], set[str]]:
+    """gate.yaml's exclusions for this config: the patterns it ignores (from the project's directory), and the paths,
+    from the repository's root, that are not this pipeline's code: gate.yaml, its price files, the test sets, the other
+    pipelines' configs and prompts."""
     skip = {directory / project.FILE}
     try:
         settings = (
@@ -96,16 +116,50 @@ def left_out(config: Path, directory: Path) -> tuple[list[str], set[Path]]:
         ValueError
     ):  # the gate reports a broken gate.yaml itself; the hash still covers the code
         settings = None
-    if settings is None:
-        return [], {s.resolve() for s in skip}
-    for p in settings.pipelines.values():
-        skip |= {directory / f for f in (p.golden, p.manifest, p.prices) if f}
-        other = directory / p.config
-        if other.resolve() != config and other.is_file():
-            skip |= {other, *prompts(other)}
-    if price := settings.defaults.get("prices"):
-        skip.add(directory / price)
-    return list(settings.ignore), {s.resolve() for s in skip}
+    patterns = []
+    if settings is not None:
+        patterns = list(settings.ignore)
+        for p in settings.pipelines.values():
+            skip |= {directory / f for f in (p.golden, p.manifest, p.prices) if f}
+            other = directory / p.config
+            if other.resolve() != config and other.is_file():
+                skip |= {other, *prompts(other)}
+        if price := settings.defaults.get("prices"):
+            skip.add(directory / price)
+    paths = set()
+    for path in skip:
+        try:
+            paths.add(path.resolve().relative_to(root).as_posix())
+        except ValueError:  # outside the repository: git does not track it anyway
+            pass
+    return patterns, paths
+
+
+def ids_on_disk(root: Path, names: list[str]) -> dict[str, str]:
+    """The ids of edited files as git would store them (its filters applied); a link by its target, a path that is no
+    longer a file by a marker. Raises RuntimeError if git cannot read one: an edit must never pass unseen."""
+    ids, files = {}, []
+    for name in names:
+        path = root / name
+        if path.is_symlink():
+            ids[name] = "link:" + os.readlink(path)
+        elif path.is_file():
+            files.append(name)
+        else:
+            ids[name] = "not a file"
+    for start in range(0, len(files), 500):
+        chunk = files[start : start + 500]
+        done = subprocess.run(
+            ["git", "-C", str(root), "hash-object", "--", *chunk],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        found = done.stdout.split()
+        if done.returncode or len(found) != len(chunk):
+            raise RuntimeError(f"git cannot read edited files: {done.stderr.strip()}")
+        ids.update(zip(chunk, found))
+    return ids
 
 
 def code_hash(config: Path) -> str | None:
@@ -114,24 +168,23 @@ def code_hash(config: Path) -> str | None:
     root, directory = root_of(config.parent), project_dir(config)
     if root is None or directory is None:
         return None
-    patterns, skip = left_out(config, directory)
-    docs, dirs, ignored = (
-        matcher(DOCS, ignorecase=True),
-        matcher(DIRS),
-        matcher(patterns),
-    )
+    patterns, skip = left_out(config, directory, root)
+    docs, dirs = matcher(DOCS, ignorecase=True), matcher(DIRS)
+    ignored = matcher([p.lstrip("/") for p in patterns if not p.startswith("!")])
+    kept = matcher([p[1:].lstrip("/") for p in patterns if p.startswith("!")])
     inside = "" if directory == root else directory.relative_to(root).as_posix() + "/"
 
     def counts(name: str) -> bool:
+        if any(name == s or name.startswith(s + "/") for s in skip):
+            return False
         own = name[len(inside) :] if name.startswith(inside) else None
-        if (
+        if own is not None and kept(own):  # gate.yaml says it is code after all
+            return True
+        return not (
             docs(name)
             or dirs(name)
             or (own is not None and (dirs(own) or ignored(own)))
-        ):
-            return False
-        path = (root / name).resolve()
-        return not any(s == path or s in path.parents for s in skip)
+        )
 
     gone = set((git(root, "ls-files", "-z", "--deleted") or "").split("\0"))
     ids, modes = {}, {}
@@ -147,17 +200,7 @@ def code_hash(config: Path) -> str | None:
         for n in (git(root, "ls-files", "-z", "--modified") or "").split("\0")
         if n in ids
     ]
-    files = [n for n in edited if modes[n] != GITLINK]
-    if files:
-        ids.update(
-            zip(
-                files,
-                (
-                    git(root, "hash-object", "--stdin-paths", stdin="\n".join(files))
-                    or ""
-                ).split(),
-            )
-        )
+    ids.update(ids_on_disk(root, [n for n in edited if modes[n] != GITLINK]))
     for name in (n for n in edited if modes[n] == GITLINK):
         ids[name] = (git(root / name, "rev-parse", "HEAD") or ids[name]).strip()
     return canonical_hash(ids)
