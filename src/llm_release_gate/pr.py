@@ -224,8 +224,8 @@ def one(
 def show(dest: Path) -> None:
     """The pipeline's logs and comment, for the CI job's log."""
     for name in (
-        "prepare-base.log",
-        "prepare-candidate.log",
+        ".prepare-base.log",
+        ".prepare-candidate.log",
         "base.log",
         "candidate.log",
         "gate.log",
@@ -267,26 +267,28 @@ def main(argv: list[str] | None = None) -> int:
         p.error("give --base and --out")
     if args.pipeline not in (None, *settings.pipelines):
         p.error(f"gate.yaml has no pipeline {args.pipeline!r}")
+    candidate, out = args.project.resolve(), args.out.resolve()
     top = subprocess.run(
-        ["git", "rev-parse", "--show-toplevel"],
+        ["git", "-C", str(candidate), "rev-parse", "--show-toplevel"],
         capture_output=True,
         text=True,
         check=False,
     )
     if top.returncode:
-        p.error("run it inside the project's git repository")
-    root, candidate, out = (
-        Path(top.stdout.strip()),
-        args.project.resolve(),
-        args.out.resolve(),
-    )
+        p.error(f"{args.project} is not in a git repository")
+    root = Path(top.stdout.strip()).resolve()
     names = [args.pipeline] if args.pipeline else list(settings.pipelines)
     for name in names:
         shutil.rmtree(out / name, ignore_errors=True)
         (out / name).mkdir(parents=True)
     tree = out / ".base-tree"
     base = tree / candidate.relative_to(root)
-    logs = out / "prepare-base.log", out / "prepare-candidate.log"
+    logs = (
+        out / ".prepare-base.log",
+        out / ".prepare-candidate.log",
+    )  # names no pipeline can have
+    for log in logs:
+        log.unlink(missing_ok=True)
     codes = {}
     try:
         shutil.rmtree(tree, ignore_errors=True)  # left by a run that was killed

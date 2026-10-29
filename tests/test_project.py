@@ -44,6 +44,7 @@ def test_defaults(tmp_path):
             "pipelines.a: Additional properties are not allowed ('confg'",
         ),
         ("pipelines: {'..': {config: c, golden: g}}\n", "'..' does not match"),
+        ("pipelines: {1: {config: c, golden: g}}\n", "1 is not of type 'string'"),
         ("pipelines: {.a: {config: c, golden: g}}\n", "'.a' does not match"),
         (
             "pipelines: {a: {config: c, golden: g}}\nk: 0\n",

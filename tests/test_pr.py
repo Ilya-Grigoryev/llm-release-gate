@@ -220,3 +220,30 @@ def test_a_bug_in_one_pipeline_is_an_infra_error_for_it_alone(repo, monkeypatch)
     code, out = gate(repo)
     assert code == pr.INFRA_ERROR
     assert "RuntimeError: boom" in (out / "comment.md").read_text()
+
+
+def test_a_rerun_shows_only_its_own_prepare(repo):
+    version(repo, "bare", GATE + "prepare: [sh, -c, 'echo PREPARED']\n")
+    gate(repo)
+    _, out = gate(repo)
+    assert (out / ".prepare-candidate.log").read_text().count("PREPARED") == 1
+
+
+def test_the_project_may_be_given_from_another_directory(
+    repo, monkeypatch, tmp_path_factory
+):
+    monkeypatch.chdir(tmp_path_factory.mktemp("elsewhere"))
+    version(repo, "bare")
+    assert (
+        pr.main(
+            [
+                "--base",
+                "HEAD",
+                "--project",
+                str(repo),
+                "--out",
+                str(repo.parent / "out"),
+            ]
+        )
+        == pr.QUALITY_FAIL
+    )
