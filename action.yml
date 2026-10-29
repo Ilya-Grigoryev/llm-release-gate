@@ -22,10 +22,14 @@ runs:
     - name: fork
       id: fork
       shell: bash
-      run: |  # GitHub gives a pull request from a fork no secrets, so no key for the model
-        fork=$(jq -r 'if .pull_request then (.pull_request.head.repo.full_name // "") != .repository.full_name else false end' \
-          "$GITHUB_EVENT_PATH")
-        echo "fork=$fork" >> "$GITHUB_OUTPUT"
+      run: |  # on `pull_request` GitHub gives a request from a fork no secrets, so no key for the model
+        python3 - >> "$GITHUB_OUTPUT" <<'PY'
+        import json, os
+        event = json.load(open(os.environ["GITHUB_EVENT_PATH"]))
+        head = ((event.get("pull_request") or {}).get("head") or {}).get("repo") or {}
+        fork = os.environ.get("GITHUB_EVENT_NAME") == "pull_request" and head.get("full_name") != event["repository"]["full_name"]
+        print(f"fork={str(fork).lower()}")
+        PY
     - name: pipeline
       id: pipeline
       if: steps.fork.outputs.fork != 'true'
