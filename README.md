@@ -50,7 +50,7 @@ input: text
 
 For each run the gate writes one JSON request to the program's stdin: the case's id and input paths and the version's
 model, prompt and params, never the expected values. It reads one JSON answer from stdout: `output`, optionally tokens,
-the model and a trace. Exit 75 retries the run, 78 stops the whole run, any other non-zero code fails it.
+the model and a trace. Exit 75 retries the run; 78, 126 and 127 stop the whole run; any other non-zero code fails it.
 [docs/protocol.md](docs/protocol.md) has every field, the trace steps, the exit codes and an example in Node;
 [`protocol.schema.json`](src/llm_release_gate/protocol.schema.json) is the schema the gate checks each answer against.
 
@@ -79,8 +79,8 @@ class Adapter:
         return Answer(...)
 ```
 
-Each step has a kind (`llm`, `tool`, `message`, `retrieval`) and an actor (`agent`, `user`, `system`, `env`). [docs/protocol.md](docs/protocol.md#trace) lists the fields of each. A model step
-holds the model the API reported, tokens, cost, the finish reason and the new output; a tool step holds the name, the
+Each step has a kind (`llm`, `tool`, `message`, `retrieval`) and an actor (`agent`, `user`, `system`, `env`);
+[docs/protocol.md](docs/protocol.md#trace) lists the fields of each. A model step holds the model the API reported, tokens, cost, the finish reason and the new output; a tool step holds the name, the
 arguments, a status and the result or error. Wrap a user simulator's client with `actor="user"` to keep its cost apart from
 the agent's. Record what the wrappers cannot see with `trace.current().step(kind, actor, ...)`. Tool calls you do not wrap
 are rebuilt from the `tool` messages your agent sends back, with status `unknown`. Only `chat.completions.create` is

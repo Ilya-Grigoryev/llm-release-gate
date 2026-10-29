@@ -47,7 +47,7 @@ process.stdin.on("end", () => {
 | `config.model` | the model of the version under test |
 | `config.prompt` | absolute path of the prompt, or prompt name → path when the config names several |
 | `config.input` | which input the version reads |
-| `config.params` | the config's `params`, as written |
+| `config.params` | the config's `params`; a whole float arrives as an integer (`1.0` as `1`) |
 
 The program never gets the case's expected values.
 
@@ -74,7 +74,7 @@ Only `output` is required.
 | `input_tokens`, `output_tokens` | whole numbers ≥ 0, default 0. When the trace has model steps, the gate prices those instead |
 | `model` | the model the provider reported. A run with neither `model` nor model steps stays unpriced |
 | `trace` | the run's steps and end state, below |
-| `protocol` | optional; another version stops the whole run |
+| `protocol` | optional; another version stops the whole run, and the gate keeps none of that answer's trace |
 
 ## Trace
 
@@ -103,7 +103,7 @@ agent's.
 | any other | this run fails |
 
 The gate keeps a trace the program printed before a failed exit, so paid steps count. An answer that breaks the schema
-fails the run, with the path to the field in the error.
+fails the run, with the path to the field in the error; the steps before a broken step stay.
 
 `timeout_s` in the config bounds the whole program. It runs in its own process group (POSIX only); on timeout the gate
 kills the group, loses that attempt's trace and retries. A child that leaves the group (`setsid`, `docker run`) survives
