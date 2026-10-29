@@ -173,19 +173,20 @@ def one(
     set_hash: str,
     candidate: Path,
     base: Path | None,
+    base_config: str | None,
     prices: str | None,
     dest: Path,
 ) -> int:
-    """Compare the two versions; without a base (the target branch has no version of the pipeline) only the candidate
+    """Compare the target branch's version (`base_config` in `base`) with the request's; without one only the candidate
     runs, for its score and a neutral exit."""
     if not (candidate / p.config).is_file():
         raise Infra(f"There is no {p.config}.")
-    if base is not None and not (base / p.config).is_file():
+    if base is None or base_config is None or not (base / base_config).is_file():
         base = None
     logs = dest / "base.log", dest / "candidate.log"
     if base is not None:
         hashes = both(
-            lambda: version(base, p.config, logs[0]),
+            lambda: version(base, base_config, logs[0]),
             lambda: version(candidate, p.config, logs[1]),
         )
         if hashes[0] and hashes[0] == hashes[1]:
@@ -194,29 +195,21 @@ def one(
         *PYTHON,
         "-m",
         "llm_release_gate.runner",
-        "--config",
-        p.config,
         "--golden",
         str(golden),
         "-k",
         str(p.k),
     ]
     codes = both(
-        lambda: (
-            call([*runs, "--out", str(dest / "base.jsonl")], base, logs[0])
-            if base
-            else 0
-        ),
-        lambda: call(
-            [*runs, "--out", str(dest / "candidate.jsonl")], candidate, logs[1]
-        ),
-    )
+        lambda: call([*runs, "--config", base_config, "--out", str(dest / "base.jsonl")], base, logs[0]) if base else 0,
+        lambda: call([*runs, "--config", p.config, "--out", str(dest / "candidate.jsonl")], candidate, logs[1]),
+    )  # fmt: skip
     for arm, code, log in zip(("base version", "candidate"), codes, logs, strict=True):
         if code != 0:
             raise Infra(f"The {arm} did not finish its runs.", log)
     decide = [
         *PYTHON, "-m", "llm_release_gate.gate",
-        *(["--base", str(dest / "base.jsonl")] if base else []), "--candidate", str(dest / "candidate.jsonl"),
+        *(["--base", str(dest / "base.jsonl")] if base else ["--no-base"]), "--candidate", str(dest / "candidate.jsonl"),
         "--golden", str(golden), "--threshold", str(p.delta),
         "--markdown", str(dest / "comment.md"), "--json", str(dest / "verdict.json"),
         *(["--prices", prices] if prices else []),
@@ -228,26 +221,66 @@ def one(
     return code
 
 
+def snapshot(rules: project.Project, base: Path, to: Path) -> None:
+    """Copy the target branch's price files before anything of the request runs in its tree (`prepare`)."""
+    for path in {p.prices for p in rules.pipelines.values()} | {
+        rules.defaults.get("prices")
+    }:
+        if path and (base / path).is_file():
+            (to / path).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(base / path, to / path)
+
+
 def ruled(
     p: project.Pipeline,
     rules: project.Project | None,
     candidate: Path,
     base: Path | None,
-) -> tuple[project.Pipeline, str | None, bool]:
-    """`p` under the target branch's rules when it has a gate.yaml (D-024), the path of its prices, and whether the
-    request changes those rules."""
-    if rules is None or base is None:
-        return p, str(candidate / p.prices) if p.prices else None, False
-    r = rules.rules(p)
-    changed = any(getattr(r, k) != getattr(p, k) for k in project.SETTINGS)
-    if r.prices and p.prices and not changed:
-        mine, theirs = candidate / p.prices, base / r.prices
-        changed = not (
-            mine.is_file()
-            and theirs.is_file()
-            and mine.read_bytes() == theirs.read_bytes()
-        )
-    return r, str(base / r.prices) if r.prices else None, changed
+    prices_copy: Path,
+) -> tuple[project.Pipeline, str | None, str | None, list[str]]:
+    """`p` under the target branch's rules (D-024), the path of its prices, the target branch's config of the pipeline
+    (None: there is no base version) and notes for the comment.
+
+    With a gate.yaml on the target branch the pipeline is matched by name, so renaming a config file does not drop the
+    base version; without one, by the request's config path."""
+    if base is None:
+        return p, str(candidate / p.prices) if p.prices else None, None, []
+    if rules is None:
+        return p, str(candidate / p.prices) if p.prices else None, p.config, []
+    r, own = rules.rules(p), rules.pipelines.get(p.name)
+    if own is None:
+        notes = [
+            f"`{p.name}` is new in gate.yaml: the target branch's top-level rules apply until merge."
+        ]
+    else:
+        changed = any(getattr(r, k) != getattr(p, k) for k in project.SETTINGS)
+        if r.prices and p.prices and not changed:
+            mine, theirs = candidate / p.prices, prices_copy / r.prices
+            changed = not (
+                mine.is_file()
+                and theirs.is_file()
+                and mine.read_bytes() == theirs.read_bytes()
+            )
+        notes = []
+        if changed:
+            notes.append(
+                f"⚙️ This request changes the gate's rules for `{p.name}` (gate.yaml or its prices). They apply "
+                "after merge; until then the gate keeps the target branch's."
+            )
+        own_set = base / own.golden
+        if own_set.is_dir() and check(own_set)[0] not in (
+            None,
+            check(candidate / p.golden)[0],
+        ):
+            notes.append(
+                f"This request changes the test set of `{p.name}`; both versions run on the request's set."
+            )
+    return (
+        r,
+        str(prices_copy / r.prices) if r.prices else None,
+        own and own.config,
+        notes,
+    )
 
 
 def show(dest: Path) -> None:
@@ -325,6 +358,8 @@ def main(argv: list[str] | None = None) -> int:
             ["git", "worktree", "prune"], cwd=root, capture_output=True, check=False
         )
         problem, rules, rules_problem = None, None, None
+        prices_copy = out / ".base-prices"
+        shutil.rmtree(prices_copy, ignore_errors=True)
         if subprocess.run(
             ["git", "worktree", "add", "--detach", str(tree), args.base],
             cwd=root,
@@ -338,8 +373,9 @@ def main(argv: list[str] | None = None) -> int:
             elif (base / project.FILE).is_file():
                 try:
                     rules = project.load(base)
+                    snapshot(rules, base, prices_copy)
                 except ValueError as e:
-                    rules_problem = f"The target branch's gate.yaml is not valid, so this run uses the request's rules: {e}"
+                    rules_problem = f"⚠️ The target branch's gate.yaml is not valid, so this run uses the request's rules: {e}"
             done = both(
                 lambda: ready(base, settings.prepare, logs[0]) if base else True,
                 lambda: ready(candidate, settings.prepare, logs[1]),
@@ -354,24 +390,20 @@ def main(argv: list[str] | None = None) -> int:
             for log in logs:
                 if log.is_file():
                     shutil.copyfile(log, dest / log.name)
+            notes = [rules_problem] if rules_problem else []
             try:
                 golden, set_hash = checked_set(
                     settings.pipelines[name], candidate, dest
                 )
                 if problem:
                     raise problem
-                p, prices, changed = ruled(
-                    settings.pipelines[name], rules, candidate, base
+                p, prices, base_config, more = ruled(
+                    settings.pipelines[name], rules, candidate, base, prices_copy
                 )
-                codes[name] = one(p, golden, set_hash, candidate, base, prices, dest)
-                with (dest / "comment.md").open("a") as f:
-                    if changed:
-                        f.write(
-                            f"\n⚙️ This request changes the gate's rules for `{name}` (gate.yaml or its prices). They "
-                            "apply after merge; this run used the target branch's.\n"
-                        )
-                    if rules_problem:
-                        f.write(f"\n⚠️ {rules_problem}\n")
+                notes += more
+                codes[name] = one(
+                    p, golden, set_hash, candidate, base, base_config, prices, dest
+                )
             except Infra as e:
                 write_comment(
                     dest, "⚠️ infra error", str(e), e.log and dest / e.log.name
@@ -383,6 +415,8 @@ def main(argv: list[str] | None = None) -> int:
                     dest, "⚠️ infra error", f"The gate failed: {type(e).__name__}: {e}"
                 )
                 codes[name] = INFRA_ERROR
+            with (dest / "comment.md").open("a") as f:
+                f.writelines(f"\n{note}\n" for note in notes)
             show(dest)
     finally:
         subprocess.run(
@@ -391,6 +425,12 @@ def main(argv: list[str] | None = None) -> int:
             capture_output=True,
             check=False,
         )
+    if rules and not args.pipeline:
+        for name in sorted(set(rules.pipelines) - set(settings.pipelines)):
+            print(
+                f"warning: this request removes `{name}` from gate.yaml, so the gate did not run it",
+                file=sys.stderr,
+            )
     return min(codes.values(), key=WORST.index)
 
 

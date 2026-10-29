@@ -1,6 +1,5 @@
 import json
 import re
-import shutil
 import subprocess
 from pathlib import Path
 
@@ -70,43 +69,35 @@ def test_the_action_finds_the_pipeline(tmp_path, names, pipeline, ok, name):
         assert "several pipelines" in done.stdout
 
 
-@pytest.mark.skipif(
-    shutil.which("jq") is None, reason="needs jq, as GitHub's runners have"
-)
+def pr_event(head):
+    return {
+        "pull_request": {"head": {"repo": head and {"full_name": head}}},
+        "repository": {"full_name": "me/app"},
+    }
+
+
 @pytest.mark.parametrize(
-    "event, fork",
+    "name, event, fork",
     [
+        ("pull_request", pr_event("me/app"), "false"),
+        ("pull_request", pr_event("you/app"), "true"),
+        ("pull_request", pr_event(None), "true"),  # the fork was deleted
+        ("push", {"repository": {"full_name": "me/app"}}, "false"),
         (
-            {
-                "pull_request": {"head": {"repo": {"full_name": "me/app"}}},
-                "repository": {"full_name": "me/app"},
-            },
+            "pull_request_target",
+            pr_event("you/app"),
             "false",
-        ),
-        (
-            {
-                "pull_request": {"head": {"repo": {"full_name": "you/app"}}},
-                "repository": {"full_name": "me/app"},
-            },
-            "true",
-        ),
-        (
-            {
-                "pull_request": {"head": {"repo": None}},
-                "repository": {"full_name": "me/app"},
-            },
-            "true",
-        ),  # a deleted fork
-        ({"repository": {"full_name": "me/app"}}, "false"),  # a push
+        ),  # secrets are there: T-86
     ],
 )
-def test_a_pull_request_from_a_fork_is_found(tmp_path, event, fork):
+def test_a_pull_request_from_a_fork_is_found(tmp_path, name, event, fork):
     (tmp_path / "event.json").write_text(json.dumps(event))
     env = {
-        "PATH": f"{Path(shutil.which('jq')).parent}:/usr/bin:/bin",
+        "PATH": "/usr/bin:/bin",
         "GITHUB_EVENT_PATH": str(tmp_path / "event.json"),
+        "GITHUB_EVENT_NAME": name,
+        "GITHUB_OUTPUT": str(tmp_path / "output"),
     }
-    env["GITHUB_OUTPUT"] = str(tmp_path / "output")
     subprocess.run(["bash", "-c", _step("fork")["run"]], env=env, check=True)
     assert (tmp_path / "output").read_text() == f"fork={fork}\n"
 

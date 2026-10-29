@@ -53,6 +53,8 @@ def load(directory: Path) -> Project:
     if found := protocol.describe(VALIDATOR, raw):
         raise ValueError(f"{path}: {'; '.join(found)}")
     top = {k: raw[k] for k in SETTINGS if k in raw}
+    if "cost_per_run_usd" in top.get("budgets", {}) and "prices" not in top:
+        raise ValueError(f"{path}: budgets.cost_per_run_usd needs prices")
     pipelines = {}
     for name, p in raw["pipelines"].items():
         settings = top | {k: p[k] for k in SETTINGS if k in p}

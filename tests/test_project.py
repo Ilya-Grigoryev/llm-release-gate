@@ -64,6 +64,10 @@ def test_defaults(tmp_path):
             "budgets.cost_per_run_usd needs prices",
         ),
         ("[a, b]\n", "is not of type 'object'"),
+        (
+            "pipelines: {a: {config: c, golden: g}}\nbudgets: {cost_per_run_usd: 1}\n",
+            "budgets.cost_per_run_usd needs prices",
+        ),
         ("pipelines: [\n", "gate.yaml"),
     ],
 )

@@ -107,16 +107,48 @@ def test_a_failed_prepare_is_an_infra_error(repo):
 
 
 def test_without_a_base_version_the_candidate_alone_runs_and_passes(repo):
-    (repo / "demo.yaml").rename(repo / "new.yaml")
-    git(repo, "add", "-A")
-    git(repo, "commit", "-q", "-m", "renamed")
-    (repo / "new.yaml").rename(repo / "demo.yaml")
-    code, out = gate(repo)
+    version(repo, "answer", GATE + "  new: {config: new.yaml, golden: golden}\n")
+    (repo / "new.yaml").write_text((repo / "demo.yaml").read_text())
+    code, out = (
+        pr.main(
+            ["--base", "HEAD", "--out", str(repo.parent / "out"), "--pipeline", "new"]
+        ),
+        repo.parent / "out" / "new",
+    )
     assert code == pr.PASS
     verdict = json.loads((out / "verdict.json").read_text())
     assert verdict["outcome"] == "no base" and verdict["candidate_mean"] == 1.0
-    assert "no base version" in (out / "comment.md").read_text()
+    comment = (out / "comment.md").read_text()
+    assert "no base version" in comment and "`new` is new in gate.yaml" in comment
     assert [p.name for p in out.glob("*.jsonl")] == ["candidate.jsonl"]
+
+
+def test_renaming_the_config_keeps_the_base_version(repo):
+    (repo / "demo.yaml").rename(repo / "demo2.yaml")
+    version(repo, "bare", GATE.replace("demo.yaml", "demo2.yaml"))
+    (repo / "demo.yaml").rename(repo / "demo2.yaml")
+    assert gate(repo)[0] == pr.QUALITY_FAIL
+
+
+def test_prepare_cannot_rewrite_the_target_branchs_prices(repo):
+    (repo / "prices.yaml").write_text("fake-model-2026-01-01: [1, 1]\n")
+    rules = GATE + "prices: prices.yaml\nbudgets: {cost_per_run_usd: 0.000001}\n"
+    (repo / "gate.yaml").write_text(rules)
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "rules")
+    cheap = (
+        "prepare: [sh, -c, 'echo \"fake-model-2026-01-01: [0, 0]\" > prices.yaml']\n"
+    )
+    version(repo, "answer-again", rules + cheap)
+    assert gate(repo)[0] == pr.BUDGET_FAIL
+
+
+def test_a_changed_test_set_is_named(repo):
+    case = repo / "golden" / "synth-001.yaml"
+    case.write_text(case.read_text().replace("store: TEST MART", "store: OTHER MART"))
+    version(repo, "bare")
+    _, out = gate(repo)
+    assert "changes the test set of `demo`" in (out / "comment.md").read_text()
 
 
 def test_a_request_that_adds_the_project_runs_the_candidate_alone(
@@ -247,6 +279,7 @@ def test_a_hash_that_cannot_be_computed_runs_both_versions(repo, monkeypatch):
 def test_the_worst_pipeline_decides_and_one_can_be_picked(repo):
     two = GATE + "  same: {config: same.yaml, golden: golden}\n"
     (repo / "same.yaml").write_text((repo / "demo.yaml").read_text())
+    (repo / "gate.yaml").write_text(two)
     git(repo, "add", "-A")
     git(repo, "commit", "-q", "-m", "a second pipeline")
     version(repo, "bare", two)

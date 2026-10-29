@@ -230,40 +230,43 @@ def markdown(
             "(successful calls, list prices)."
         )
     if spend:
-        parts = []
-        if spend.cost_limit is not None and spend.cost_per_run is not None:
-            parts.append(
-                f"cost ${spend.cost_per_run:.4f} per run (limit ${spend.cost_limit:g})"
-            )
-        if spend.latency_limit is not None and spend.latency_s is not None:
-            lo, hi = (f"{x:.2f}" if x is not None else "?" for x in spend.latency_ci)
-            parts.append(
-                f"latency p{100 * spend.latency_q:g} {spend.latency_s:.2f} s "
-                f"(interval {lo}–{hi} s; limit {spend.latency_limit:g} s)"
-            )
-        verdict = (
-            "over: " + "; ".join(spend.over)
-            if spend.over
-            else "not shown over its limits"
-        )
-        if spend.unchecked:
-            verdict += " (not checked: " + "; ".join(spend.unchecked) + ")"
-        retried = (
-            f", {spend.retried} of {spend.runs} runs needed retries"
-            if spend.retried
-            else ""
-        )
-        lines.append(
-            f"Budget of the candidate {verdict} · {' · '.join(parts)}{retried}."
-        )
+        lines.append(budget_line(spend))
     if v.worse:
         lines += ["", "| Case | Base | Candidate |", "|---|---|---|"]
         lines += [f"| {k} | {b:.2f} | {c:.2f} |" for k, b, c in v.worse[:5]]
     return "\n".join(lines) + "\n"
 
 
-def alone(candidate: Arm, prices: Prices | None) -> tuple[str, dict]:
-    """No base version yet: the candidate's mean score and cost as a comment and a report, for a neutral verdict."""
+def budget_line(spend: budget.Budget) -> str:
+    parts = []
+    if spend.cost_limit is not None and spend.cost_per_run is not None:
+        parts.append(
+            f"cost ${spend.cost_per_run:.4f} per run (limit ${spend.cost_limit:g})"
+        )
+    if spend.latency_limit is not None and spend.latency_s is not None:
+        lo, hi = (f"{x:.2f}" if x is not None else "?" for x in spend.latency_ci)
+        parts.append(
+            f"latency p{100 * spend.latency_q:g} {spend.latency_s:.2f} s "
+            f"(interval {lo}–{hi} s; limit {spend.latency_limit:g} s)"
+        )
+    verdict = (
+        "over: " + "; ".join(spend.over) if spend.over else "not shown over its limits"
+    )
+    if spend.unchecked:
+        verdict += " (not checked: " + "; ".join(spend.unchecked) + ")"
+    retried = (
+        f", {spend.retried} of {spend.runs} runs needed retries"
+        if spend.retried
+        else ""
+    )
+    return f"Budget of the candidate {verdict} · {' · '.join(parts)}{retried}."
+
+
+def alone(
+    candidate: Arm, prices: Prices | None, spend: budget.Budget | None
+) -> tuple[str, dict]:
+    """No base version yet: the candidate's mean score, cost and budget as a comment and a report, for a neutral
+    verdict; a budget is reported, not enforced."""
     runs: dict[str, list[dict]] = {}
     for (case, _), r in sorted(candidate.records.items()):
         runs.setdefault(case, []).append(r)
@@ -284,6 +287,15 @@ def alone(candidate: Arm, prices: Prices | None) -> tuple[str, dict]:
             if spent is None
             else f"Cost of these runs ${spent:.3f} (successful calls, list prices)."
         )
+    if candidate.aliases:
+        lines.append(
+            f"⚠️ Model without a date ({', '.join(sorted(candidate.aliases))}): the provider may change it."
+        )
+    if spend:
+        lines.append(
+            budget_line(spend)
+            + " Without a base version the gate does not block on it."
+        )
     report = {
         "outcome": "no base",
         "exit_code": PASS,
@@ -296,6 +308,8 @@ def alone(candidate: Arm, prices: Prices | None) -> tuple[str, dict]:
         "scorer_version": candidate.scorer_version,
         "cost_usd": {"base": None, "candidate": spent} if prices else None,
         "prices_hash": canonical_hash(prices) if prices else None,
+        "budget": asdict(spend) if spend else None,
+        "models_without_date": sorted(candidate.aliases),
         "runs_per_case": {"base": 0, "candidate": max(map(len, runs.values()))},
     }
     return "\n".join(lines) + "\n", report
@@ -317,10 +331,12 @@ def write_all(files: dict[Path | None, str]) -> None:
 
 def main(argv: Sequence[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument(
-        "--base",
-        type=Path,
-        help="runs of the current version (JSONL); without it, the candidate's score and a neutral exit",
+    base = p.add_mutually_exclusive_group(required=True)
+    base.add_argument("--base", type=Path, help="runs of the current version (JSONL)")
+    base.add_argument(
+        "--no-base",
+        action="store_true",
+        help="no current version yet: report the candidate alone, exit 0",
     )
     p.add_argument(
         "--candidate", type=Path, required=True, help="runs of the new version (JSONL)"
@@ -366,12 +382,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     p.add_argument("--markdown", type=Path, help="write the merge request comment")
     args = p.parse_args(argv)
     try:
-        if args.base is None:
+        if args.no_base:
             candidate = load_arm(args.candidate)
             if args.golden:
                 candidate = rescored(candidate, args.golden)
+            prices = load_prices(args.prices) if args.prices else None
             text, report = alone(
-                candidate, load_prices(args.prices) if args.prices else None
+                candidate, prices, candidate_budget(candidate, prices, args)
             )
             write_all(
                 {args.markdown: text, args.json: json.dumps(report, indent=2) + "\n"}
