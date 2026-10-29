@@ -20,7 +20,7 @@ target architecture.
 | Criterion | `gate.py`, `criterion.py` | the verdict and its exit code | built (naive rule; the rule on checks as a library function); planned (the rule on the mean, inconclusive, the rule on checks in the gate's verdict) |
 | Budget | `budget.py`, `gate.py` | cost of the decision; cost and latency limits | built |
 | Report and comment | `gate.py`, `comment.py` | Markdown and JSON verdict; one comment on the pull or merge request, edited on later pushes | built |
-| CI adapter | `action.yml`, `setup/action.yml`, `pr.py` + `pr.sh`, `comment.py` | runs both versions of a request and posts the verdict | built (a GitHub Action; the commands for any CI) |
+| CI adapter | `action.yml`, `setup/action.yml`, `project.py` (`gate.yaml`), `pr.py`, `comment.py`, `cli.py` | runs both versions of each changed pipeline of a request and posts the verdict | built (a GitHub Action; `llm-release-gate` for any CI) |
 | Dashboard | `dashboard/` (Next.js) | the gate's runs per repository: history of pull requests, a run's cases, a case's answers, checks and steps on both sides | built (first version) |
 
 Projects use the gate as a dependency, each in its own repository: [receipt-intake](https://github.com/Ilya-Grigoryev/receipt-intake) (receipt
@@ -159,15 +159,19 @@ runner's scorer is `hits(case, answer, trace=None)` (by default the run's trace,
 
 ### CI adapter (built)
 
-A project's pull request job (on GitHub: `uses: Ilya-Grigoryev/llm-release-gate@<tag>` after its `setup` action) checks that it can comment, gets the golden set (from the repository, a GitHub release or a GitLab package) and validates
-it, then runs `python -m llm_release_gate.pr BASE_REV PROJECT_DIR CONFIG GOLDEN_DIR OUT_DIR` from the repository's
-root: it checks out the target
-branch in a worktree, runs both versions in parallel, each with its own code (one run per case: the runner's default `-k
-1`), runs the gate and writes `comment.md` and `verdict.json`. If a version cannot run, it writes an infra-error comment
-and exits 20; otherwise it exits with the gate's code. It first copies the golden set's text files (cases and text
-inputs, never images; links followed, so a link out of the set brings its text files along) to `OUT_DIR/cases`, so even a run without a verdict shows what it was given. The job posts the comment and keeps the records as an artifact, and the
-golden set's text files as a second one (`release-gate[-NAME]-ATTEMPT-cases`, 30 days), with `inputs-url` for the
-files it leaves out. It
+A project says what to gate in `gate.yaml` (`project.schema.json`, `project.load`): named pipelines, each a version's
+config and a golden set (with an optional manifest and `inputs-url`), and the settings `k`, `delta`, `prices`,
+`budgets`, which a pipeline may override, plus a `prepare` command. Its pull request job (on GitHub: `uses:
+Ilya-Grigoryev/llm-release-gate@<tag>` after its `setup` action) checks that it can comment, gets the golden set (from
+the repository, a GitHub release or a GitLab package), then runs `llm-release-gate pr --base REV --out OUT` from the
+repository's root. For each pipeline `pr` first copies the golden set's text files (cases and text inputs, never
+images; links followed) to `OUT/NAME/cases`, so even a run without a verdict shows what it was given, and checks the set
+against its manifest. It checks out the target branch in a worktree, runs `prepare` and syncs the environment in both
+trees, and asks each tree's own gate for the version's config hash. Equal hashes give `unchanged` (exit 0, no runs);
+otherwise both versions run in parallel, each with its own code, `k` runs per case, and the gate writes `comment.md` and
+`verdict.json`. A step that cannot run gives an infra-error comment and 20; `pr` exits with the worst outcome of its
+pipelines. The action gates one pipeline per step (`pipeline:`, or the only one), posts the comment and keeps the
+records as an artifact (`release-gate-NAME-ATTEMPT`) and the text files as a second one (`…-cases`, 30 days). It
 advises: on GitHub until the check is made required, on GitLab while the job has `allow_failure: true`.
 
 ```mermaid
@@ -189,7 +193,7 @@ flowchart LR
         report[report]
     end
     subgraph ci[CI adapter]
-        gatesh[pr.sh]
+        gatesh[pr: gate.yaml]
         comment[comment.py]
     end
     provider[(model provider)]
@@ -299,8 +303,9 @@ about 25-fold for a long dialog.
 ## Planned
 
 - **Statistical gate** (see Criterion), interleaved arms in the runner, latency budgets, the anchor comparison.
-- **Adoption**: a `gate.yaml` at the root of an application project, a `pr` command that runs only the versions whose
-  config hash changed, a JUnit report.
+- **Adoption** (D-023): the protocol's schema for any program (built), `gate.yaml` and `llm-release-gate pr` (built), a
+  neutral verdict without a base version, Python adapters in a worker process, the engine through `uvx`, `init` and
+  `doctor`, a recording proxy for traces, a GitLab component and a pytest plugin; a JUnit report.
 - **Adapters**: a benchmark adapter (τ²-bench telecom), a harness agent in a container through `pipeline: command`,
   retrieval-augmented generation (to be decided), import of OpenTelemetry traces.
 - **Dashboard**: the main branch's mean with the anchor line, why a verdict passed or blocked (with its interval), noise

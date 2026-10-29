@@ -101,7 +101,7 @@ The runner calls the pipeline K times per case of a golden set and appends one J
 
 ```sh
 # in receipt-intake: the scan version on its golden set, 3 runs per receipt
-uv run --env-file .env python -m llm_release_gate.runner --config configs/sroie-image.yaml --golden data/golden/sroie -k 3 --out runs/image.jsonl
+uv run --env-file .env llm-release-gate run --config configs/sroie-image.yaml --golden data/golden/sroie -k 3 --out runs/image.jsonl
 ```
 
 ## The naive gate
@@ -120,7 +120,7 @@ when there are too few runs to decide. The cost per run includes the user simula
 the price table it used (`prices_hash`), and the JSON report carries the hash of the gate's.
 
 ```sh
-uv run python -m llm_release_gate.gate --base data/runs/base.jsonl --candidate data/runs/candidate.jsonl --markdown comment.md --json verdict.json
+uv run llm-release-gate gate --base data/runs/base.jsonl --candidate data/runs/candidate.jsonl --markdown comment.md --json verdict.json
 ```
 
 | Exit code | Meaning |
@@ -138,7 +138,7 @@ Python and argparse keep 1 and 2, so a crash is never read as a verdict.
 Each case is a YAML file with its inputs next to it; `src/llm_release_gate/case.schema.json` defines the format.
 
 ```sh
-uv run python -m llm_release_gate.golden validate tests/fixtures/golden
+uv run llm-release-gate golden validate tests/fixtures/golden
 ```
 
 `validate` checks the schema, unique ids and that every input exists inside the set, then prints a sha256 over the parsed cases and the input bytes. Reformatting a case keeps the hash. Editing an expectation or an input changes it. With `--manifest` it also fails unless the ids and the hash match. A set that may not go into git (receipt scans in [receipt-intake](https://github.com/Ilya-Grigoryev/receipt-intake)) is rebuilt from a manifest of ids.
@@ -174,11 +174,19 @@ A check compares against its own `value` or against the case's expected value at
    dependencies = ["llm-release-gate"]
 
    [tool.uv.sources]
-   llm-release-gate = { git = "https://github.com/Ilya-Grigoryev/llm-release-gate", tag = "v0.1.0-dev.5" }
+   llm-release-gate = { git = "https://github.com/Ilya-Grigoryev/llm-release-gate", tag = "v0.1.0-dev.6" }
    ```
-2. Write an adapter (`build(config)` and `run(case)`, [Your pipeline](#your-pipeline)), a config for the version in
-   production and a golden set.
-3. Add the gate to the pull request workflow; put the provider's key in the repository's secrets:
+2. Write an adapter (`build(config)` and `run(case)`, [Your pipeline](#your-pipeline)) or a program
+   ([Any program](#any-program)), a config for the version in production and a golden set.
+3. Say what to gate in `gate.yaml` at the project's root:
+   ```yaml
+   pipelines:
+     support:                        # names the comment and the artifact
+       config: configs/support.yaml  # the version
+       golden: golden/solo           # its test set
+   delta: 5                          # block when the mean score drops by more than 5 points
+   ```
+4. Add the gate to the pull request workflow; put the provider's key in the repository's secrets:
    ```yaml
    on: pull_request
    jobs:
@@ -189,23 +197,35 @@ A check compares against its own `value` or against the case's expected value at
          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
        steps:
          - uses: actions/checkout@v7
-         - uses: Ilya-Grigoryev/llm-release-gate/setup@v0.1.0-dev.5
+         - uses: Ilya-Grigoryev/llm-release-gate/setup@v0.1.0-dev.6
            with:
              gate-ssh-key: ${{ secrets.LLM_RELEASE_GATE_KEY }}  # while this repository is private
-         - uses: Ilya-Grigoryev/llm-release-gate@v0.1.0-dev.5
-           with:
-             config: configs/production.yaml
-             golden: golden/smoke
+         - uses: Ilya-Grigoryev/llm-release-gate@v0.1.0-dev.6
    ```
 
-`setup` installs Python, uv and the project's locked environment. The gate action checks that it can comment, validates
-the golden set (against a `manifest` if given), runs the version from the target branch and the one from the request on
-it, in parallel and each with its own code, compares them and posts the verdict as one comment, edited on later pushes
-(one per `name` when a request gates several pipelines). It keeps the records as an artifact, and the golden set's case
-files and text inputs as a second one for 30 days (`cases: false` leaves it out), so the [dashboard](#dashboard) can
-show what each case asked; `inputs-url` tells it where the other files are, such as images, to link to them. It fails the job with the
-gate's verdict; the job only advises until it is made a required check. A golden set that stays out of git is fetched or
-built in a step between the two; if that step fails, the gate does not run and the request gets no comment.
+`gate.yaml` ([`project.schema.json`](src/llm_release_gate/project.schema.json)) takes these fields; settings at the top
+apply to every pipeline, and a pipeline's own win:
+
+| Field | Meaning |
+|---|---|
+| `pipelines.NAME.config`, `.golden` | the version's config and the test set's directory, relative to the project |
+| `pipelines.NAME.manifest` | ids and hash the set must match, for a set built or fetched outside git |
+| `pipelines.NAME.inputs-url` | where the dashboard finds the set's other files (images): a URL with `{path}` or `{name}` |
+| `k` | runs per case and version, default 1; the naive rule decides on the first run, budgets use all |
+| `delta` | points of mean score the candidate may lose, default 5 |
+| `prices` | YAML of `model: [input, output]` USD per 1M tokens, for costs and the cost budget |
+| `budgets` | `cost_per_run_usd` (needs `prices`), `latency_s` and `latency_quantile` (default 0.95) |
+| `prepare` | a command that readies the project in both trees before their runs, such as `[npm, ci]` |
+
+`setup` installs Python, uv and the project's locked environment. The gate action checks that it can comment, checks
+the golden set (against its manifest, if any), and compares the version from the target branch with the one from the
+request, in parallel and each with its own code. A request that leaves a pipeline's config, prompts and `VERSION` as
+they are gets `unchanged` and costs nothing. The verdict comes as one comment, edited on later pushes. The action keeps
+the records as an artifact, and the golden set's case files and text inputs as a second one for 30 days
+(`cases: false` leaves it out), so the [dashboard](#dashboard) can show what each case asked. It fails the job with the
+gate's verdict; the job only advises until it is made a required check. With several pipelines in `gate.yaml`, add one
+step per pipeline with `pipeline: NAME`; each gets its own comment and artifact. A golden set that stays out of git is
+fetched or built in a step before the gate; if that step fails, the gate does not run and the request gets no comment.
 
 While this repository is private, only repositories of its owner can use it: the owner shares its actions with them
 (Settings → Actions → Access) and gives each a read-only deploy key, passed as `gate-ssh-key`. Other projects wait for
@@ -215,11 +235,11 @@ Three projects use it, each with its own `.github/workflows/ci.yml`: [receipt-in
 (about $0.06 a pull request), [workbench-support](https://github.com/Ilya-Grigoryev/workbench-support) ($0.04) and
 [telecom-support](https://github.com/Ilya-Grigoryev/telecom-support) ($0.20).
 
-Outside GitHub Actions the same two commands do the work, from the repository's root:
-`python -m llm_release_gate.pr BASE_REV PROJECT_DIR CONFIG GOLDEN_DIR OUT_DIR` runs both versions and the gate,
-`python -m llm_release_gate.comment OUT_DIR/comment.md` posts the verdict (on GitLab with `GITLAB_TOKEN`, a project access
-token with the `api` scope); `--check` tells beforehand whether the job can comment, `--dry-run` prints the comment and
-posts nothing.
+Outside GitHub Actions the gate's command does the work, from the repository's root. `llm-release-gate pr --base
+origin/main --out OUT` runs every pipeline of `gate.yaml` and writes `OUT/NAME` (`--project DIR` when `gate.yaml` is not
+at the root, `--list` only checks it). `llm-release-gate comment OUT/NAME/comment.md --name NAME` posts a verdict (on
+GitLab with `GITLAB_TOKEN`, a project access token with the `api` scope); `--check` tells beforehand whether the job
+can comment, `--dry-run` prints the comment and posts nothing.
 
 ## Dashboard
 
