@@ -23,12 +23,11 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any
 
+from llm_release_gate import protocol
 from llm_release_gate.prices import Prices, usd
 
 VERSION = 1
-KINDS = ("llm", "tool", "message", "retrieval")
-ACTORS = ("agent", "user", "system", "env")
-STATUSES = {"llm": ("ok", "error"), "tool": ("ok", "error", "unknown")}
+ACTORS = tuple(protocol.SCHEMA["$defs"]["step"]["properties"]["actor"]["enum"])
 FINISH = {
     "stop": "stop",
     "tool_calls": "tool_calls",
@@ -59,41 +58,9 @@ def active(trace: "Trace | None") -> Iterator["Trace | None"]:
         _current.reset(token)
 
 
-def count(value: Any) -> bool:
-    return type(value) is int and value >= 0
-
-
 def problems(step: dict) -> list[str]:
-    """What makes a step break the format: missing or mistyped required fields, unknown kind, actor or status."""
-    found = []
-    kind, status = step.get("kind"), step.get("status")
-    if kind not in KINDS:
-        found.append(f"kind must be one of {KINDS}")
-    if not isinstance(step.get("ts"), str | None):
-        found.append("ts must be a string or null")
-    if step.get("actor") not in ACTORS:
-        found.append(f"actor must be one of {ACTORS}")
-    need = ["seq", "kind", "actor"]
-    if kind in STATUSES:
-        need.append("status")
-        if status is not None and status not in STATUSES[kind]:
-            found.append(f"{kind} status must be one of {STATUSES[kind]}")
-    if kind == "llm" and status == "ok":
-        need += ["model", "tokens_in", "tokens_out", "cost_usd"]
-        for k in ("tokens_in", "tokens_out"):
-            if k in step and not count(step[k]):
-                found.append(f"{k} must be a whole number >= 0")
-        cost = step.get("cost_usd")
-        if cost is not None and (type(cost) not in (int, float) or cost < 0):
-            found.append("cost_usd must be a number >= 0 or null")
-    if kind == "llm" and status == "error":
-        need += ["error", "attempt"]
-        if "attempt" in step and not (count(step["attempt"]) and step["attempt"] >= 1):
-            found.append("attempt must be a whole number >= 1")
-    if kind == "tool":
-        need += ["name", "args"]
-    found += [f"missing {k}" for k in need if k not in step]
-    return found
+    """What makes a step break the format (`protocol.schema.json`, `step`)."""
+    return protocol.errors(step, "step")
 
 
 def plain(value: Any) -> Any:

@@ -1,0 +1,108 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Ilya-Grigoryev/llm-release-gate/blob/main/src/llm_release_gate/protocol.schema.json",
+  "title": "llm-release-gate pipeline protocol, version 1",
+  "description": "The gate writes one request to a program's stdin and reads one answer from its stdout. docs/protocol.md explains the fields and the exit codes. Integers are integer literals: 3.0 is not a token count.",
+  "$defs": {
+    "request": {
+      "type": "object",
+      "required": ["protocol", "case", "config"],
+      "properties": {
+        "protocol": {"const": 1},
+        "case": {
+          "type": "object",
+          "required": ["id", "inputs"],
+          "properties": {
+            "id": {"type": "string"},
+            "inputs": {
+              "description": "Input name to the file's absolute path.",
+              "type": "object",
+              "additionalProperties": {"type": "string"}
+            }
+          }
+        },
+        "config": {
+          "description": "The version under test, from its YAML config.",
+          "type": "object",
+          "required": ["model", "prompt", "input", "params"],
+          "properties": {
+            "model": {"type": "string"},
+            "prompt": {
+              "description": "An absolute path, or prompt names to absolute paths.",
+              "anyOf": [
+                {"type": "string"},
+                {"type": "object", "additionalProperties": {"type": "string"}}
+              ]
+            },
+            "input": {"type": "string"},
+            "params": {"type": "object"}
+          }
+        }
+      }
+    },
+    "answer": {
+      "type": "object",
+      "required": ["output"],
+      "properties": {
+        "protocol": {"const": 1},
+        "output": {"description": "What the case's checks score; null when there is no answer.", "type": ["object", "null"]},
+        "raw": {"description": "The model's text; any other value is kept as JSON. Defaults to `output` as JSON."},
+        "input_tokens": {"$ref": "#/$defs/count"},
+        "output_tokens": {"$ref": "#/$defs/count"},
+        "model": {"description": "The model the provider reported.", "type": ["string", "null"]},
+        "trace": {"$ref": "#/$defs/trace"}
+      }
+    },
+    "trace": {
+      "type": ["object", "null"],
+      "properties": {
+        "steps": {"type": "array", "items": {"$ref": "#/$defs/step"}},
+        "final_state": {"description": "The world after the run, for state checks."},
+        "state_change": {"description": "What the run changed in the world."},
+        "stop": {"description": "Why the run ended, e.g. done, max_steps, error.", "type": ["string", "null"]}
+      }
+    },
+    "step": {
+      "description": "One step of a run. The gate numbers steps (`seq`, `run_attempt`) and ignores numbers sent to it; other fields are kept.",
+      "type": "object",
+      "required": ["kind", "actor"],
+      "properties": {
+        "kind": {"enum": ["llm", "tool", "message", "retrieval"]},
+        "actor": {"enum": ["agent", "user", "system", "env"]},
+        "ts": {"description": "ISO 8601 time the step started.", "type": ["string", "null"]}
+      },
+      "allOf": [
+        {
+          "if": {"required": ["kind"], "properties": {"kind": {"const": "llm"}}},
+          "then": {"required": ["status"], "properties": {"status": {"enum": ["ok", "error"]}}}
+        },
+        {
+          "if": {"required": ["kind"], "properties": {"kind": {"const": "tool"}}},
+          "then": {
+            "required": ["status", "name", "args"],
+            "properties": {"status": {"enum": ["ok", "error", "unknown"]}}
+          }
+        },
+        {
+          "if": {"required": ["kind", "status"], "properties": {"kind": {"const": "llm"}, "status": {"const": "ok"}}},
+          "then": {
+            "required": ["model", "tokens_in", "tokens_out", "cost_usd"],
+            "properties": {
+              "tokens_in": {"$ref": "#/$defs/count"},
+              "tokens_out": {"$ref": "#/$defs/count"},
+              "cost_usd": {"description": "null: the gate prices the step from its price table.", "type": ["number", "null"], "minimum": 0}
+            }
+          }
+        },
+        {
+          "if": {"required": ["kind", "status"], "properties": {"kind": {"const": "llm"}, "status": {"const": "error"}}},
+          "then": {
+            "required": ["error", "attempt"],
+            "properties": {"attempt": {"description": "1 for the first failed try of a call.", "type": "integer", "minimum": 1}}
+          }
+        }
+      ]
+    },
+    "count": {"type": "integer", "minimum": 0}
+  }
+}

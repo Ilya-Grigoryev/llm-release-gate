@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from llm_release_gate import command, runner, trace
+from llm_release_gate import command, protocol, runner, trace
 from llm_release_gate.golden import load_cases, validate
 from llm_release_gate.metrics import hits
 from llm_release_gate.pipeline import (
@@ -91,6 +91,7 @@ def test_the_program_gets_the_case_and_the_version_but_not_the_expected_values(
     )
     run_case(config(tmp_path, command=["sh", str(spy)]))
     request = json.loads((tmp_path / "request.json").read_text())
+    assert protocol.errors(request, "request") == [] and request["protocol"] == 1
     assert request["case"]["id"] == "synth-001"
     assert all(
         Path(p).is_absolute() and Path(p).exists()
@@ -115,11 +116,12 @@ def test_the_program_gets_the_case_and_the_version_but_not_the_expected_values(
         ("fail", RuntimeError, "exit 3: agent crashed"),
         ("garbage", ValueError, "not JSON"),
         ("list", TypeError, "must be a JSON object"),
-        ("nooutput", TypeError, "`output` must be an object or null"),
-        ("textoutput", TypeError, "`output` must be an object or null"),
-        ("numbermodel", TypeError, "model must be a string"),
-        ("negtokens", ValueError, "input_tokens must be a whole number"),
-        ("floattokens", ValueError, "output_tokens must be a whole number"),
+        ("nooutput", ValueError, "answer: missing output"),
+        ("textoutput", ValueError, "output: '12.50' is not of type 'object', 'null'"),
+        ("numbermodel", ValueError, "model: 4 is not of type 'string', 'null'"),
+        ("negtokens", ValueError, "input_tokens: -1 is less than the minimum of 0"),
+        ("floattokens", ValueError, "output_tokens: 2.5 is not of type 'integer'"),
+        ("otherprotocol", Fatal, "answer speaks protocol 2, the gate 1"),
     ],
 )
 def test_exit_codes_map_to_retry_stop_or_a_failed_run(tmp_path, mode, error, match):
@@ -222,8 +224,8 @@ def test_model_null_stays_none_and_raw_that_is_not_text_is_json(tmp_path):
 @pytest.mark.parametrize(
     "mode, error, match",
     [
-        ("badstop", TypeError, "stop must be a string"),
-        ("badts", ValueError, "ts must be a string"),
+        ("badstop", ValueError, "trace: stop: 3 is not of type 'string', 'null'"),
+        ("badts", ValueError, "trace: steps.0.ts: 5 is not of type 'string', 'null'"),
     ],
 )
 def test_trace_fields_of_the_wrong_type_fail_the_run(tmp_path, mode, error, match):
