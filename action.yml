@@ -19,8 +19,16 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: fork
+      id: fork
+      shell: bash
+      run: |  # GitHub gives a pull request from a fork no secrets, so no key for the model
+        fork=$(jq -r 'if .pull_request then (.pull_request.head.repo.full_name // "") != .repository.full_name else false end' \
+          "$GITHUB_EVENT_PATH")
+        echo "fork=$fork" >> "$GITHUB_OUTPUT"
     - name: pipeline
       id: pipeline
+      if: steps.fork.outputs.fork != 'true'
       shell: bash
       env:
         PROJECT: ${{ inputs.project-dir }}
@@ -35,12 +43,14 @@ runs:
         echo "name=$PIPELINE" >> "$GITHUB_OUTPUT"
         echo "out=$RUNNER_TEMP/llm-release-gate/$PIPELINE" >> "$GITHUB_OUTPUT"
     - name: can comment
+      if: steps.fork.outputs.fork != 'true'
       shell: bash
       env:
         GITHUB_TOKEN: ${{ inputs.github-token }}
         PROJECT: ${{ inputs.project-dir }}
       run: uv run --project "$PROJECT" llm-release-gate comment --check
     - name: gate
+      if: steps.fork.outputs.fork != 'true'
       shell: bash
       env:
         PROJECT: ${{ inputs.project-dir }}
@@ -50,7 +60,7 @@ runs:
         uv run --project "$PROJECT" llm-release-gate pr --base FETCH_HEAD --project "$PROJECT" --pipeline "$NAME" \
           --out "$RUNNER_TEMP/llm-release-gate"
     - name: comment
-      if: ${{ !cancelled() }}
+      if: ${{ !cancelled() && steps.fork.outputs.fork != 'true' }}
       shell: bash
       env:
         GITHUB_TOKEN: ${{ inputs.github-token }}
@@ -75,3 +85,13 @@ runs:
         path: ${{ steps.pipeline.outputs.out }}/cases/
         retention-days: ${{ inputs.cases-retention-days }}
         if-no-files-found: ignore
+    - name: not checked
+      if: steps.fork.outputs.fork == 'true'
+      shell: bash
+      run: |  # red, never a pass: a required check must not let an unchecked request through
+        message="This pull request comes from a fork, and GitHub gives such workflows no secrets, so the gate cannot
+        call the model and did not check it. To gate it, a maintainer pushes its branch to this repository and opens the
+        request from there."
+        printf '### Release gate: not checked\n\n%s\n' "$message" >> "$GITHUB_STEP_SUMMARY"
+        echo "::error title=Release gate: not checked::$(echo $message)"
+        exit 1
