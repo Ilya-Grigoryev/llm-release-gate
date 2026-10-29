@@ -1,81 +1,166 @@
+import json
+import shutil
 import subprocess
+import sys
+from pathlib import Path
+
+import pytest
 
 from llm_release_gate import pr
 
-
-def test_runs_the_packaged_script(monkeypatch):
-    calls = []
-    monkeypatch.setattr(pr.os, "execvp", lambda file, args: calls.append((file, args)))
-    pr.main(["FETCH_HEAD", ".", "a.yaml", "golden", "out"])
-    assert pr.SCRIPT.is_file()
-    assert calls == [
-        ("bash", ["bash", str(pr.SCRIPT), "FETCH_HEAD", ".", "a.yaml", "golden", "out"])
-    ]
+FIXTURES = Path(__file__).parent / "fixtures"
+AGENT = FIXTURES / "command" / "agent.sh"
+GATE = "pipelines:\n  demo: {config: demo.yaml, golden: golden}\n"
 
 
-def run_without_a_base(tmp_path, golden):
-    repo, out = tmp_path / "repo", tmp_path / "out"
-    repo.mkdir()
-    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
-    done = subprocess.run(
-        ["bash", str(pr.SCRIPT), "no-such-rev", ".", "a.yaml", str(golden), str(out)],
+def git(repo, *args):
+    subprocess.run(
+        ["git", "-c", "user.name=t", "-c", "user.email=t@t", *args],
         cwd=repo,
+        check=True,
         capture_output=True,
-        text=True,
-        check=False,
     )
-    assert done.returncode == 20
-    assert "infra error" in (out / "comment.md").read_text()
-    cases = out / "cases"
-    return {str(p.relative_to(cases)): p for p in cases.rglob("*") if not p.is_dir()}
 
 
-def test_keeps_the_sets_text_files_even_without_a_verdict(tmp_path):
-    golden, elsewhere = tmp_path / "golden", tmp_path / "elsewhere"
-    (golden / "inputs").mkdir(parents=True)
+def version(repo, mode, gate=GATE):
+    (repo / "demo.yaml").write_text(
+        f"pipeline: command\ncommand: [sh, {AGENT}]\nmodel: fake-model-2026-01-01\n"
+        f"prompt: prompt.md\ninput: text\nparams: {{mode: {mode}}}\n"
+    )
+    (repo / "gate.yaml").write_text(gate)
+
+
+@pytest.fixture
+def repo(tmp_path, monkeypatch):
+    """A project whose target branch answers every case right; the gate runs in this interpreter, without uv."""
+    monkeypatch.setattr(pr, "SYNC", None)
+    monkeypatch.setattr(pr, "PYTHON", [sys.executable])
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    shutil.copytree(FIXTURES / "golden", repo / "golden")
+    shutil.copy(FIXTURES / "prompt.md", repo / "prompt.md")
+    version(repo, "answer")
+    git(repo, "init", "-q")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "base")
+    monkeypatch.chdir(repo)
+    return repo
+
+
+def gate(repo, *args):
+    out = repo.parent / "out"
+    return pr.main(["--base", "HEAD", "--out", str(out), *args]), out / "demo"
+
+
+def test_a_worse_version_is_blocked_and_the_results_are_kept(repo):
+    version(repo, "bare")  # answers only the total
+    code, out = gate(repo)
+    assert code == pr.QUALITY_FAIL
+    verdict = json.loads((out / "verdict.json").read_text())
+    assert (
+        verdict["outcome"] == "quality fail"
+        and verdict["base_config"] != verdict["candidate_config"]
+    )
+    assert "quality fail" in (out / "comment.md").read_text()
+    assert {p.name for p in out.glob("*.jsonl")} == {"base.jsonl", "candidate.jsonl"}
+    assert (out / "cases" / "synth-001.yaml").is_file()
+    assert not (repo.parent / "out" / ".base-tree").exists()
+
+
+def test_settings_reach_the_runs_and_the_gate(repo):
+    (repo / "prices.yaml").write_text("fake-model-2026-01-01: [1, 1]\n")
+    gate_yaml = (
+        GATE + "k: 2\nprices: prices.yaml\nbudgets: {cost_per_run_usd: 0.000001}\n"
+    )
+    version(repo, "answer-again", gate_yaml)  # the same answers from another version
+    code, out = gate(repo)
+    assert code == pr.BUDGET_FAIL
+    assert len((out / "base.jsonl").read_text().splitlines()) == 2
+    assert json.loads((out / "verdict.json").read_text())["budget"] is not None
+
+
+def test_an_unchanged_version_is_not_run(repo):
+    (repo / "README.md").write_text("docs only\n")
+    code, out = gate(repo)
+    assert code == pr.PASS
+    assert json.loads((out / "verdict.json").read_text())["outcome"] == "unchanged"
+    assert "unchanged" in (out / "comment.md").read_text()
+    assert not list(out.glob("*.jsonl"))
+
+
+def test_prepare_runs_in_both_trees(repo):
+    log = repo.parent / "prepared"
+    version(repo, "bare", GATE + f"prepare: [sh, -c, 'pwd >> {log}']\n")
+    gate(repo)
+    assert len(log.read_text().splitlines()) == 2
+
+
+def test_a_failed_prepare_is_an_infra_error(repo):
+    version(repo, "bare", GATE + "prepare: [sh, -c, 'echo no network; exit 1']\n")
+    code, out = gate(repo)
+    assert code == pr.INFRA_ERROR
+    comment = (out / "comment.md").read_text()
+    assert "could not be prepared" in comment and "no network" in comment
+
+
+def test_a_target_branch_without_the_version_is_an_infra_error(repo):
+    (repo / "demo.yaml").rename(repo / "new.yaml")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "renamed")
+    (repo / "new.yaml").rename(repo / "demo.yaml")
+    code, out = gate(repo)
+    assert code == pr.INFRA_ERROR
+    assert "no base version" in (out / "comment.md").read_text()
+
+
+def test_a_missing_target_branch_is_an_infra_error_but_the_cases_are_kept(repo):
+    code = pr.main(["--base", "no-such-rev", "--out", str(repo.parent / "out")])
+    out = repo.parent / "out" / "demo"
+    assert code == pr.INFRA_ERROR
+    assert "Cannot check out" in (out / "comment.md").read_text()
+    assert (out / "cases" / "synth-001.yaml").is_file()
+
+
+def test_keeps_only_the_sets_text_files(repo):
+    golden, elsewhere = repo / "golden", repo.parent / "elsewhere"
     elsewhere.mkdir()
-    (golden / "a.yaml").write_text("id: a\n")
     (golden / "inputs" / "a.TXT").write_text("hello\n")
     (golden / "inputs" / "a.jpg").write_bytes(b"\xff\xd8")
     (golden / ".hidden.yaml").write_text("x")
     (elsewhere / "b.jpg").write_bytes(b"\xff\xd8")
     (elsewhere / "b.json").write_text("{}")
-    (golden / "inputs" / "b.jpg").symlink_to(elsewhere / "b.jpg")
     (golden / "inputs" / "b.json").symlink_to(elsewhere / "b.json")
     (golden / "scans").symlink_to(elsewhere)
-    files = run_without_a_base(tmp_path, golden)
-    assert sorted(files) == ["a.yaml", "inputs/a.TXT", "inputs/b.json", "scans/b.json"]
-    assert not any(p.is_symlink() for p in files.values())
-    assert files["inputs/a.TXT"].read_text() == "hello\n"
-
-
-def test_follows_a_set_that_is_a_link(tmp_path):
-    real = tmp_path / "real"
-    real.mkdir()
-    (real / "a.yaml").write_text("id: a\n")
-    (real / "a.png").write_bytes(b"\x89PNG")
-    (tmp_path / "golden").symlink_to(real)
-    assert sorted(run_without_a_base(tmp_path, tmp_path / "golden")) == ["a.yaml"]
-
-
-def test_a_missing_set_is_an_infra_error(tmp_path):
-    (tmp_path / "repo").mkdir()
-    (tmp_path / "repo" / "a.yaml").write_text("x")
-    done = subprocess.run(
-        [
-            "bash",
-            str(pr.SCRIPT),
-            "HEAD",
-            ".",
-            "a.yaml",
-            str(tmp_path / "nope"),
-            str(tmp_path / "out"),
-        ],
-        cwd=tmp_path / "repo",
-        capture_output=True,
-        text=True,
-        check=False,
+    version(repo, "answer", GATE.replace("}", ", inputs-url: 'https://x/{name}'}"))
+    _, out = gate(repo)
+    files = {
+        str(p.relative_to(out / "cases")): p
+        for p in (out / "cases").rglob("*")
+        if p.is_file()
+    }
+    assert (
+        "inputs/a.TXT" in files and "inputs/b.json" in files and "scans/b.json" in files
     )
-    assert done.returncode == 20
-    assert "no golden set" in (tmp_path / "out" / "comment.md").read_text()
-    assert list((tmp_path / "out").iterdir()) == [tmp_path / "out" / "comment.md"]
+    assert not [f for f in files if f.endswith(".jpg") or "hidden" in f]
+    assert not any(p.is_symlink() for p in files.values())
+    assert files["inputs-url.txt"].read_text() == "https://x/{name}\n"
+
+
+def test_a_missing_set_is_an_infra_error(repo):
+    version(repo, "bare", GATE.replace("golden: golden", "golden: nope"))
+    code, out = gate(repo)
+    assert code == pr.INFRA_ERROR
+    assert "no golden set at nope" in (out / "comment.md").read_text()
+
+
+def test_list_names_the_pipelines_and_a_bad_gate_yaml_is_an_infra_error(repo, capsys):
+    assert pr.main(["--list"]) == pr.PASS
+    assert capsys.readouterr().out == "demo\n"
+    (repo / "gate.yaml").write_text("pipelines: {demo: {golden: golden}}\n")
+    assert pr.main(["--list"]) == pr.INFRA_ERROR
+    assert "missing pipelines.demo.config" in capsys.readouterr().err
+
+
+def test_an_unknown_pipeline_is_refused(repo):
+    with pytest.raises(SystemExit):
+        pr.main(["--base", "HEAD", "--out", "out", "--pipeline", "nope"])

@@ -80,18 +80,29 @@ def validate(directory: Path) -> tuple[str | None, list[str]]:
     return (None if errors else canonical_hash(parts)), errors
 
 
-def main() -> None:
+def check(
+    directory: Path, manifest: Path | None = None
+) -> tuple[str | None, list[str]]:
+    """`validate`, and with a manifest also that the set has the manifest's ids and hash."""
+    set_hash, errors = validate(directory)
+    if manifest and not errors:
+        try:
+            want = yaml.safe_load(Path(manifest).read_text())
+            ids = sorted(c.id for c in load_cases(directory))
+            if ids != sorted(want["ids"]) or set_hash != want["sha256"]:
+                errors.append(f"{directory} does not match {manifest}")
+        except (OSError, yaml.YAMLError, KeyError, TypeError) as e:
+            errors.append(f"{manifest}: not a manifest ({type(e).__name__}: {e})")
+    return set_hash, errors
+
+
+def main(argv: list[str] | None = None) -> None:
     p = argparse.ArgumentParser(description="Validate a golden set and print its hash.")
     p.add_argument("command", choices=["validate"])
     p.add_argument("directory", type=Path)
     p.add_argument("--manifest", type=Path, help="fail unless ids and hash match it")
-    args = p.parse_args()
-    set_hash, errors = validate(args.directory)
-    if args.manifest and not errors:
-        manifest = yaml.safe_load(args.manifest.read_text())
-        ids = sorted(c.id for c in load_cases(args.directory))
-        if ids != sorted(manifest["ids"]) or set_hash != manifest["sha256"]:
-            errors.append(f"{args.directory} does not match {args.manifest}")
+    args = p.parse_args(argv)
+    set_hash, errors = check(args.directory, args.manifest)
     for error in errors:
         print(error, file=sys.stderr)
     if errors:

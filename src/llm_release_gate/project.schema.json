@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "gate.yaml",
+  "description": "A project's gate settings, at the root of the project. Settings at the top apply to every pipeline; a pipeline's own settings win.",
+  "type": "object",
+  "required": ["pipelines"],
+  "allOf": [{"$ref": "#/$defs/settings"}],
+  "properties": {
+    "prepare": {
+      "description": "A command that readies the project in both the target branch's tree and this one before their runs, e.g. [npm, ci].",
+      "type": "array",
+      "minItems": 1,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "pipelines": {
+      "description": "Pipeline name to its version and test set. The name labels the comment and the artifact.",
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {"pattern": "^[A-Za-z0-9._-]+$"},
+      "additionalProperties": {"$ref": "#/$defs/pipeline"}
+    }
+  },
+  "unevaluatedProperties": false,
+  "$defs": {
+    "pipeline": {
+      "type": "object",
+      "required": ["config", "golden"],
+      "allOf": [{"$ref": "#/$defs/settings"}],
+      "properties": {
+        "config": {"description": "The version's config, relative to the project.", "type": "string", "minLength": 1},
+        "golden": {"description": "The test set's directory, relative to the project.", "type": "string", "minLength": 1},
+        "manifest": {"description": "Ids and hash the set must match, relative to the project.", "type": "string", "minLength": 1},
+        "inputs-url": {"description": "Where a reader finds the set's non-text files: a URL with {path} or {name}.", "type": "string", "minLength": 1}
+      },
+      "unevaluatedProperties": false
+    },
+    "settings": {
+      "properties": {
+        "k": {"description": "Runs per case and version (default 1). The naive rule decides on the first; budgets use all.", "type": "integer", "minimum": 1},
+        "delta": {"description": "Block when the candidate's mean score is lower by more than this many points (default 5).", "type": "number", "minimum": 0},
+        "prices": {"description": "YAML of model: [input, output] USD per 1M tokens, relative to the project.", "type": "string", "minLength": 1},
+        "budgets": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "cost_per_run_usd": {"description": "The candidate's mean cost per run; needs prices.", "type": "number", "exclusiveMinimum": 0},
+            "latency_s": {"description": "Seconds for the candidate's latency quantile.", "type": "number", "exclusiveMinimum": 0},
+            "latency_quantile": {"description": "Default 0.95.", "type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1}
+          }
+        }
+      }
+    }
+  }
+}
