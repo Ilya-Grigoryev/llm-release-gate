@@ -4,6 +4,7 @@ const LOOK: Record<string, { color: string; ink: string; icon: string }> = {
   "budget fail": { color: "var(--bad)", ink: "#fff", icon: "$" },
   inconclusive: { color: "var(--warn)", ink: "#1b1a18", icon: "?" },
   "infra error": { color: "var(--none)", ink: "#fff", icon: "!" },
+  unchanged: { color: "var(--none)", ink: "#fff", icon: "=" },
 };
 
 export const look = (outcome: string) => LOOK[outcome] ?? LOOK["infra error"];

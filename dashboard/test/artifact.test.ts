@@ -64,6 +64,12 @@ describe("parseArtifact", () => {
     });
   });
 
+  it("summarizes a version the request did not change", () => {
+    const verdict = { outcome: "unchanged", exit_code: 0, base_mean: null, candidate_mean: null, diff_pp: null, base_config: "a", candidate_config: "a" };
+    const p = parseArtifact(zipSync({ "verdict.json": strToU8(JSON.stringify(verdict)) }));
+    expect(summarize(p)).toEqual({ outcome: "unchanged", exit_code: 0, base_mean: null, candidate_mean: null, diff_pp: null, cost: null, same_version: true });
+  });
+
   it("calls a run without a verdict an infra error", () => {
     const p = parseArtifact(zipSync({ "comment.md": strToU8("**Release gate: ⚠️ infra error**"), "base.jsonl": strToU8(lines(base)) }));
     expect(p.verdict).toBeNull();
