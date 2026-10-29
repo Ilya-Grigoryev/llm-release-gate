@@ -164,3 +164,59 @@ def test_list_names_the_pipelines_and_a_bad_gate_yaml_is_an_infra_error(repo, ca
 def test_an_unknown_pipeline_is_refused(repo):
     with pytest.raises(SystemExit):
         pr.main(["--base", "HEAD", "--out", "out", "--pipeline", "nope"])
+
+
+def test_a_hash_that_cannot_be_computed_runs_both_versions(repo, monkeypatch):
+    monkeypatch.setattr(pr, "HASH", "import sys; sys.exit('no hash here')")
+    (repo / "README.md").write_text("docs only\n")
+    code, out = gate(repo)
+    assert code == pr.PASS
+    assert {p.name for p in out.glob("*.jsonl")} == {"base.jsonl", "candidate.jsonl"}
+    assert "no hash here" in (out / "base.log").read_text()
+
+
+def test_the_worst_pipeline_decides_and_one_can_be_picked(repo):
+    two = GATE + "  same: {config: same.yaml, golden: golden}\n"
+    (repo / "same.yaml").write_text((repo / "demo.yaml").read_text())
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "a second pipeline")
+    version(repo, "bare", two)
+    code, out = gate(repo)
+    assert code == pr.QUALITY_FAIL
+    assert "unchanged" in (out.parent / "same" / "comment.md").read_text()
+    assert gate(repo, "--pipeline", "same")[0] == pr.PASS
+
+
+def test_a_broken_link_in_the_set_is_skipped_or_named(repo):
+    (repo / "golden" / "inputs" / "gone.txt").symlink_to(repo / "nowhere.txt")
+    version(repo, "bare")
+    code, out = gate(repo)
+    assert (
+        code == pr.QUALITY_FAIL and not (out / "cases" / "inputs" / "gone.txt").exists()
+    )
+    (repo / "golden" / "gone.yaml").symlink_to(
+        repo / "nowhere.yaml"
+    )  # a case the set cannot read
+    code, out = gate(repo)
+    assert code == pr.INFRA_ERROR
+    assert "gone.yaml: No such file or directory" in (out / "comment.md").read_text()
+
+
+def test_runs_from_a_subdirectory_of_the_repository(repo, monkeypatch):
+    (repo / "sub").mkdir()
+    monkeypatch.chdir(repo / "sub")
+    version(repo, "bare")
+    assert (
+        pr.main(["--base", "HEAD", "--project", "..", "--out", "out"])
+        == pr.QUALITY_FAIL
+    )
+
+
+def test_a_bug_in_one_pipeline_is_an_infra_error_for_it_alone(repo, monkeypatch):
+    def broken(*args):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(pr, "one", broken)
+    code, out = gate(repo)
+    assert code == pr.INFRA_ERROR
+    assert "RuntimeError: boom" in (out / "comment.md").read_text()

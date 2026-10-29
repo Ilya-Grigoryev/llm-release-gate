@@ -48,6 +48,9 @@ def validate(directory: Path) -> tuple[str | None, list[str]]:
             raw = yaml.safe_load(path.read_text())
             jsonschema.validate(raw, SCHEMA)
             case_hash = canonical_hash(raw)
+        except OSError as e:  # a link to nothing, say
+            errors.append(f"{path.name}: {e.strerror}")
+            continue
         except (yaml.YAMLError, UnicodeDecodeError, jsonschema.ValidationError) as e:
             errors.append(f"{path.name}: {getattr(e, 'message', e)}")
             continue

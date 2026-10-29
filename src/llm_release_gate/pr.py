@@ -1,4 +1,4 @@
-"""Gate a pull or merge request from the root of its repository.
+"""Gate a pull or merge request.
 
 For each pipeline in the project's gate.yaml whose version the request changes, run the target branch's version and this
 checkout's on the pipeline's test set, each in its own tree and environment, and compare them. OUT/NAME gets the comment,
@@ -12,6 +12,7 @@ import os
 import shutil
 import subprocess
 import sys
+import traceback
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -39,6 +40,11 @@ HASH = (
 WORST = (INFRA_ERROR, QUALITY_FAIL, BUDGET_FAIL, INCONCLUSIVE, PASS)
 TEXT = {".yaml", ".yml", ".json", ".txt", ".md", ".csv"}
 ENV = {k: v for k, v in os.environ.items() if k != "VIRTUAL_ENV"}
+BUDGETS = {
+    "cost_per_run_usd": "--max-cost-per-run",
+    "latency_s": "--max-latency",
+    "latency_quantile": "--latency-quantile",
+}
 
 
 class Infra(Exception):
@@ -76,8 +82,8 @@ def ready(tree: Path, prepare: tuple[str, ...] | None, log: Path) -> bool:
     return all(call(list(c), tree, log) == 0 for c in (prepare, SYNC) if c)
 
 
-def version(tree: Path, config: str) -> str | None:
-    """The config's hash, computed by the tree's own gate; None if it cannot say."""
+def version(tree: Path, config: str, log: Path) -> str | None:
+    """The config's hash, computed by the tree's own gate; None if it cannot say (the reason goes to `log`)."""
     done = subprocess.run(
         [*PYTHON, "-c", HASH, config],
         cwd=tree,
@@ -86,6 +92,8 @@ def version(tree: Path, config: str) -> str | None:
         text=True,
         check=False,
     )
+    with log.open("a") as f:
+        f.write(done.stderr)
     lines = done.stdout.split()
     return lines[-1] if done.returncode == 0 and lines else None
 
@@ -96,8 +104,12 @@ def copy_text_files(golden: Path, dest: Path) -> None:
         dirs[:] = [d for d in dirs if not d.startswith(".")]
         for name in files:
             source = Path(directory) / name
-            if name.startswith(".") or source.suffix.lower() not in TEXT:
-                continue
+            if (
+                name.startswith(".")
+                or source.suffix.lower() not in TEXT
+                or not source.is_file()
+            ):
+                continue  # a hidden file, not text, or a broken link
             target = dest / source.relative_to(golden)
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(source, target)
@@ -108,16 +120,14 @@ def write_comment(
 ) -> None:
     text = f"**Release gate: {title}**\n\n{message}\n"
     if log and log.is_file():
-        text += (
-            "\n```\n"
-            + "\n".join(log.read_text(errors="replace").splitlines()[-15:])
-            + "\n```\n"
-        )
+        tail = log.read_text(errors="replace").splitlines()[-15:]
+        text += "\n```\n" + "\n".join(tail) + "\n```\n"
     (dest / "comment.md").write_text(text)
 
 
-def test_set(p: project.Pipeline, candidate: Path, dest: Path) -> Path:
-    """The pipeline's set, checked; its text files go to DEST/cases first, so a reader sees the cases whatever happens."""
+def checked_set(p: project.Pipeline, candidate: Path, dest: Path) -> tuple[Path, str]:
+    """The pipeline's set and its hash; its text files go to DEST/cases first, so a reader sees the cases whatever
+    happens next."""
     golden = candidate / p.golden
     if not golden.is_dir():
         raise Infra(f"There is no golden set at {p.golden}.")
@@ -125,14 +135,45 @@ def test_set(p: project.Pipeline, candidate: Path, dest: Path) -> Path:
     if p.inputs_url:
         (dest / "cases").mkdir(exist_ok=True)
         (dest / "cases" / "inputs-url.txt").write_text(p.inputs_url + "\n")
-    _, errors = check(golden, candidate / p.manifest if p.manifest else None)
+    set_hash, errors = check(golden, candidate / p.manifest if p.manifest else None)
     if errors:
         raise Infra("The golden set is not valid: " + "; ".join(errors[:5]))
-    return golden
+    return golden, set_hash
+
+
+def unchanged(p: project.Pipeline, config_hash: str, set_hash: str, dest: Path) -> int:
+    (dest / "verdict.json").write_text(
+        json.dumps(
+            {
+                "outcome": "unchanged",
+                "exit_code": PASS,
+                "base_mean": None,
+                "candidate_mean": None,
+                "diff_pp": None,
+                "base_config": config_hash,
+                "candidate_config": config_hash,
+                "set_hash": set_hash,
+            }
+        )
+        + "\n"
+    )
+    write_comment(
+        dest,
+        "⏭ unchanged",
+        f"This request does not change `{p.name}`: its config, prompts and pipeline `VERSION` hash the same in both "
+        f"branches (`{config_hash[:12]}`), so nothing ran. A code change that changes what the model gets needs a new "
+        "`VERSION` in the adapter, or a new number in `params` for `pipeline: command`.",
+    )
+    return PASS
 
 
 def one(
-    p: project.Pipeline, golden: Path, candidate: Path, base: Path, dest: Path
+    p: project.Pipeline,
+    golden: Path,
+    set_hash: str,
+    candidate: Path,
+    base: Path,
+    dest: Path,
 ) -> int:
     if not (candidate / p.config).is_file():
         raise Infra(f"There is no {p.config}.")
@@ -140,29 +181,13 @@ def one(
         raise Infra(
             f"The target branch has no {p.config}, so there is no base version to compare with."
         )
-    hashes = both(lambda: version(base, p.config), lambda: version(candidate, p.config))
+    logs = dest / "base.log", dest / "candidate.log"
+    hashes = both(
+        lambda: version(base, p.config, logs[0]),
+        lambda: version(candidate, p.config, logs[1]),
+    )
     if hashes[0] and hashes[0] == hashes[1]:
-        (dest / "verdict.json").write_text(
-            json.dumps(
-                {
-                    "outcome": "unchanged",
-                    "exit_code": PASS,
-                    "base_mean": None,
-                    "candidate_mean": None,
-                    "diff_pp": None,
-                    "base_config": hashes[0],
-                    "candidate_config": hashes[1],
-                }
-            )
-            + "\n"
-        )
-        write_comment(
-            dest,
-            "⏭ unchanged",
-            f"This request does not change `{p.name}`: its config, prompts and pipeline `VERSION` hash the same in "
-            f"both branches (`{hashes[0][:12]}`). A code change that changes what the model gets needs a new `VERSION`.",
-        )
-        return PASS
+        return unchanged(p, hashes[0], set_hash, dest)
     runs = [
         *PYTHON,
         "-m",
@@ -175,54 +200,42 @@ def one(
         str(p.k),
     ]
     codes = both(
+        lambda: call([*runs, "--out", str(dest / "base.jsonl")], base, logs[0]),
         lambda: call(
-            [*runs, "--out", str(dest / "base.jsonl")], base, dest / "base.log"
-        ),
-        lambda: call(
-            [*runs, "--out", str(dest / "candidate.jsonl")],
-            candidate,
-            dest / "candidate.log",
+            [*runs, "--out", str(dest / "candidate.jsonl")], candidate, logs[1]
         ),
     )
-    for arm, code in zip(("base", "candidate"), codes, strict=True):
+    for arm, code, log in zip(("base version", "candidate"), codes, logs, strict=True):
         if code != 0:
-            raise Infra(
-                f"The {'base version' if arm == 'base' else 'candidate'} did not finish its runs.",
-                dest / f"{arm}.log",
-            )
-    budgets = {
-        "cost_per_run_usd": "--max-cost-per-run",
-        "latency_s": "--max-latency",
-        "latency_quantile": "--latency-quantile",
-    }
+            raise Infra(f"The {arm} did not finish its runs.", log)
     decide = [
-        *PYTHON,
-        "-m",
-        "llm_release_gate.gate",
-        "--base",
-        str(dest / "base.jsonl"),
-        "--candidate",
-        str(dest / "candidate.jsonl"),
-        "--golden",
-        str(golden),
-        "--threshold",
-        str(p.delta),
-        "--markdown",
-        str(dest / "comment.md"),
-        "--json",
-        str(dest / "verdict.json"),
+        *PYTHON, "-m", "llm_release_gate.gate",
+        "--base", str(dest / "base.jsonl"), "--candidate", str(dest / "candidate.jsonl"), "--golden", str(golden),
+        "--threshold", str(p.delta), "--markdown", str(dest / "comment.md"), "--json", str(dest / "verdict.json"),
         *(["--prices", p.prices] if p.prices else []),
-        *(
-            a
-            for k, flag in budgets.items()
-            if k in p.budgets
-            for a in (flag, str(p.budgets[k]))
-        ),
-    ]
+        *(a for k, flag in BUDGETS.items() if k in p.budgets for a in (flag, str(p.budgets[k]))),
+    ]  # fmt: skip
     code = call(decide, candidate, dest / "gate.log")
     if code not in WORST or code == INFRA_ERROR or not (dest / "comment.md").is_file():
         raise Infra("The gate could not compare the runs.", dest / "gate.log")
     return code
+
+
+def show(dest: Path) -> None:
+    """The pipeline's logs and comment, for the CI job's log."""
+    for name in (
+        "prepare-base.log",
+        "prepare-candidate.log",
+        "base.log",
+        "candidate.log",
+        "gate.log",
+        "comment.md",
+    ):
+        if (dest / name).is_file():
+            print(
+                f"--- {dest.name}: {name}\n{(dest / name).read_text(errors='replace')}",
+                end="\n",
+            )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -254,16 +267,32 @@ def main(argv: list[str] | None = None) -> int:
         p.error("give --base and --out")
     if args.pipeline not in (None, *settings.pipelines):
         p.error(f"gate.yaml has no pipeline {args.pipeline!r}")
+    top = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if top.returncode:
+        p.error("run it inside the project's git repository")
+    root, candidate, out = (
+        Path(top.stdout.strip()),
+        args.project.resolve(),
+        args.out.resolve(),
+    )
     names = [args.pipeline] if args.pipeline else list(settings.pipelines)
-    root, out = Path.cwd(), args.out.resolve()
-    candidate = (root / args.project).resolve()
     for name in names:
         shutil.rmtree(out / name, ignore_errors=True)
         (out / name).mkdir(parents=True)
     tree = out / ".base-tree"
     base = tree / candidate.relative_to(root)
+    logs = out / "prepare-base.log", out / "prepare-candidate.log"
     codes = {}
     try:
+        shutil.rmtree(tree, ignore_errors=True)  # left by a run that was killed
+        subprocess.run(
+            ["git", "worktree", "prune"], cwd=root, capture_output=True, check=False
+        )
         problem = None
         if subprocess.run(
             ["git", "worktree", "add", "--detach", str(tree), args.base],
@@ -274,10 +303,9 @@ def main(argv: list[str] | None = None) -> int:
             problem = Infra(f"Cannot check out the target branch ({args.base}).")
         elif not base.is_dir():
             problem = Infra(
-                f"The target branch has no {args.project}, so there is no base version to compare with."
+                f"The target branch has no {candidate.relative_to(root)}, so there is no base version to compare with."
             )
         else:
-            logs = out / "base-prepare.log", out / "candidate-prepare.log"
             done = both(
                 lambda: ready(base, settings.prepare, logs[0]),
                 lambda: ready(candidate, settings.prepare, logs[1]),
@@ -289,17 +317,30 @@ def main(argv: list[str] | None = None) -> int:
                     problem = Infra(f"The {arm}'s project could not be prepared.", log)
         for name in names:
             dest = out / name
+            for log in logs:
+                if log.is_file():
+                    shutil.copyfile(log, dest / log.name)
             try:
-                golden = test_set(settings.pipelines[name], candidate, dest)
+                golden, set_hash = checked_set(
+                    settings.pipelines[name], candidate, dest
+                )
                 if problem:
                     raise problem
                 codes[name] = one(
-                    settings.pipelines[name], golden, candidate, base, dest
+                    settings.pipelines[name], golden, set_hash, candidate, base, dest
                 )
             except Infra as e:
-                write_comment(dest, "⚠️ infra error", str(e), e.log)
+                write_comment(
+                    dest, "⚠️ infra error", str(e), e.log and dest / e.log.name
+                )
                 codes[name] = INFRA_ERROR
-            print(f"--- {name}\n{(dest / 'comment.md').read_text()}")
+            except Exception as e:  # noqa: BLE001 - a bug in one pipeline is an infra error, never a verdict
+                traceback.print_exc()
+                write_comment(
+                    dest, "⚠️ infra error", f"The gate failed: {type(e).__name__}: {e}"
+                )
+                codes[name] = INFRA_ERROR
+            show(dest)
     finally:
         subprocess.run(
             ["git", "worktree", "remove", "--force", str(tree)],

@@ -41,8 +41,10 @@ def test_defaults(tmp_path):
         ("pipelines: {a: {golden: g}}\n", "missing pipelines.a.config"),
         (
             "pipelines: {a: {config: c, golden: g, confg: x}}\n",
-            "pipelines.a: Unevaluated properties are not allowed",
+            "pipelines.a: Additional properties are not allowed ('confg'",
         ),
+        ("pipelines: {'..': {config: c, golden: g}}\n", "'..' does not match"),
+        ("pipelines: {.a: {config: c, golden: g}}\n", "'.a' does not match"),
         (
             "pipelines: {a: {config: c, golden: g}}\nk: 0\n",
             "k: 0 is less than the minimum of 1",
@@ -73,3 +75,9 @@ def test_errors_name_the_file_and_the_field(tmp_path, text, error):
 def test_a_missing_file_is_named(tmp_path):
     with pytest.raises(ValueError, match="gate.yaml: No such file"):
         project.load(tmp_path)
+
+
+def test_a_bad_value_is_the_only_error(tmp_path):
+    with pytest.raises(ValueError) as e:
+        load(tmp_path, "pipelines: {a: {config: c, golden: g, delta: '5'}}\n")
+    assert str(e.value).endswith("pipelines.a.delta: '5' is not of type 'number'")

@@ -19,4 +19,5 @@ def main(argv: list[str] | None = None) -> int:
     if not args or args[0] not in COMMANDS:
         sys.stderr.write(USAGE)
         return 2
+    sys.argv[0] = f"llm-release-gate {args[0]}"  # the name each command's --help shows
     return COMMANDS[args[0]](args[1:]) or 0
