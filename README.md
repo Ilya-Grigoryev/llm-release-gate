@@ -220,12 +220,20 @@ apply to every pipeline, and a pipeline's own win:
 `setup` installs Python, uv and the project's locked environment. The gate action checks that it can comment, checks
 the golden set (against its manifest, if any), and compares the version from the target branch with the one from the
 request, in parallel and each with its own code. A request that leaves a pipeline's config, prompts and `VERSION` as
-they are gets `unchanged` and costs nothing. A request that adds a pipeline (the target branch has no version of it)
-gets `no base version`: the candidate's score, and the check passes. The rules (`delta`, `k`, `budgets`, `prices`) come
-from the target branch's `gate.yaml`, so a request cannot loosen its own gate: new rules apply after merge, and the
-comment says when a request changes them; protect `gate.yaml` with CODEOWNERS if needed. A pull request from a fork
-gets no secrets on GitHub, so the gate cannot call the model: the job fails as `not checked` and says why, and a
-maintainer gates it by pushing its branch to the repository. The verdict comes as one comment, edited on later pushes. The action keeps
+they are gets `unchanged` and costs nothing. The verdict comes as one comment, edited on later pushes.
+
+The rules (`delta`, `k`, `budgets`, `prices`) come from the target branch's `gate.yaml`, so editing `gate.yaml` in a
+request does not loosen that request's gate: new rules apply after merge, and the comment says when a request changes
+them, adds a pipeline or changes a test set. The gate matches pipelines by name: a pipeline the target branch's
+`gate.yaml` lacks gets `no base version` (the candidate runs alone; its score and budget are reported and the check
+passes), and so does every pipeline when the target branch has no `gate.yaml` and no file at the config's path. A new
+pipeline follows the target branch's top-level rules; without a `gate.yaml` there, or with a broken one (the comment
+warns), the request's rules hold. The gate runs the request's code, its workflow and its lock file, so it catches
+mistakes, not a hostile author: protect `.github/`, `gate.yaml` and the lock file with CODEOWNERS for that.
+
+On `pull_request` GitHub gives a request from a fork no secrets, so the gate cannot call the model: the job fails as
+`not checked` and says why, and a maintainer gates the request by pushing its branch to the repository. The action
+supports the `pull_request` event. The action keeps
 the records as an artifact, and the golden set's case files and text inputs as a second one for 30 days
 (`cases: false` leaves it out), so the [dashboard](#dashboard) can show what each case asked. It fails the job with the
 gate's verdict; the job only advises until it is made a required check. With several pipelines in `gate.yaml`, add one

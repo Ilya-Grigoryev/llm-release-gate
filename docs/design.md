@@ -143,7 +143,7 @@ runner's scorer is `hits(case, answer, trace=None)` (by default the run's trace,
   set, the cost, the warning about models without a date and the cases that got worse; the JSON report holds the
   verdict's fields plus the threshold, both config hashes, the set hash, the scorer version, whether it rescored, the
   cost, the hash of the price table, the budget, `models_without_date` and the runs per case. CLI: `python -m
-  llm_release_gate.gate --base FILE --candidate FILE [--threshold PP] [--relative] [--golden DIR] [--prices FILE]
+  llm_release_gate.gate (--base FILE | --no-base) --candidate FILE [--threshold PP] [--relative] [--golden DIR] [--prices FILE]
   [--max-cost-per-run USD] [--max-latency S] [--latency-quantile Q] [--markdown FILE] [--json FILE]`; the exit code is
   the verdict's. `comment.py` posts the Markdown as one comment on a GitHub pull request or GitLab merge request, edits it on
   later pushes, and posts an infra-error comment when the job stopped before a verdict. CLI: `python -m
@@ -168,9 +168,11 @@ repository's root. For each pipeline `pr` first copies the golden set's text fil
 images; links followed) to `OUT/NAME/cases`, so even a run without a verdict shows what it was given, and checks the set
 against its manifest. It checks out the target branch in a worktree, runs `prepare` and syncs the environment in both
 trees, and asks each tree's own gate for the version's config hash. The rules (`delta`, `k`, `budgets`, `prices`) come
-from the target branch's `gate.yaml` when it has one (D-024), so a request cannot loosen its own gate; the comment says
-when it changes them. A target branch without the pipeline gives `no base version`: only the candidate runs, for its
-score, exit 0. Equal hashes give `unchanged` (exit 0, no runs);
+from the target branch's `gate.yaml` when it has one (D-024); price files are copied before the request's `prepare`
+runs in that tree. Pipelines are matched by name, and the base arm runs the target branch's config of the pipeline, so
+renaming a config file keeps the base. A pipeline the target branch lacks gives `no base version`: only the candidate
+runs (`gate --no-base`), for its score and budget, exit 0. The comment notes changed rules, a new pipeline and a changed
+test set. The gate runs the request's code, workflow and lock file: it catches mistakes, not a hostile author. Equal hashes give `unchanged` (exit 0, no runs);
 otherwise both versions run in parallel, each with its own code, `k` runs per case, and the gate writes `comment.md` and
 `verdict.json`. A step that cannot run gives an infra-error comment and 20; `pr` exits with the worst outcome of its
 pipelines. The action gates one pipeline per step (`pipeline:`, or the only one), posts the comment and keeps the
