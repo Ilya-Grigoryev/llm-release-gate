@@ -401,8 +401,29 @@ def test_a_request_that_removes_a_pipeline_fails(repo):
     git(repo, "commit", "-q", "-m", "two pipelines")
     version(repo, "answer")  # gate.yaml without `old`, the rest as it was
     code, out = gate(repo)
-    assert code == pr.INFRA_ERROR
+    assert code == pr.INCONCLUSIVE  # red, and not a crash of the tool
+    assert (
+        json.loads((out / "verdict.json").read_text())["outcome"] == "pass"
+    )  # demo's own verdict stays true
     assert (
         "removes `old` from gate.yaml: no version of it was compared"
         in (out / "comment.md").read_text()
     )
+
+
+def test_a_new_ignore_rule_cannot_hide_new_code(repo):
+    version(repo, "answer", GATE + "ignore: ['plugins/**']\n")
+    (repo / "plugins").mkdir()
+    (repo / "plugins" / "evil.py").write_text("print('hidden')\n")
+    git(repo, "add", "plugins")
+    code, out = gate(repo)
+    assert code == pr.PASS and "unchanged" not in (out / "comment.md").read_text()
+    assert "changes what the gate ignores" in (out / "comment.md").read_text()
+
+
+def test_a_changed_test_set_alone_keeps_the_version(repo):
+    case = repo / "golden" / "synth-001.yaml"
+    case.write_text(case.read_text().replace("store: TEST MART", "store: OTHER MART"))
+    _, out = gate(repo)
+    comment = (out / "comment.md").read_text()
+    assert "unchanged" in comment and "changes the test set of `demo`." in comment

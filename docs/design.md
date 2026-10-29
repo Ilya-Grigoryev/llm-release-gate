@@ -38,8 +38,9 @@ agent over a booking system, alone on a ticket or in a chat with a simulated use
   import path.
 - **Version** (`PipelineConfig`, `load_config(path)`): `pipeline`, `model`, `prompt` (a file or named files), `input`,
   `params`, `max_retries`, `timeout_s`, and `command` for `pipeline: command`. `config_hash(config)` covers every field
-  and the bytes of each prompt file; `version.version_hash(path)` adds the project's code (D-025): the files git tracks
-  in the project, as on disk, but documentation, CI, `gate.yaml`, its `ignore`, test sets and other pipelines' files.
+  and the bytes of each prompt file; `version.version_hash(path)` adds the repository's code (D-025): every tracked file
+  by the id git gives its content (the index's id, or the id of a modified file on disk), but documentation, CI,
+  `gate.yaml` and its price files, its `ignore`, its test sets and its other pipelines' files.
   Records carry it as `config_hash`, so resuming, pairing, the dashboard and `unchanged` share one notion of a version.
 - **Any program** (`pipeline: command`, `command: [program, args]`; [protocol.md](protocol.md), `protocol.schema.json`): one JSON request on stdin (case id, input paths, the
   version; never the expected values), one JSON answer on stdout (`output`, optionally tokens, model and a trace). Exit 75
@@ -169,12 +170,12 @@ the repository, a GitHub release or a GitLab package), then runs `llm-release-ga
 repository's root. For each pipeline `pr` first copies the golden set's text files (cases and text inputs, never
 images; links followed) to `OUT/NAME/cases`, so even a run without a verdict shows what it was given, and checks the set
 against its manifest. It checks out the target branch in a worktree, runs `prepare` and syncs the environment in both
-trees, and asks each tree's own gate for the version's config hash. The rules (`delta`, `k`, `budgets`, `prices`) come
+trees, and asks each tree's own gate for the version's hash. The rules (`delta`, `k`, `budgets`, `prices`) come
 from the target branch's `gate.yaml` when it has one (D-024); price files are copied before the request's `prepare`
 runs in that tree. Pipelines are matched by name, and the base arm runs the target branch's config of the pipeline, so
 renaming a config file keeps the base. A pipeline the target branch lacks gives `no base version`: only the candidate
 runs (`gate --no-base`), for its score and budget, exit 0. The comment notes changed rules, a new pipeline and a changed
-test set. The gate runs the request's code, workflow and lock file: it catches mistakes, not a hostile author. Equal hashes give `unchanged` (exit 0, no runs);
+test set. The gate runs the request's code, workflow and lock file: it catches mistakes, not a hostile author. Equal hashes give `unchanged` (exit 0, no runs) when the two `gate.yaml` agree on `ignore` and on which files belong to which pipeline; a request that removes a pipeline exits 11;
 otherwise both versions run in parallel, each with its own code, `k` runs per case, and the gate writes `comment.md` and
 `verdict.json`. A step that cannot run gives an infra-error comment and 20; `pr` exits with the worst outcome of its
 pipelines. The action gates one pipeline per step (`pipeline:`, or the only one), posts the comment and keeps the
@@ -312,7 +313,7 @@ about 25-fold for a long dialog.
 - A pipeline stays behind its interface; changing it does not touch the gate's code.
 - Criteria and budget checks are pure functions: arrays of results in, a verdict out; no network, files, clock or logs. A
   seed comes in as an argument and goes into the verdict.
-- Every record carries the config hash and the set hash; runs on different sets are not compared.
+- Every record carries the version's hash (config, prompts, code) and the set hash; runs on different sets are not compared.
 - The runner resumes after a crash and runs cases in parallel with a limit and backoff.
 - "Quality failed" and "tool crashed" are different exit codes.
 

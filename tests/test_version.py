@@ -116,7 +116,46 @@ def test_commit_marks_uncommitted_edits(repo):
         ("docs/**", "src/docs/y.txt", False),
         ("LICENSE*", "LICENSE.txt", True),
         ("web/*.html", "web/a/b.html", False),
+        ("web/", "web/a/b.html", True),
+        ("**/x.py", "x.py", True),
+        ("**/x.py", "a/b/x.py", True),
     ],
 )
 def test_ignore_patterns(pattern, path, hit):
     assert matcher([pattern])(path) is hit
+
+
+def test_the_repository_counts_above_the_project_and_a_dirty_commit_is_seen_from_configs(
+    tmp_path,
+):
+    repo = tmp_path / "mono"
+    write(repo / "uv.lock", "v1\n")  # a monorepo's shared lock file, above the project
+    write(
+        repo / "app" / "gate.yaml",
+        "pipelines: {a: {config: configs/a.yaml, golden: golden}}\n",
+    )
+    write(repo / "app" / "configs" / "a.md", "p")
+    config = write(repo / "app" / "configs" / "a.yaml", CONFIG.format(p="a.md"))
+    write(repo / "app" / "src" / "agent.py", "print(1)\n")
+    git(repo, "init", "-q")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "init")
+    before, clean = version_hash(config), commit(config)
+    (repo / "uv.lock").write_text("v2\n")
+    assert version_hash(config) != before
+    assert commit(config) == clean + "+dirty"
+
+
+def test_the_price_file_is_a_rule_not_code(repo):
+    write(repo / "prices.yaml", "m-2026-01-01: [1, 1]\n")
+    (repo / "gate.yaml").write_text(
+        (repo / "gate.yaml").read_text() + "prices: prices.yaml\n"
+    )
+    git(repo, "add", "-A")
+    before = version_hash(repo / "a.yaml")
+    (repo / "prices.yaml").write_text("m-2026-01-01: [2, 2]\n")
+    assert version_hash(repo / "a.yaml") == before
+
+
+def test_documentation_is_found_in_any_case():
+    assert matcher(["README*"], ignorecase=True)("src/readme.md")

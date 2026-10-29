@@ -172,15 +172,16 @@ def one(
     base_config: str | None,
     prices: str | None,
     dest: Path,
+    may_skip: bool = True,
 ) -> int:
     """Compare the target branch's version (`base_config` in `base`) with the request's; without one only the candidate
-    runs, for its score and a neutral exit."""
+    runs, for its score and a neutral exit. `may_skip`: an unchanged version may skip the runs."""
     if not (candidate / p.config).is_file():
         raise Infra(f"There is no {p.config}.")
     if base is None or base_config is None or not (base / base_config).is_file():
         base = None
     logs = dest / "base.log", dest / "candidate.log"
-    if base is not None:
+    if base is not None and may_skip:
         hashes = both(
             lambda: version(base, base_config, logs[0]),
             lambda: version(candidate, p.config, logs[1]),
@@ -215,6 +216,15 @@ def one(
     if code not in WORST or code == INFRA_ERROR or not (dest / "comment.md").is_file():
         raise Infra("The gate could not compare the runs.", dest / "gate.log")
     return code
+
+
+def layout(settings: project.Project) -> tuple:
+    """What decides which files are a version's code (D-025): a request must not change it and skip its own runs."""
+    files = {
+        n: (p.config, p.golden, p.manifest, p.prices)
+        for n, p in settings.pipelines.items()
+    }
+    return sorted(settings.ignore), files, settings.defaults.get("prices")
 
 
 def snapshot(rules: project.Project, base: Path, to: Path) -> None:
@@ -282,9 +292,7 @@ def ruled(
                 check(new_set)[0],
             )
         ):
-            notes.append(
-                f"This request changes the test set of `{p.name}`; both versions run on the request's set."
-            )
+            notes.append(f"This request changes the test set of `{p.name}`.")
     return (
         r,
         str(theirs) if theirs else None,
@@ -368,6 +376,7 @@ def main(argv: list[str] | None = None) -> int:
             ["git", "worktree", "prune"], cwd=root, capture_output=True, check=False
         )
         problem, rules, rules_problem, removed = None, None, None, []
+        same_layout = False  # without the target branch's gate.yaml nothing tells which files a request may ignore
         prices_copy = out / ".base-prices"
         shutil.rmtree(prices_copy, ignore_errors=True)
         if subprocess.run(
@@ -385,6 +394,12 @@ def main(argv: list[str] | None = None) -> int:
                     rules = project.load(base)
                     snapshot(rules, base, prices_copy)
                     removed = sorted(set(rules.pipelines) - set(settings.pipelines))
+                    same_layout = layout(rules) == layout(settings)
+                    if not same_layout:
+                        rules_problem = (
+                            "gate.yaml in this request changes what the gate ignores or which files belong to which "
+                            "pipeline, so every pipeline runs."
+                        )
                 except ValueError as e:
                     rules_problem = f"⚠️ The target branch's gate.yaml is not valid, so this run uses the request's rules: {e}"
             done = both(
@@ -415,7 +430,15 @@ def main(argv: list[str] | None = None) -> int:
                 if problem:
                     raise problem
                 codes[name] = one(
-                    p, golden, set_hash, candidate, base, base_config, prices, dest
+                    p,
+                    golden,
+                    set_hash,
+                    candidate,
+                    base,
+                    base_config,
+                    prices,
+                    dest,
+                    same_layout,
                 )
             except Infra as e:
                 write_comment(
@@ -433,7 +456,6 @@ def main(argv: list[str] | None = None) -> int:
                     f"❌ This request removes {', '.join(f'`{n}`' for n in removed)} from gate.yaml: no version of it "
                     "was compared, so the check fails. If that is intended, merge over the check."
                 )
-                codes[name] = INFRA_ERROR
             with (dest / "comment.md").open("a") as f:
                 f.writelines(f"\n{note}\n" for note in notes)
             show(dest)
@@ -444,7 +466,7 @@ def main(argv: list[str] | None = None) -> int:
             capture_output=True,
             check=False,
         )
-    return min(codes.values(), key=WORST.index)
+    return min([*codes.values(), *([INCONCLUSIVE] if removed else [])], key=WORST.index)
 
 
 if __name__ == "__main__":
