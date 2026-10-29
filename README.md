@@ -34,7 +34,7 @@ time, the gate's comment warns about it, and the gate refuses to compare two ver
 pause longer than an hour, or that asked for the same model and got different ones from the provider (or runs that do
 not say which one they got: report `model`).
 
-The gate's code imports no pipeline. Give your module a `VERSION` and bump it when your code changes what the model gets. [receipt-intake](https://github.com/Ilya-Grigoryev/receipt-intake) is a whole project set up this way.
+The gate's code imports no pipeline. [receipt-intake](https://github.com/Ilya-Grigoryev/receipt-intake) is a whole project set up this way.
 
 ### Any program
 
@@ -54,8 +54,8 @@ the model and a trace. Exit 75 retries the run; 78, 126 and 127 stop the whole r
 [docs/protocol.md](docs/protocol.md) has every field, the trace steps, the exit codes and an example in Node;
 [`protocol.schema.json`](src/llm_release_gate/protocol.schema.json) is the schema the gate checks each answer against.
 
-`command` is part of the version and its hash; the program's code is not. When you change the code in a way that
-changes what the model gets, bump a number in `params` (`params: {version: 2}`), as a Python module bumps `VERSION`.
+`command` is part of the version and its hash, and the program's code is part of the version as any code of the
+project is ([Running a version](#running-a-version)).
 
 ## Traces
 
@@ -95,7 +95,7 @@ runner's backoff between attempts. A pipeline that records nothing writes `trace
 
 ## Running a version
 
-Each pipeline version is a YAML file: pipeline module, model (a dated snapshot if there is one), prompt file (or named prompt files for a pipeline with several steps), input, API parameters and, optionally, `max_retries` (default 5) and `timeout_s` (default 60). Its hash covers every field, the bytes of each prompt and the module's `VERSION`; key order, YAML formatting and `0` versus `0.0` do not change it.
+Each pipeline version is a YAML file: pipeline module, model (a dated snapshot if there is one), prompt file (or named prompt files for a pipeline with several steps), input, API parameters and, optionally, `max_retries` (default 5) and `timeout_s` (default 60). Its hash covers every field and the bytes of each prompt; key order, YAML formatting and `0` versus `0.0` do not change it. A version is its config, the bytes of its prompts and the project's code: every file git tracks in the project, as it is on disk, but documentation (`README*`, `CHANGELOG*`, `CONTRIBUTING*`, `LICENSE*`, `docs/`), CI (`.github/`), `gate.yaml`, the paths in its `ignore`, the test sets and the files of other pipelines. A code change gives a new version by itself; a change to the README does not. Untracked files (run records, data) do not count, so writing results never changes the version, and each record carries the commit too, with `+dirty` for uncommitted edits.
 
 The runner calls the pipeline K times per case of a golden set and appends one JSON record per call, stamped with the config hash, the set hash and the scorer version. A rerun pays only for what is missing. The runner retries rate limits, timeouts and server errors with backoff 1, 2, 4... s and stops when the account is out of quota. `--prices` puts a list price on each model step of a trace; the raw provider responses go to `<stem>.native.jsonl`.
 
@@ -216,15 +216,18 @@ apply to every pipeline, and a pipeline's own win:
 | `prices` | YAML of `model: [input, output]` USD per 1M tokens, for costs and the cost budget |
 | `budgets` | `cost_per_run_usd` (needs `prices`), `latency_s` and `latency_quantile` (default 0.95) |
 | `prepare` | a command that readies the project in both trees before their runs, such as `[npm, ci]` |
+| `ignore` | glob patterns of files that never change what the model gets, such as `web/**`, on top of documentation and CI |
 
 `setup` installs Python, uv and the project's locked environment. The gate action checks that it can comment, checks
 the golden set (against its manifest, if any), and compares the version from the target branch with the one from the
-request, in parallel and each with its own code. A request that leaves a pipeline's config, prompts and `VERSION` as
-they are gets `unchanged` and costs nothing. The verdict comes as one comment, edited on later pushes.
+request, in parallel and each with its own code. A request that leaves a pipeline's version as it is (config,
+prompts and code, see [Running a version](#running-a-version)) gets `unchanged` and costs nothing; a pipeline's own
+files (another pipeline's prompt, say) do not count for the others. The verdict comes as one comment, edited on later pushes.
 
 The rules (`delta`, `k`, `budgets`, `prices`) come from the target branch's `gate.yaml`, so editing the rules in a
 request does not loosen that request's gate: new rules apply after merge, and the comment says when a request changes
-them, adds or removes a pipeline, or changes a test set. Commit the price file: a file that `prepare` makes is read
+them, adds a pipeline or changes a test set. A request that removes a pipeline (or renames it, which looks the same)
+fails: no version of it was compared, so a maintainer merges it over the check if that is intended. Commit the price file: a file that `prepare` makes is read
 after `prepare` has run. The gate matches pipelines by name: a pipeline the target branch's
 `gate.yaml` lacks gets `no base version` (the candidate runs alone; its score and budget are reported and the check
 passes), and so does every pipeline when the target branch has no `gate.yaml` and no file at the config's path. A new

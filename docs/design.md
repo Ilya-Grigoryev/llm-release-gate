@@ -37,8 +37,10 @@ agent over a booking system, alone on a ticket or in a chat with a simulated use
   call may succeed later and `Fatal` when no call can. The gate's code imports no pipeline; the config names it by
   import path.
 - **Version** (`PipelineConfig`, `load_config(path)`): `pipeline`, `model`, `prompt` (a file or named files), `input`,
-  `params`, `max_retries`, `timeout_s`, and `command` for `pipeline: command`. `config_hash(config)` covers every field,
-  the bytes of each prompt file and the module's `VERSION`.
+  `params`, `max_retries`, `timeout_s`, and `command` for `pipeline: command`. `config_hash(config)` covers every field
+  and the bytes of each prompt file; `version.version_hash(path)` adds the project's code (D-025): the files git tracks
+  in the project, as on disk, but documentation, CI, `gate.yaml`, its `ignore`, test sets and other pipelines' files.
+  Records carry it as `config_hash`, so resuming, pairing, the dashboard and `unchanged` share one notion of a version.
 - **Any program** (`pipeline: command`, `command: [program, args]`; [protocol.md](protocol.md), `protocol.schema.json`): one JSON request on stdin (case id, input paths, the
   version; never the expected values), one JSON answer on stdout (`output`, optionally tokens, model and a trace). Exit 75
   and a timeout retry; 78, 126, 127 and a program that cannot start stop the run; any other non-zero code fails the run.
@@ -269,12 +271,13 @@ sequenceDiagram
 
 ## The record of a run
 
-One JSON line per (case, repetition), record version 5:
+One JSON line per (case, repetition), record version 6:
 
 | Field | Meaning |
 |---|---|
 | `record_version` | format of the record |
-| `config_hash`, `set_hash` | the version and the test set; runs on different sets are never paired |
+| `config_hash`, `set_hash` | the version (config, prompts, code) and the test set; runs on different sets are never paired |
+| `commit` | the project's commit, `+dirty` with uncommitted edits; to find the code, not to compare |
 | `case`, `rep`, `run_id`, `timestamp` | which run, of which invocation, when (UTC) |
 | `requested_model` | the model the config asked for |
 | `prices_hash` | hash of the price table the runner priced `usage` with, `null` without one |

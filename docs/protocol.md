@@ -111,8 +111,8 @@ the kill: stop it in the program.
 
 ## Versions
 
-`command` is part of the version and its hash; the program's code is not. When a code change changes what the model
-gets, bump a number in `params` (`params: {version: 2}`).
+`command` is part of the version and its hash, and so is the program's code: the gate hashes the files git tracks in
+the project (README, "Running a version").
 
 Within protocol 1 the gate may add request fields and read new optional answer fields: ignore request fields you do
 not know. A change that breaks programs gets a new `protocol` number.
