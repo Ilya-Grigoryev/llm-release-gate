@@ -59,7 +59,7 @@ export default async function Run(props: PageProps<"/[owner]/[repo]/runs/[id]">)
         <div className="text-lg font-medium">
           <Outcome value={run.outcome} />
         </div>
-        {v ? (
+        {v && run.outcome !== "unchanged" ? (
           <>
             <p className="mt-2 text-sm text-ink-2">{v.rule}</p>
             <dl className="mt-4 grid grid-cols-2 gap-4 text-sm sm:grid-cols-4">

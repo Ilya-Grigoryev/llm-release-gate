@@ -224,7 +224,8 @@ they are gets `unchanged` and costs nothing. The verdict comes as one comment, e
 the records as an artifact, and the golden set's case files and text inputs as a second one for 30 days
 (`cases: false` leaves it out), so the [dashboard](#dashboard) can show what each case asked. It fails the job with the
 gate's verdict; the job only advises until it is made a required check. With several pipelines in `gate.yaml`, add one
-step per pipeline with `pipeline: NAME`; each gets its own comment and artifact. A golden set that stays out of git is
+step per pipeline with `pipeline: NAME` and `if: ${{ !cancelled() }}` on all but the first, so a block in one does not
+skip the others; each gets its own comment and artifact. A golden set that stays out of git is
 fetched or built in a step before the gate; if that step fails, the gate does not run and the request gets no comment.
 
 While this repository is private, only repositories of its owner can use it: the owner shares its actions with them
@@ -232,7 +233,7 @@ While this repository is private, only repositories of its owner can use it: the
 the public release.
 
 Three projects use it, each with its own `.github/workflows/ci.yml`: [receipt-intake](https://github.com/Ilya-Grigoryev/receipt-intake)
-(about $0.06 a pull request), [workbench-support](https://github.com/Ilya-Grigoryev/workbench-support) ($0.04) and
+(about $0.06 a pull request), [workbench-support](https://github.com/Ilya-Grigoryev/workbench-support) ($0.14) and
 [telecom-support](https://github.com/Ilya-Grigoryev/telecom-support) ($0.20).
 
 Outside GitHub Actions the gate's command does the work, from the repository's root. `llm-release-gate pr --base

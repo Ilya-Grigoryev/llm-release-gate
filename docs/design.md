@@ -228,27 +228,33 @@ changed ones first; a case's answer, checks and steps on both sides.
 sequenceDiagram
     participant CI as CI job
     participant C as comment.py
-    participant SH as pr.sh
+    participant SH as pr (gate.yaml)
     participant RB as runner (base, target branch)
     participant RC as runner (candidate, this request)
     participant AD as adapter + model
     participant G as gate
     CI->>C: --check: can comment
-    CI->>CI: download and validate the golden set
-    CI->>SH: base revision, example, config, golden set
-    SH->>SH: worktree of the target branch
-    par base, with the target branch's code
-        SH->>RB: one run per case
-        RB->>AD: run(case), trace current
-        AD-->>RB: Answer + steps
-    and candidate, with this request's code
-        SH->>RC: one run per case
-        RC->>AD: run(case), trace current
-        AD-->>RC: Answer + steps
+    CI->>CI: download or build the golden set
+    CI->>SH: --base revision, --pipeline
+    SH->>SH: copy the set's text files, check it against its manifest
+    SH->>SH: worktree of the target branch, prepare and sync both trees
+    SH->>SH: each tree's gate hashes the version
+    alt same hash
+        SH-->>CI: unchanged, exit 0, nothing runs
+    else the request changes the version
+        par base, with the target branch's code
+            SH->>RB: k runs per case
+            RB->>AD: run(case), trace current
+            AD-->>RB: Answer + steps
+        and candidate, with this request's code
+            SH->>RC: k runs per case
+            RC->>AD: run(case), trace current
+            AD-->>RC: Answer + steps
+        end
+        SH->>G: base.jsonl, candidate.jsonl, --golden, delta, prices, budgets
+        G->>G: load arms, rescore, pair, verdict, cost
+        G-->>SH: comment.md, verdict.json, exit code
     end
-    SH->>G: base.jsonl, candidate.jsonl, --golden, --prices
-    G->>G: load arms, rescore, pair, verdict, cost
-    G-->>SH: comment.md, verdict.json, exit code
     CI->>C: comment.md
     C->>C: create or edit the one gate comment
     CI->>CI: keep records and logs as artifacts
