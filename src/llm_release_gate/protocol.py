@@ -6,14 +6,17 @@ from typing import Any
 
 import jsonschema
 
-PROTOCOL = 1
 SCHEMA = json.loads((Path(__file__).parent / "protocol.schema.json").read_text())
+PROTOCOL = SCHEMA["$defs"]["request"]["properties"]["protocol"]["const"]
 
-# JSON Schema counts 3.0 as an integer; a token count or an attempt number must be written as 3
+# JSON's numbers only: JSON Schema counts 3.0 as an integer (a token count must be written 3) and a Decimal as a number
 Validator = jsonschema.validators.extend(
     jsonschema.Draft202012Validator,
-    type_checker=jsonschema.Draft202012Validator.TYPE_CHECKER.redefine(
-        "integer", lambda _, value: type(value) is int
+    type_checker=jsonschema.Draft202012Validator.TYPE_CHECKER.redefine_many(
+        {
+            "integer": lambda _, value: type(value) is int,
+            "number": lambda _, value: type(value) in (int, float),
+        }
     ),
 )
 VALIDATORS = {
@@ -21,11 +24,15 @@ VALIDATORS = {
 }
 
 
-def errors(instance: Any, part: str) -> list[str]:
-    """What breaks the schema's `part` (request, answer, trace, step), each with the path to the field."""
+def errors(instance: Any, part: str, at: str = "") -> list[str]:
+    """What breaks the schema's `part` (request, answer, trace, step), each with the path to the field from `at`."""
+    return describe(VALIDATORS[part], instance, at)
+
+
+def describe(validator: Any, instance: Any, at: str = "") -> list[str]:
     found = []
-    for e in VALIDATORS[part].iter_errors(instance):
-        where = ".".join(str(p) for p in e.absolute_path)
+    for e in validator.iter_errors(instance):
+        where = ".".join(str(p) for p in (*([at] if at else []), *e.absolute_path))
         if e.validator == "required":
             found += [
                 f"missing {where + '.' if where else ''}{k}"

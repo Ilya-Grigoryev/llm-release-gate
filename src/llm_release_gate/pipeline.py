@@ -104,6 +104,8 @@ def load_config(path: Path) -> PipelineConfig:
         raise ValueError(f"{path}: max_retries must be an integer >= 0")
     if type(timeout) not in (int, float) or not 0 < timeout < math.inf:
         raise ValueError(f"{path}: timeout_s must be a finite number > 0")
+    if not isinstance(raw["input"], str):
+        raise ValueError(f"{path}: input must be a name, got {raw['input']!r}")  # noqa: TRY004 - a config error like the others
     if not isinstance(raw["model"], str) or not raw["model"]:
         raise ValueError(f"{path}: model must be a name, got {raw['model']!r}")
     command = raw.get("command")

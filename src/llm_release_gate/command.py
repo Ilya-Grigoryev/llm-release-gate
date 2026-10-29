@@ -150,20 +150,35 @@ def keep_trace(out: str) -> None:
 
 
 def record(sent: Any) -> None:
-    """Put the program's trace into the current one; a step that breaks the format fails the run."""
-    if found := protocol.errors(sent, "trace"):
-        raise ValueError(f"answer: trace: {'; '.join(found)}")
+    """Put the program's trace into the current one, step by step: a broken step fails the run, the steps before it
+    were paid for and stay."""
+    steps = sent.get("steps", []) if isinstance(sent, dict) else []
+    outer = (
+        {**sent, "steps": []}
+        if isinstance(sent, dict) and isinstance(steps, list)
+        else sent
+    )
+    if found := protocol.errors(outer, "trace", at="trace"):
+        raise ValueError(f"answer: {'; '.join(found)}")
     t = trace.current()
+    for i, step in enumerate(steps):
+        if found := protocol.errors(step, "step", at=f"trace.steps.{i}"):
+            raise ValueError(f"answer: {'; '.join(found)}")
+        if t is not None:
+            fields = {
+                k: v
+                for k, v in step.items()
+                if k
+                not in (
+                    "kind",
+                    "actor",
+                    "seq",
+                    "run_attempt",
+                )  # the runner numbers steps
+            }
+            t.step(step["kind"], step["actor"], **fields)
     if t is None or sent is None:
         return
-    for step in sent.get("steps", []):
-        fields = {
-            k: v
-            for k, v in step.items()
-            if k
-            not in ("kind", "actor", "seq", "run_attempt")  # the runner numbers steps
-        }
-        t.step(step.get("kind"), step.get("actor"), **fields)
     t.final_state = sent.get("final_state", t.final_state)
     t.state_change = sent.get("state_change", t.state_change)
     t.stop = sent["stop"] if sent.get("stop") is not None else t.stop

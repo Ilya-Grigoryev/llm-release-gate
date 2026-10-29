@@ -140,6 +140,12 @@ def test_a_failed_exit_keeps_the_steps_the_program_paid_for(tmp_path, mode, stop
     ] and t.stop == stop
 
 
+def test_a_broken_step_fails_the_run_and_the_steps_before_it_stay(tmp_path):
+    t, error = traced(config(tmp_path, "halfbroken"))
+    assert isinstance(error, ValueError) and "trace.steps.1" in str(error)
+    assert [(s["kind"], s["tokens_in"]) for s in t.steps] == [("llm", 12)]
+
+
 def test_a_broken_trace_after_a_failed_exit_leaves_a_note_and_keeps_the_exit_error(
     tmp_path,
 ):
@@ -224,8 +230,16 @@ def test_model_null_stays_none_and_raw_that_is_not_text_is_json(tmp_path):
 @pytest.mark.parametrize(
     "mode, error, match",
     [
-        ("badstop", ValueError, "trace: stop: 3 is not of type 'string', 'null'"),
-        ("badts", ValueError, "trace: steps.0.ts: 5 is not of type 'string', 'null'"),
+        (
+            "badstop",
+            ValueError,
+            "answer: trace.stop: 3 is not of type 'string', 'null'",
+        ),
+        (
+            "badts",
+            ValueError,
+            "answer: trace.steps.0.ts: 5 is not of type 'string', 'null'",
+        ),
     ],
 )
 def test_trace_fields_of_the_wrong_type_fail_the_run(tmp_path, mode, error, match):

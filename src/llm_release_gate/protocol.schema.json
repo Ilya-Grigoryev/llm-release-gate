@@ -1,7 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/Ilya-Grigoryev/llm-release-gate/blob/main/src/llm_release_gate/protocol.schema.json",
-  "title": "llm-release-gate pipeline protocol, version 1",
+  "title": "llm-release-gate pipeline protocol",
   "description": "The gate writes one request to a program's stdin and reads one answer from its stdout. docs/protocol.md explains the fields and the exit codes. Integers are integer literals: 3.0 is not a token count.",
   "$defs": {
     "request": {

@@ -73,3 +73,13 @@ def test_the_documents_node_program_answers_through_pipeline_command(tmp_path):
 )
 def test_counts_are_integer_literals_and_steps_carry_their_fields(answer, error):
     assert error in protocol.errors(answer, "answer")
+
+
+def test_a_decimal_is_not_a_json_number():
+    from decimal import Decimal
+
+    step = {"kind": "llm", "actor": "agent", "status": "ok", "model": "m"}
+    step |= {"tokens_in": 1, "tokens_out": 1, "cost_usd": Decimal("0.01")}
+    assert protocol.errors(step, "step") == [
+        "cost_usd: Decimal('0.01') is not of type 'number', 'null'"
+    ]

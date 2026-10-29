@@ -15,6 +15,7 @@ case "$request" in
   *'"mode": "badstep"'*) echo '{"output": {}, "trace": {"steps": [{"kind": "llm", "actor": "robot"}]}}'; exit 0 ;;
   *'"mode": "latin1"'*) printf 'caf\351 au lait\n' >&2; printf '{"output": {"note": "caf\351"}}\n'; exit 0 ;;
   *'"mode": "bare"'*) echo '{"output": {"total": "12.50"}}'; exit 0 ;;
+  *'"mode": "halfbroken"'*) echo "{\"output\": {}, \"trace\": {\"steps\": [$step, {\"kind\": \"tool\", \"actor\": \"agent\"}]}}"; exit 0 ;;
   *'"mode": "otherprotocol"'*) echo '{"protocol": 2, "output": {}}'; exit 0 ;;
   *'"mode": "list"'*) echo '[1, 2]'; exit 0 ;;
   *'"mode": "nooutput"'*) echo '{"raw": "forgot it"}'; exit 0 ;;

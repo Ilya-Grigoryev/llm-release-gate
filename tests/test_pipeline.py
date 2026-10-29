@@ -44,6 +44,7 @@ def test_load_config_resolves_prompt_next_to_config(tmp_path):
             "pipeline: replay_pipeline\nmodel: gpt-4.1-mini-2025-04-14\nprompt: p.md\ninput: text\n"
             "temprature: 0\n"
         ),  # typo
+        "pipeline: replay_pipeline\nmodel: gpt-4.1-mini-2025-04-14\nprompt: p.md\ninput: 5\n",  # input not a name
     ],
 )
 def test_load_config_rejects_bad_files(tmp_path, body):
