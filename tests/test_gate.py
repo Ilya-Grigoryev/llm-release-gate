@@ -351,3 +351,32 @@ def test_the_json_report_lists_models_without_a_date(tmp_path, monkeypatch):
     assert code == 0 and js.loads(out.read_text())["models_without_date"] == [
         "gpt-6-luna"
     ]
+
+
+def test_without_a_base_the_candidate_is_reported_and_passes(tmp_path, monkeypatch):
+    candidate = runs(tmp_path, monkeypatch, "candidate", 0, Fixed())
+    prices = tmp_path / "prices.yaml"
+    prices.write_text("gpt-4.1-mini-2025-04-14: [1, 1]\n")
+    report, comment = tmp_path / "v.json", tmp_path / "c.md"
+    args = ["--no-base", "--candidate", str(candidate), "--prices", str(prices)]
+    args += [
+        "--max-cost-per-run",
+        "0.000001",
+        "--json",
+        str(report),
+        "--markdown",
+        str(comment),
+    ]
+    assert gate.main(args) == gate.PASS
+    verdict = json.loads(report.read_text())
+    assert verdict["outcome"] == "no base" and verdict["candidate_mean"] == 1.0
+    assert verdict["budget"]["over"] and verdict["base_config"] is None
+    assert "does not block on it" in comment.read_text()
+
+
+@pytest.mark.parametrize(
+    "args", [["--candidate", "c"], ["--base", "b", "--no-base", "--candidate", "c"]]
+)
+def test_a_base_or_no_base_is_required(args):
+    with pytest.raises(SystemExit):
+        gate.main(args)

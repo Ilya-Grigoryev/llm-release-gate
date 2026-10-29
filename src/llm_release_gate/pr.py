@@ -237,9 +237,11 @@ def ruled(
     candidate: Path,
     base: Path | None,
     prices_copy: Path,
+    requested: dict,
 ) -> tuple[project.Pipeline, str | None, str | None, list[str]]:
     """`p` under the target branch's rules (D-024), the path of its prices, the target branch's config of the pipeline
-    (None: there is no base version) and notes for the comment.
+    (None: there is no base version) and notes for the comment; `requested` are the request's pipelines, to name the
+    ones it removes.
 
     With a gate.yaml on the target branch the pipeline is matched by name, so renaming a config file does not drop the
     base version; without one, by the request's config path."""
@@ -248,36 +250,53 @@ def ruled(
     if rules is None:
         return p, str(candidate / p.prices) if p.prices else None, p.config, []
     r, own = rules.rules(p), rules.pipelines.get(p.name)
+    theirs = None
+    if (
+        r.prices
+    ):  # the copy taken before `prepare`, else a file `prepare` made (not in git)
+        theirs = (
+            prices_copy / r.prices
+            if (prices_copy / r.prices).is_file()
+            else base / r.prices
+        )
+    notes = [
+        f"This request removes `{gone}` from gate.yaml, so the gate no longer runs it."
+        for gone in sorted(set(rules.pipelines) - set(requested))
+    ]
     if own is None:
-        notes = [
+        notes.append(
             f"`{p.name}` is new in gate.yaml: the target branch's top-level rules apply until merge."
-        ]
+        )
     else:
         changed = any(getattr(r, k) != getattr(p, k) for k in project.SETTINGS)
         if r.prices and p.prices and not changed:
-            mine, theirs = candidate / p.prices, prices_copy / r.prices
+            mine = candidate / p.prices
             changed = not (
                 mine.is_file()
                 and theirs.is_file()
                 and mine.read_bytes() == theirs.read_bytes()
             )
-        notes = []
         if changed:
             notes.append(
                 f"⚙️ This request changes the gate's rules for `{p.name}` (gate.yaml or its prices). They apply "
                 "after merge; until then the gate keeps the target branch's."
             )
-        own_set = base / own.golden
-        if own_set.is_dir() and check(own_set)[0] not in (
-            None,
-            check(candidate / p.golden)[0],
+        own_set, new_set = base / own.golden, candidate / p.golden
+        if (
+            own_set.is_dir()
+            and new_set.is_dir()
+            and check(own_set)[0]
+            not in (
+                None,
+                check(new_set)[0],
+            )
         ):
             notes.append(
                 f"This request changes the test set of `{p.name}`; both versions run on the request's set."
             )
     return (
         r,
-        str(prices_copy / r.prices) if r.prices else None,
+        str(theirs) if theirs else None,
         own and own.config,
         notes,
     )
@@ -392,15 +411,18 @@ def main(argv: list[str] | None = None) -> int:
                     shutil.copyfile(log, dest / log.name)
             notes = [rules_problem] if rules_problem else []
             try:
-                golden, set_hash = checked_set(
-                    settings.pipelines[name], candidate, dest
-                )
-                if problem:
-                    raise problem
                 p, prices, base_config, more = ruled(
-                    settings.pipelines[name], rules, candidate, base, prices_copy
+                    settings.pipelines[name],
+                    rules,
+                    candidate,
+                    base,
+                    prices_copy,
+                    settings.pipelines,
                 )
                 notes += more
+                golden, set_hash = checked_set(p, candidate, dest)
+                if problem:
+                    raise problem
                 codes[name] = one(
                     p, golden, set_hash, candidate, base, base_config, prices, dest
                 )
@@ -425,12 +447,6 @@ def main(argv: list[str] | None = None) -> int:
             capture_output=True,
             check=False,
         )
-    if rules and not args.pipeline:
-        for name in sorted(set(rules.pipelines) - set(settings.pipelines)):
-            print(
-                f"warning: this request removes `{name}` from gate.yaml, so the gate did not run it",
-                file=sys.stderr,
-            )
     return min(codes.values(), key=WORST.index)
 
 

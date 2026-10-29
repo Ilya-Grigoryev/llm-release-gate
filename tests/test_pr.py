@@ -349,3 +349,32 @@ def test_the_project_may_be_given_from_another_directory(
         )
         == pr.QUALITY_FAIL
     )
+
+
+def test_a_removed_pipeline_and_changed_rules_are_named_even_on_an_infra_error(repo):
+    (repo / "gate.yaml").write_text(
+        GATE + "  old: {config: demo.yaml, golden: golden}\n"
+    )
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "two pipelines")
+    version(
+        repo, "bare", GATE.replace("golden: golden", "golden: nope") + "delta: 100\n"
+    )
+    code, out = gate(repo)
+    comment = (out / "comment.md").read_text()
+    assert code == pr.INFRA_ERROR and "no golden set at nope" in comment
+    assert (
+        "changes the gate's rules for `demo`" in comment
+        and "removes `old` from gate.yaml" in comment
+    )
+
+
+def test_prices_that_prepare_makes_are_read_after_it(repo):
+    make = "prepare: [sh, -c, 'echo \"fake-model-2026-01-01: [1, 1]\" > prices.yaml']\nprices: prices.yaml\n"
+    (repo / "gate.yaml").write_text(GATE + make)
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "prices made by prepare")
+    version(repo, "answer-again", GATE + make)
+    code, out = gate(repo)
+    assert code == pr.PASS
+    assert json.loads((out / "verdict.json").read_text())["cost_usd"]["candidate"] > 0
