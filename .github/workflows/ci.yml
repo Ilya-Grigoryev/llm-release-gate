@@ -21,7 +21,7 @@ jobs:
       - name: test
         run: uv run pytest
       - name: validate
-        run: uv run python -m llm_release_gate.golden validate tests/fixtures/golden
+        run: uv run llm-release-gate golden validate tests/fixtures/golden
 
   dashboard:
     runs-on: ubuntu-latest

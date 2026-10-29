@@ -21,7 +21,7 @@ test:
 validate:
   extends: .python
   script:
-    - uv run python -m llm_release_gate.golden validate tests/fixtures/golden
+    - uv run llm-release-gate golden validate tests/fixtures/golden
 
 dashboard:
   image: node:22-slim

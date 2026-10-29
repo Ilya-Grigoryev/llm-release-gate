@@ -1,94 +1,77 @@
 name: llm-release-gate
-description: Run the target branch's version and this pull request's on a golden set, compare them and comment the verdict.
+description: Run the target branch's version and this pull request's of a pipeline in gate.yaml, compare them and comment the verdict.
 inputs:
-  config:
-    description: The version's config, relative to the project's directory.
-    required: true
-  golden:
-    description: The golden set's directory, relative to the project's directory.
-    required: true
-  manifest:
-    description: A manifest the golden set must match (ids and hash), relative to the project's directory.
+  pipeline:
+    description: The pipeline in gate.yaml to gate; may be left out when gate.yaml has one.
     default: ""
   project-dir:
-    description: The project's directory in the repository.
+    description: The project's directory in the repository, with gate.yaml.
     default: "."
-  name:
-    description: Names the comment and the artifact, so that several pipelines of one request keep one comment each.
-    default: ""
   github-token:
     description: Writes the comment; needs pull-requests write.
     default: ${{ github.token }}
   cases:
     description: Upload the golden set's text files (cases and text inputs) as a second artifact, for a dashboard to show.
     default: "true"
-  inputs-url:
-    description: >-
-      Where a reader finds the set's other files (images, say), which the artifact leaves out: a URL with `{path}`, the
-      file's path in the set, or `{name}`, its file name. A dashboard links to it.
-    default: ""
   cases-retention-days:
     description: Days GitHub keeps that artifact.
     default: "30"
 runs:
   using: composite
   steps:
-    - name: can comment
+    - name: pipeline
+      id: pipeline
       shell: bash
-      working-directory: ${{ inputs.project-dir }}
       env:
-        GITHUB_TOKEN: ${{ inputs.github-token }}
+        PROJECT: ${{ inputs.project-dir }}
+        PIPELINE: ${{ inputs.pipeline }}
       run: |
         command -v uv > /dev/null || { echo "::error::run Ilya-Grigoryev/llm-release-gate/setup first"; exit 1; }
-        uv run python -m llm_release_gate.comment --check
-    - name: golden set
+        names=$(uv run --project "$PROJECT" llm-release-gate pr --project "$PROJECT" --list) || exit 1
+        if [ -z "$PIPELINE" ]; then
+          [ "$(printf '%s\n' "$names" | wc -l)" -eq 1 ] || { echo "::error::gate.yaml has several pipelines: name one in \`pipeline\`"; exit 1; }
+          PIPELINE=$names
+        fi
+        echo "name=$PIPELINE" >> "$GITHUB_OUTPUT"
+        echo "out=$RUNNER_TEMP/llm-release-gate/$PIPELINE" >> "$GITHUB_OUTPUT"
+    - name: can comment
       shell: bash
-      working-directory: ${{ inputs.project-dir }}
       env:
-        GOLDEN: ${{ inputs.golden }}
-        MANIFEST: ${{ inputs.manifest }}
-      run: uv run python -m llm_release_gate.golden validate "$GOLDEN" ${MANIFEST:+--manifest "$MANIFEST"}
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        PROJECT: ${{ inputs.project-dir }}
+      run: uv run --project "$PROJECT" llm-release-gate comment --check
     - name: gate
       shell: bash
       env:
         PROJECT: ${{ inputs.project-dir }}
-        CONFIG: ${{ inputs.config }}
-        GOLDEN: ${{ inputs.golden }}
-        OUT: ${{ runner.temp }}/llm-release-gate${{ inputs.name != '' && format('-{0}', inputs.name) || '' }}
+        NAME: ${{ steps.pipeline.outputs.name }}
       run: |
-        rm -rf "$OUT"  # a second gate in the job starts from scratch
         git fetch --depth=1 origin "$GITHUB_BASE_REF"
-        uv run --project "$PROJECT" python -m llm_release_gate.pr FETCH_HEAD "$PROJECT" "$CONFIG" "$PROJECT/$GOLDEN" "$OUT"
+        uv run --project "$PROJECT" llm-release-gate pr --base FETCH_HEAD --project "$PROJECT" --pipeline "$NAME" \
+          --out "$RUNNER_TEMP/llm-release-gate"
     - name: comment
       if: ${{ !cancelled() }}
       shell: bash
       env:
         GITHUB_TOKEN: ${{ inputs.github-token }}
         PROJECT: ${{ inputs.project-dir }}
-        NAME: ${{ inputs.name }}
-        OUT: ${{ runner.temp }}/llm-release-gate${{ inputs.name != '' && format('-{0}', inputs.name) || '' }}
-      run: uv run --project "$PROJECT" python -m llm_release_gate.comment "$OUT/comment.md" ${NAME:+--name "$NAME"}
+        NAME: ${{ steps.pipeline.outputs.name }}
+        OUT: ${{ steps.pipeline.outputs.out }}
+      run: |  # no comment.md: the job failed before the gate ran, and the request still learns that
+        uv run --project "$PROJECT" llm-release-gate comment "$OUT/comment.md" ${NAME:+--name "$NAME"}
     - uses: actions/upload-artifact@v7
-      if: ${{ !cancelled() }}
+      if: ${{ !cancelled() && steps.pipeline.outputs.name != '' }}
       with:
-        name: release-gate${{ inputs.name != '' && format('-{0}', inputs.name) || '' }}-${{ github.run_attempt }}
+        name: release-gate-${{ steps.pipeline.outputs.name }}-${{ github.run_attempt }}
         path: |
-          ${{ runner.temp }}/llm-release-gate${{ inputs.name != '' && format('-{0}', inputs.name) || '' }}/*.jsonl
-          ${{ runner.temp }}/llm-release-gate${{ inputs.name != '' && format('-{0}', inputs.name) || '' }}/*.json
-          ${{ runner.temp }}/llm-release-gate${{ inputs.name != '' && format('-{0}', inputs.name) || '' }}/*.md
-          ${{ runner.temp }}/llm-release-gate${{ inputs.name != '' && format('-{0}', inputs.name) || '' }}/*.log
-    - name: cases
-      if: ${{ !cancelled() && inputs.cases == 'true' }}
-      shell: bash
-      env:
-        INPUTS_URL: ${{ inputs.inputs-url }}
-        OUT: ${{ runner.temp }}/llm-release-gate${{ inputs.name != '' && format('-{0}', inputs.name) || '' }}
-      run: |  # pr.sh copied only the set's text files
-        if [ -d "$OUT/cases" ] && [ -n "$INPUTS_URL" ]; then printf '%s\n' "$INPUTS_URL" > "$OUT/cases/inputs-url.txt"; fi
+          ${{ steps.pipeline.outputs.out }}/*.jsonl
+          ${{ steps.pipeline.outputs.out }}/*.json
+          ${{ steps.pipeline.outputs.out }}/*.md
+          ${{ steps.pipeline.outputs.out }}/*.log
     - uses: actions/upload-artifact@v7
-      if: ${{ !cancelled() && inputs.cases == 'true' }}
+      if: ${{ !cancelled() && steps.pipeline.outputs.name != '' && inputs.cases == 'true' }}
       with:
-        name: release-gate${{ inputs.name != '' && format('-{0}', inputs.name) || '' }}-${{ github.run_attempt }}-cases
-        path: ${{ runner.temp }}/llm-release-gate${{ inputs.name != '' && format('-{0}', inputs.name) || '' }}/cases/
+        name: release-gate-${{ steps.pipeline.outputs.name }}-${{ github.run_attempt }}-cases
+        path: ${{ steps.pipeline.outputs.out }}/cases/
         retention-days: ${{ inputs.cases-retention-days }}
         if-no-files-found: ignore

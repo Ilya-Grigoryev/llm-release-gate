@@ -20,13 +20,13 @@ def test_actions_use_only_declared_inputs(path):
 
 def test_the_gate_action_runs_the_packaged_commands():
     text = (ROOT / "action.yml").read_text()
-    for module in (
-        "comment --check",
-        "golden validate",
-        "pr FETCH_HEAD",
-        'comment "$OUT/comment.md"',
+    for command in (
+        "llm-release-gate pr --project",
+        "llm-release-gate comment --check",
+        "llm-release-gate pr --base FETCH_HEAD",
+        'llm-release-gate comment "$OUT/comment.md"',
     ):
-        assert f"llm_release_gate.{module}" in text
+        assert command in text
 
 
 def _step(name):
@@ -34,12 +34,35 @@ def _step(name):
     return next(s for s in action["runs"]["steps"] if s.get("name") == name)
 
 
-@pytest.mark.parametrize("url", ["", "https://example.com/files/{name}"])
-def test_the_cases_step_says_where_the_other_files_are(tmp_path, url):
-    (tmp_path / "cases").mkdir()
-    env = {"INPUTS_URL": url, "OUT": str(tmp_path), "PATH": "/usr/bin:/bin"}
-    subprocess.run(["bash", "-c", _step("cases")["run"]], env=env, check=True)
-    written = tmp_path / "cases" / "inputs-url.txt"
-    assert written.exists() == bool(url)
-    if url:
-        assert written.read_text() == url + "\n"
+@pytest.mark.parametrize(
+    "names, pipeline, ok, name",
+    [("demo", "", True, "demo"), ("a\nb", "", False, None), ("a\nb", "b", True, "b")],
+)
+def test_the_action_finds_the_pipeline(tmp_path, names, pipeline, ok, name):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "uv").write_text(f"#!/bin/sh\nprintf '{names}\\n'\n")
+    (bin_dir / "uv").chmod(0o755)
+    output = tmp_path / "output"
+    env = {
+        "PATH": f"{bin_dir}:/usr/bin:/bin",
+        "PROJECT": ".",
+        "PIPELINE": pipeline,
+        "GITHUB_OUTPUT": str(output),
+        "RUNNER_TEMP": str(tmp_path),
+    }
+    done = subprocess.run(
+        ["bash", "-c", _step("pipeline")["run"]],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert (done.returncode == 0) == ok
+    if ok:
+        assert (
+            output.read_text()
+            == f"name={name}\nout={tmp_path}/llm-release-gate/{name}\n"
+        )
+    else:
+        assert "several pipelines" in done.stdout
