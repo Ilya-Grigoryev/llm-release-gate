@@ -33,10 +33,7 @@ SYNC = [
     "--quiet",
 ]  # each tree gets its own environment, its own gate included
 PYTHON = ["uv", "run", "--quiet", "python"]
-HASH = (
-    "import sys; from llm_release_gate.pipeline import config_hash, load_config; "
-    "print(config_hash(load_config(sys.argv[1])))"
-)
+HASH = "import sys; from llm_release_gate.version import version_hash; print(version_hash(sys.argv[1]))"
 WORST = (INFRA_ERROR, QUALITY_FAIL, BUDGET_FAIL, INCONCLUSIVE, PASS)
 TEXT = {".yaml", ".yml", ".json", ".txt", ".md", ".csv"}
 ENV = {k: v for k, v in os.environ.items() if k != "VIRTUAL_ENV"}
@@ -160,9 +157,8 @@ def unchanged(p: project.Pipeline, config_hash: str, set_hash: str, dest: Path) 
     write_comment(
         dest,
         "⏭ unchanged",
-        f"This request does not change `{p.name}`: its config, prompts and pipeline `VERSION` hash the same in both "
-        f"branches (`{config_hash[:12]}`), so nothing ran. A code change that changes what the model gets needs a new "
-        "`VERSION` in the adapter, or a new number in `params` for `pipeline: command`.",
+        f"This request does not change `{p.name}`: its config, prompts and code hash the same in both branches "
+        f"(`{config_hash[:12]}`), so nothing ran. Documentation, CI, gate.yaml and the paths it ignores do not count.",
     )
     return PASS
 
@@ -237,11 +233,9 @@ def ruled(
     candidate: Path,
     base: Path | None,
     prices_copy: Path,
-    requested: dict,
 ) -> tuple[project.Pipeline, str | None, str | None, list[str]]:
     """`p` under the target branch's rules (D-024), the path of its prices, the target branch's config of the pipeline
-    (None: there is no base version) and notes for the comment; `requested` are the request's pipelines, to name the
-    ones it removes.
+    (None: there is no base version) and notes for the comment.
 
     With a gate.yaml on the target branch the pipeline is matched by name, so renaming a config file does not drop the
     base version; without one, by the request's config path."""
@@ -259,10 +253,7 @@ def ruled(
             if (prices_copy / r.prices).is_file()
             else base / r.prices
         )
-    notes = [
-        f"This request removes `{gone}` from gate.yaml, so the gate no longer runs it."
-        for gone in sorted(set(rules.pipelines) - set(requested))
-    ]
+    notes = []
     if own is None:
         notes.append(
             f"`{p.name}` is new in gate.yaml: the target branch's top-level rules apply until merge."
@@ -376,7 +367,7 @@ def main(argv: list[str] | None = None) -> int:
         subprocess.run(
             ["git", "worktree", "prune"], cwd=root, capture_output=True, check=False
         )
-        problem, rules, rules_problem = None, None, None
+        problem, rules, rules_problem, removed = None, None, None, []
         prices_copy = out / ".base-prices"
         shutil.rmtree(prices_copy, ignore_errors=True)
         if subprocess.run(
@@ -393,6 +384,7 @@ def main(argv: list[str] | None = None) -> int:
                 try:
                     rules = project.load(base)
                     snapshot(rules, base, prices_copy)
+                    removed = sorted(set(rules.pipelines) - set(settings.pipelines))
                 except ValueError as e:
                     rules_problem = f"⚠️ The target branch's gate.yaml is not valid, so this run uses the request's rules: {e}"
             done = both(
@@ -417,7 +409,6 @@ def main(argv: list[str] | None = None) -> int:
                     candidate,
                     base,
                     prices_copy,
-                    settings.pipelines,
                 )
                 notes += more
                 golden, set_hash = checked_set(p, candidate, dest)
@@ -435,6 +426,12 @@ def main(argv: list[str] | None = None) -> int:
                 traceback.print_exc()
                 write_comment(
                     dest, "⚠️ infra error", f"The gate failed: {type(e).__name__}: {e}"
+                )
+                codes[name] = INFRA_ERROR
+            if removed:  # unchecked must not look like a pass: a renamed pipeline looks the same (D-025)
+                notes.append(
+                    f"❌ This request removes {', '.join(f'`{n}`' for n in removed)} from gate.yaml: no version of it "
+                    "was compared, so the check fails. If that is intended, merge over the check."
                 )
                 codes[name] = INFRA_ERROR
             with (dest / "comment.md").open("a") as f:

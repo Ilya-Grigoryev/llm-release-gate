@@ -10,8 +10,6 @@ from types import SimpleNamespace
 from llm_release_gate import trace
 from llm_release_gate.pipeline import Answer, Fatal, Retryable
 
-VERSION = 1
-
 
 def completion(content=None, calls=(), model="fake-model-2026-01-01", tokens=(100, 10)):
     message = SimpleNamespace(

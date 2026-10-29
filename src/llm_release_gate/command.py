@@ -20,7 +20,6 @@ from typing import Any
 from llm_release_gate import protocol, trace
 from llm_release_gate.pipeline import Answer, Case, Fatal, PipelineConfig, Retryable
 
-VERSION = 1
 RETRY = 75  # sysexits EX_TEMPFAIL
 STOP = (78, 126, 127)  # EX_CONFIG; the shell's "cannot execute" and "not found"
 

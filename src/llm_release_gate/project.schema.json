@@ -16,6 +16,14 @@
         "minLength": 1
       }
     },
+    "ignore": {
+      "description": "Glob patterns of project files that never change what the model gets, on top of documentation and CI; a change only there leaves every pipeline unchanged.",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
     "pipelines": {
       "description": "Pipeline name to its version and test set. The name labels the comment and the artifact.",
       "type": "object",

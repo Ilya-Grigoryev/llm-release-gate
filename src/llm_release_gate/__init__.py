@@ -1,3 +1,3 @@
-from importlib.metadata import version
+import importlib.metadata
 
-__version__ = version("llm-release-gate")
+__version__ = importlib.metadata.version("llm-release-gate")

@@ -155,19 +155,8 @@ def test_whole_floats_in_params_become_ints():
     assert plain_numbers(True) is True
 
 
-def test_config_hash_changes_with_the_pipeline_code_version(tmp_path, monkeypatch):
-    import replay_pipeline
-
-    (tmp_path / "a").mkdir()
-    before = config_at(tmp_path / "a")
-    monkeypatch.setattr(replay_pipeline, "VERSION", replay_pipeline.VERSION + 1)
-    assert config_at(tmp_path / "a") != before
-
-
 ADAPTER = """
 from llm_release_gate.pipeline import Answer
-
-VERSION = 3
 
 
 class Echo:
@@ -225,9 +214,8 @@ def test_a_bad_pipeline_name_is_a_config_error(tmp_path, monkeypatch, name, mess
     config = load_config(
         write(root / "c.yaml", CONFIG.replace("replay_pipeline", repr(name)))
     )
-    for load in (config_hash, load_pipeline):
-        with pytest.raises(ValueError, match=re.escape(message)):
-            load(config)
+    with pytest.raises(ValueError, match=re.escape(message)):
+        load_pipeline(config)
 
 
 def test_load_config_accepts_a_model_without_a_date(tmp_path):

@@ -18,6 +18,7 @@ from llm_release_gate.pipeline import (
     load_config,
 )
 from llm_release_gate.runner import read_records, results, run
+from llm_release_gate.version import commit, version_hash
 
 FIXTURES = Path(__file__).parent / "fixtures"
 [SYNTH] = load_cases(FIXTURES / "golden")
@@ -355,9 +356,8 @@ def test_cli_stamps_every_record_with_both_hashes(tmp_path, capsys):
     runner.main([*args, "-k", "2", "--out", str(out)])
     records = read_records(out)
     assert len(records) == 2
-    assert {r["config_hash"] for r in records} == {
-        config_hash(load_config(config_path))
-    }
+    assert {r["config_hash"] for r in records} == {version_hash(config_path)}
+    assert {r["commit"] for r in records} == {commit(config_path)}
     assert {r["set_hash"] for r in records} == {validate(FIXTURES / "golden")[0]}
     assert "2 records written, 2 of 2 done, mean score 1.000" in capsys.readouterr().out
     runner.main([*args, "-k", "2", "--out", str(out)])  # nothing left to pay for

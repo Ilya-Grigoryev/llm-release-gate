@@ -277,23 +277,6 @@ def test_the_command_is_part_of_the_version(tmp_path):
     assert config_hash(a) != config_hash(b)
 
 
-def test_configs_without_a_command_keep_their_hash():
-    from dataclasses import asdict
-
-    from llm_release_gate.hashing import canonical_hash, file_hash
-    from llm_release_gate.pipeline import pipeline_module
-
-    cfg = load_config(FIXTURES / "config.yaml")
-    old = {
-        k: v for k, v in asdict(cfg).items() if k != "command"
-    }  # the fields before `command` existed
-    old.update(
-        prompt=file_hash(cfg.prompt),
-        pipeline_version=getattr(pipeline_module(cfg.pipeline), "VERSION", None),
-    )
-    assert config_hash(cfg) == canonical_hash(old)
-
-
 @pytest.mark.parametrize(
     "extra, match",
     [

@@ -7,7 +7,6 @@ from pathlib import Path
 
 from llm_release_gate.pipeline import Answer
 
-VERSION = 1
 ANSWERS = Path(__file__).parent / "fixtures" / "replay" / "synth-001.jsonl"
 
 

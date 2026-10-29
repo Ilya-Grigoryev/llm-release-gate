@@ -156,20 +156,14 @@ def pipeline_module(name: str) -> ModuleType:
 
 
 def config_hash(config: PipelineConfig) -> str:
-    """Identity of a pipeline version: every config field, the bytes of each prompt file and the
-    pipeline module's VERSION, which the module bumps when its code changes what the model is asked."""
-    module = pipeline_module(config.pipeline)
+    """Every config field and the bytes of each prompt file; `version.version_hash` adds the project's code."""
     prompt = config.prompt
-    fields = asdict(config)
-    if fields["command"] is None:  # configs from before `command` keep their hash
-        del fields["command"]
     return canonical_hash(
         {
-            **fields,
+            **asdict(config),
             "prompt": file_hash(prompt)
             if isinstance(prompt, Path)
             else {name: file_hash(p) for name, p in prompt.items()},
-            "pipeline_version": getattr(module, "VERSION", None),
         }
     )
 

@@ -378,3 +378,31 @@ def test_prices_that_prepare_makes_are_read_after_it(repo):
     code, out = gate(repo)
     assert code == pr.PASS
     assert json.loads((out / "verdict.json").read_text())["cost_usd"]["candidate"] > 0
+
+
+def test_a_change_to_the_code_alone_runs_both_versions(repo):
+    (repo / "src").mkdir()
+    (repo / "src" / "agent.py").write_text("print(1)\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "code")
+    (repo / "src" / "agent.py").write_text(
+        "print(2)\n"
+    )  # config and prompts as they were
+    code, out = gate(repo)
+    assert code == pr.PASS
+    assert {p.name for p in out.glob("*.jsonl")} == {"base.jsonl", "candidate.jsonl"}
+
+
+def test_a_request_that_removes_a_pipeline_fails(repo):
+    (repo / "gate.yaml").write_text(
+        GATE + "  old: {config: demo.yaml, golden: golden}\n"
+    )
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "two pipelines")
+    version(repo, "answer")  # gate.yaml without `old`, the rest as it was
+    code, out = gate(repo)
+    assert code == pr.INFRA_ERROR
+    assert (
+        "removes `old` from gate.yaml: no version of it was compared"
+        in (out / "comment.md").read_text()
+    )

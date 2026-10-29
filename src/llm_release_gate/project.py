@@ -32,6 +32,7 @@ class Project:
     prepare: tuple[str, ...] | None
     pipelines: dict[str, Pipeline]
     defaults: dict = field(default_factory=dict)  # the settings at the top
+    ignore: tuple[str, ...] = ()
 
     def rules(self, p: Pipeline) -> Pipeline:
         """`p` under this project's rules (D-024): its own entry's settings, or the top ones for a pipeline it lacks."""
@@ -73,4 +74,9 @@ def load(directory: Path) -> Project:
             p.get("inputs-url"),
             **settings,
         )
-    return Project(tuple(raw["prepare"]) if "prepare" in raw else None, pipelines, top)
+    return Project(
+        tuple(raw["prepare"]) if "prepare" in raw else None,
+        pipelines,
+        top,
+        tuple(raw.get("ignore", ())),
+    )

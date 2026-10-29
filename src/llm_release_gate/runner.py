@@ -25,15 +25,15 @@ from llm_release_gate.pipeline import (
     Fatal,
     Pipeline,
     Retryable,
-    config_hash,
     load_config,
     load_pipeline,
 )
 from llm_release_gate.prices import Prices, load_prices
 from llm_release_gate.trace import Trace, active, usage
+from llm_release_gate.version import commit, version_hash
 
 # 2: scorer_version; 3: trace, usage, wall_s; 4: requested_model; 5: prices_hash
-RECORD_VERSION = 5
+RECORD_VERSION = 6  # 6: config_hash covers the project's code (D-025), commit
 Scorer = Callable[[Case, Answer], dict[str, bool | float | None]]
 EMPTY_ANSWER = {f.name: None for f in fields(Answer)}
 
@@ -119,6 +119,7 @@ def run(
     wait: Callable[[float], bool] | None = None,
     prices: Prices | None = None,
     model: str | None = None,
+    commit: str | None = None,
 ) -> int:
     """Append the records missing from `out` and return how many were written.
 
@@ -127,7 +128,7 @@ def run(
     On Ctrl-C or a Fatal error the queued calls are dropped, backoffs are cut short and
     the calls already running finish and are written. A custom `wait` replaces the
     stop-aware default and is not cut short. `prices` puts a list price on each model step;
-    `model` is the model the config asks for, kept next to the one the provider reports.
+    `model` is the model the config asks for, kept next to the one the provider reports; `commit` is the project's.
     """
     if type(max_retries) is not int or max_retries < 0:
         raise ValueError(f"max_retries must be a non-negative int, got {max_retries!r}")
@@ -175,6 +176,7 @@ def run(
             "record_version": RECORD_VERSION,
             "config_hash": config_hash,
             "set_hash": set_hash,
+            "commit": commit,
             "case": case.id,
             "rep": rep,
             "run_id": run_id,
@@ -293,7 +295,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         sys.exit("\n".join(errors))
     try:
         config = load_config(args.config)
-        hashes = {"config_hash": config_hash(config), "set_hash": set_hash}
+        hashes = {"config_hash": version_hash(args.config), "set_hash": set_hash}
         pipeline = load_pipeline(config)
         prices = load_prices(args.prices) if args.prices else None
     except (
@@ -313,6 +315,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             max_retries=config.max_retries,
             prices=prices,
             model=config.model,
+            commit=commit(args.config),
             **hashes,
         )
     except Fatal as e:
