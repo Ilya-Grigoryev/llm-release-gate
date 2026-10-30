@@ -164,3 +164,15 @@ def test_only_a_cache_with_runs_is_saved(tmp_path, files, saved):
     }
     subprocess.run(["bash", "-c", _step("cached runs")["run"]], env=env, check=True)
     assert output.read_text() == saved
+
+
+def test_a_requests_cache_never_hides_its_target_branchs():
+    action = yaml.safe_load((ROOT / "action.yml").read_text())
+    cache = [s for s in action["runs"]["steps"] if "actions/cache" in s.get("uses", "")]
+    restores = [s["with"]["restore-keys"] for s in cache if "restore" in s["uses"]]
+    [save] = [s["with"]["key"] for s in cache if "save" in s["uses"]]
+    assert [k.split(":")[2] for k in restores] == [
+        "request",
+        "branch",
+    ]  # the branch's last, on top
+    assert "github.base_ref != '' && 'request' || 'branch'" in save

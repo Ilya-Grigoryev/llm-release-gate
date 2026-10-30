@@ -47,12 +47,20 @@ runs:
         echo "name=$PIPELINE" >> "$GITHUB_OUTPUT"
         echo "out=$RUNNER_TEMP/llm-release-gate/$PIPELINE" >> "$GITHUB_OUTPUT"
         echo "cache=$RUNNER_TEMP/llm-release-gate-cache" >> "$GITHUB_OUTPUT"
+    # GitHub shows a request its own caches before its target branch's, so each gets its own prefix and a request
+    # restores both: its own, then the branch's on top. A pipeline's name may contain "-", never ":".
+    - uses: actions/cache/restore@v6
+      if: steps.fork.outputs.fork != 'true' && github.base_ref != ''
+      with:
+        path: ${{ steps.pipeline.outputs.cache }}/${{ steps.pipeline.outputs.name }}
+        key: "llm-release-gate:${{ steps.pipeline.outputs.name }}:request:${{ github.run_id }}-${{ github.run_attempt }}"
+        restore-keys: "llm-release-gate:${{ steps.pipeline.outputs.name }}:request:"
     - uses: actions/cache/restore@v6
       if: steps.fork.outputs.fork != 'true'
-      with:  # a request sees its own earlier runs and its target branch's (base_max_age_days in gate.yaml)
+      with:
         path: ${{ steps.pipeline.outputs.cache }}/${{ steps.pipeline.outputs.name }}
-        key: "llm-release-gate:${{ steps.pipeline.outputs.name }}:${{ github.run_id }}-${{ github.run_attempt }}"
-        restore-keys: "llm-release-gate:${{ steps.pipeline.outputs.name }}:"  # a name may contain "-", never ":"
+        key: "llm-release-gate:${{ steps.pipeline.outputs.name }}:branch:${{ github.run_id }}-${{ github.run_attempt }}"
+        restore-keys: "llm-release-gate:${{ steps.pipeline.outputs.name }}:branch:"
     - name: can comment
       if: steps.fork.outputs.fork != 'true' && github.base_ref != ''
       shell: bash
@@ -88,7 +96,7 @@ runs:
       if: ${{ !cancelled() && steps.cached.outputs.any == 'true' }}
       with:
         path: ${{ steps.pipeline.outputs.cache }}/${{ steps.pipeline.outputs.name }}
-        key: "llm-release-gate:${{ steps.pipeline.outputs.name }}:${{ github.run_id }}-${{ github.run_attempt }}"
+        key: "llm-release-gate:${{ steps.pipeline.outputs.name }}:${{ github.base_ref != '' && 'request' || 'branch' }}:${{ github.run_id }}-${{ github.run_attempt }}"
     - name: comment
       if: ${{ !cancelled() && steps.fork.outputs.fork != 'true' && github.base_ref != '' }}
       shell: bash
