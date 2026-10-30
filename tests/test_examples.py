@@ -48,6 +48,14 @@ REPLIES = {
             "code": "insufficient_quota",
         },
     ),
+    "credits": (
+        429,
+        {
+            "message": "You have no credits remaining",
+            "type": "insufficient_quota",
+            "code": "credit_balance_exhausted",
+        },
+    ),
     "rate": (
         429,
         {
@@ -209,6 +217,7 @@ def test_an_answer_that_is_not_json_is_no_answer(project, provider):
     "mode, error",
     [
         ("quota", Fatal),
+        ("credits", Fatal),
         ("auth", Fatal),
         ("rate", Retryable),
         ("down", Retryable),

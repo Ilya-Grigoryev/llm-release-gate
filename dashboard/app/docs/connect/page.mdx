@@ -115,7 +115,7 @@ try:
         model=config["model"], on_model=model_step, on_tool=tool_step, **config["params"],
     )
 except openai.RateLimitError as e:
-    fail(78 if e.code == "insufficient_quota" else 75, e)  # no quota: stop; rate limit: retry
+    fail(78 if e.type == "insufficient_quota" else 75, e)  # no quota or credits: stop; rate limit: retry
 except (openai.APIConnectionError, openai.InternalServerError) as e:
     fail(75, e)  # timeout, network, server error: retry this run
 except (openai.AuthenticationError, openai.PermissionDeniedError, openai.NotFoundError) as e:
@@ -141,7 +141,7 @@ const { runDialog } = require("./src/dialog"); // your application
 
 function exitCode(error) {
   // no call can succeed (out of quota, wrong key, wrong model): stop all runs of this version
-  if (error.code === "insufficient_quota" || error.status === 401 || error.status === 404) return 78;
+  if (error.type === "insufficient_quota" || error.status === 401 || error.status === 404) return 78;
   // may succeed later (network, timeout, rate limit, server error): retry this run
   if (error instanceof APIConnectionError || error.status === 429 || error.status >= 500) return 75;
   return 1; // anything else, a bug in your code included: this run fails

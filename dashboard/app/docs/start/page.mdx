@@ -153,7 +153,7 @@ try:
         **config["params"],
     )
 except openai.RateLimitError as e:
-    fail(78 if e.code == "insufficient_quota" else 75, e)  # no quota: stop; rate limit: retry
+    fail(78 if e.type == "insufficient_quota" else 75, e)  # no quota or credits: stop; rate limit: retry
 except (openai.APIConnectionError, openai.InternalServerError) as e:
     fail(75, e)  # timeout, network, server error: retry this run
 except (openai.AuthenticationError, openai.PermissionDeniedError, openai.NotFoundError) as e:
@@ -224,7 +224,7 @@ const res = await fetch(`${base}/chat/completions`, {
 }).catch((e) => fail(75, e)); // network: retry this run
 const r = await res.json().catch(() => ({}));
 if (!res.ok) {
-  const stop = r.error?.code === "insufficient_quota" || [401, 403, 404].includes(res.status);
+  const stop = r.error?.type === "insufficient_quota" || [401, 403, 404].includes(res.status);
   // no quota, wrong key or model: stop all runs; rate limit, server error: retry this run
   fail(stop ? 78 : res.status === 429 || res.status >= 500 ? 75 : 1, `${res.status} ${r.error?.message}`);
 }
@@ -305,7 +305,7 @@ type Completion struct {
 		CompletionTokens int `json:"completion_tokens"`
 	} `json:"usage"`
 	Error *struct {
-		Code    string `json:"code"`
+		Type    string `json:"type"`
 		Message string `json:"message"`
 	} `json:"error"`
 }
@@ -361,7 +361,7 @@ func main() {
 			said += ": " + r.Error.Message
 		}
 		switch {
-		case r.Error != nil && r.Error.Code == "insufficient_quota", res.StatusCode == 401, res.StatusCode == 403, res.StatusCode == 404:
+		case r.Error != nil && r.Error.Type == "insufficient_quota", res.StatusCode == 401, res.StatusCode == 403, res.StatusCode == 404:
 			fail(78, said) // no quota, wrong key or model: stop all runs of the version
 		case res.StatusCode == 429, res.StatusCode >= 500:
 			fail(75, said) // rate limit, server error: retry this run
