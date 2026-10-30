@@ -19,7 +19,7 @@ describe("schemaView", () => {
     const view = schemaView(project as Schema, "#", { "#/$defs/pipeline": "#pipeline", "#/$defs/budgets": "#budgets" });
     const rows = byPath(view.rows);
     expect(view.title).toBe("gate.yaml");
-    expect(Object.keys(rows)).toEqual(["prepare", "ignore", "pipelines", "k", "delta", "prices", "budgets"]);
+    expect(Object.keys(rows)).toEqual(["prepare", "ignore", "pipelines", "k", "delta", "prices", "budgets", "base_max_age_days"]);
     expect(rows.pipelines.required).toBe(true);
     expect(text(rows.pipelines.type)).toBe("map of name to [pipeline](#pipeline)");
     expect(rows.pipelines.rules).toEqual(["at least 1 entry", "names match `^[A-Za-z0-9_-][A-Za-z0-9._-]*$`"]);
