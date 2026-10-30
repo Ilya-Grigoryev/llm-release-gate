@@ -1,0 +1,260 @@
+export const metadata = { title: "Limits and comparison" };
+
+# Limits and comparison
+
+The gate answers one question on each pull request: on your cases, did the request's version score lower than the
+version on the target branch by more than `delta` points, or go over a budget you set? Today it answers from one run of
+each version ([Today it decides on one run per version](#today-it-decides-on-one-run-per-version)). This page lists
+what the gate does not do, what it needs today, and how it differs from other tools that test LLM applications.
+
+A few terms first. The base is the version on the target branch, and the candidate is the version in the request. A
+version is its config, its prompts and the repository's code ([What a version is](/docs/how-it-works#what-a-version-is)). A
+pipeline is one application part that `gate.yaml` names, with its version's config and its test set. A case is one
+test input with its expected values, and its checks score each run of the case from 0 to 1
+([Cases](/docs/how-it-works#cases), [Checks](/docs/how-it-works#checks)). A point is 0.01 of the mean score, so the default `delta`
+of 5 points is 0.05. The gate posts its verdict as one comment on the pull request; [Verdicts](/docs/how-it-works#verdicts)
+lists every verdict, and [Reference](/docs/reference#gate-yaml) every field of `gate.yaml`.
+
+## It is not a security control
+
+The gate runs the pull request's code, the workflow file as the request has it, and the request's lock file. The
+request's code also runs with the model provider's key that your workflow passes in, because it has to call the model.
+A request can change any of these. So the gate catches mistakes, not an author who wants to get past it.
+
+What the gate does prevent is a request loosening its own rules through `gate.yaml`:
+
+- **The rules come from the target branch.** `delta`, `k` (runs per case), `budgets` and `prices` are read from the
+  target branch's `gate.yaml`, and the price files it names from the target branch's tree. Raising `delta` in a request
+  does not loosen that request's gate: the new value applies after merge, and the comment says that the request changes
+  the rules. If the target branch has no `gate.yaml`, or a broken one, the request's rules hold.
+- **New ignore patterns cannot hide code.** A request that changes `ignore`, or which files belong to which pipeline,
+  runs every pipeline.
+- **Removing a pipeline is not a quiet pass.** A request that removes or renames a pipeline in `gate.yaml` fails as
+  `inconclusive` (exit 11). No version of that pipeline was compared, so a maintainer merges over the check if that is
+  intended.
+
+What is tested comes from the request:
+
+- **The test set is the request's.** Both versions run on the cases in the request, so a request that edits, removes
+  or replaces cases is judged on its own cases. The comment only notes that the request changes the test set. The
+  candidate's config and the set's manifest also come from the request.
+- **`prepare` is the request's.** The command that readies the project runs in both checkouts, the target branch's
+  included, before either version runs.
+
+The rest is up to you. Protect the workflow, `gate.yaml`, the test sets and the lock file with code owners, and turn on
+"Require review from Code Owners" in the target branch's protection rule: without it, code owners are only asked for a
+review. Make the gate's job a required check too: until it is required, the job only advises.
+
+```text
+# .github/CODEOWNERS
+/.github/    @your-org/release-owners
+/gate.yaml   @your-org/release-owners
+/golden/     @your-org/release-owners
+/uv.lock     @your-org/release-owners
+# /golden/ stands for the test-set directories your gate.yaml names in `golden`
+# add any other lock file that `prepare` installs from, such as /package-lock.json
+```
+
+## No model grades the text
+
+Every built-in check is code. It compares fields, matches text, checks numbers and JSON, or reads the trace of what the
+application did. None of them asks a model for an opinion, so a check gives the same result for the same answer every
+time. Tone, politeness and helpfulness are not checked unless you express them in code.
+
+A `function` check runs a Python function you write, with the case's expected values, the answer, the trace and the
+check's own settings. What it does is up to you. A model-graded check that you turn on yourself is planned, without a
+date.
+
+## It is not a model benchmark
+
+The gate compares two versions of one application on that application's cases. Switching the model is one change it can
+compare, like a prompt edit or a code change. Today a pass says: on these cases, one run of the version with the new
+model had a mean score no more than `delta` points below one run of the version before. It does not say which model is
+better in general, and it does not rank models across tasks. Your test set is yours, often small, and a score means
+what your checks check.
+
+Prefer a dated model snapshot. A model name without a date works, but the provider may change the model behind it at any
+time; [How it decides](/docs/how-it-decides#why-both-versions-run-at-the-same-time) lists the precautions the gate takes for
+such a name.
+
+## It cannot see a change no case touches
+
+The gate sees a change only through the cases it affects. Say your booking assistant (a made-up example) may refund up
+to €30 without a manager's approval, and your cases ask for refunds of €20 and €60. Raising the limit to €40 changes
+nothing any case sees: whatever the gate answers, pass or block, says nothing about the new limit.
+
+It also does not see changes outside the version. A version is its config, the bytes of its prompts and the
+repository's code as git sees it: tracked files by git's ids, with uncommitted edits counted and untracked files left
+out. Documentation (files named `README`, `CHANGELOG`, `CONTRIBUTING` or `LICENSE`, and `docs/`), CI (`.github/`),
+`gate.yaml` and its price files, the paths in its `ignore`, test sets and other pipelines' files do not count. Any
+other file counts as code, a Markdown prompt or a `GUIDE.md` included. Environment variables, data outside the
+repository and a change the provider makes to a model behind its name are never part of the version.
+
+To find gaps in your cases, break your application on purpose in a branch (delete one rule from the prompt, change one
+number) and open a request. If the gate does not block, no case checks that rule, the drop on your cases was not larger
+than `delta`, or noise hid it. With 20 cases, one case going from 1 to 0 lowers the mean by exactly 5 points, and a drop
+exactly at the limit passes. If the case you expected to break is in the comment's table of cases that got worse, a
+case does check the rule and the drop was too small. [What it catches](/docs/what-it-catches#what-it-cannot-see) goes through each of these
+limits with examples.
+
+<Fig id="limits-1" caption={"A change can change the verdict only if it is part of the version, a case exercises it, and the drop it causes is larger than `delta`. Today, with one run per version, noise can push a drop over or under `delta`."} alt={"Three conditions in a row. First, the change must be part of the version: documentation, CI, gate.yaml, ignored paths and data outside the repository are not. Second, a case must exercise it: raising a refund limit from \u20ac30 to \u20ac40 is invisible when no case asks for an amount between them. Third, the mean score must drop by more than delta: one broken case among 20 lowers the mean by exactly 5 points, which passes at the default delta. Today, with one run per version, run-to-run noise can push a drop over or under delta."} />
+
+## Today it decides on one run per version
+
+The quality rule today is simple: the gate takes the first run of each case for each version, compares the mean scores
+and blocks when the candidate's mean is lower by more than `delta` points (5 by default). `k` in `gate.yaml` can ask for
+more runs per case, but today only the cost and latency budgets use them.
+
+One run is not much evidence when the model's answers vary. In the author's measurement on a support agent, one
+unchanged version on the same 10 tasks scored 0.7, 0.6, 0.6, 0.7, 0.5, 0.6, 0.6, 0.4, 0.7, 0.7 and 0.6 over 11 runs: a
+spread of 30 points with nothing changed. Twice, the same version ran as base and as candidate in one job, and the two
+runs differed by 10 points, twice the default `delta`. With this much noise, a block or a pass by today's rule can be
+noise, even for a drop of 10 or 20 points.
+
+Two more limits follow from comparing one mean against the version right before:
+
+- **Small losses add up.** A loss smaller than `delta` passes, and many such losses over many pull requests are not
+  seen.
+- **A mean can hide one broken check.** If one check gets worse and another gets better, the mean can stay where it was.
+  The comment lists up to five cases that got worse, largest drop first, so read it even on a pass. A trade-off between
+  checks inside one case, with the case's score unchanged, does not show in the comment; the [dashboard](/docs/dashboard)
+  shows the result of every check on both sides.
+
+> **Planned.** A statistical rule, planned for stage C of the roadmap ([Method](/docs/method#contribution) says what each
+> stage adds): several runs per version, an interval around the difference, `delta` as the loss you accept, and three
+> outcomes: pass, block and not sure yet. Buying more runs automatically when the gate is not sure comes after that, in
+> stage D. Also planned: a rule per check in the verdict, and a second comparison against an anchor version that only a
+> person moves, so that small losses cannot add up unseen.
+> [How it decides](/docs/how-it-decides#planned-several-runs-and-an-interval) explains each part.
+
+How often the gate decides wrongly is not known yet. The author's experiments will measure it after the statistical rule
+is built; until then this site states no error rates.
+
+## What it needs today
+
+- **Access.** The gate's repository is private today, so only repositories of its owner can use it. Other projects wait
+  for the public release, which is planned.
+- **A uv project.** `pyproject.toml` and `uv.lock` at the project's root, Python 3.12 or newer. An application in another
+  language connects through `pipeline: command` (a JSON request on stdin, a JSON answer on stdout), but the project still
+  needs a small `pyproject.toml` that lists the gate. Planned: the gate installs itself, and a project without Python
+  needs no `pyproject.toml`.
+- **GitHub Actions or GitLab CI.** The gate is packaged as a GitHub Action. On GitLab CI, `llm-release-gate pr` runs the
+  pipelines and `llm-release-gate comment` posts the verdict with a `GITLAB_TOKEN`. On another CI, `pr` writes each
+  pipeline's comment and verdict to files and exits with the verdict's code; nothing is posted. Planned: a GitLab CI/CD
+  component.
+- **Requests from forks are not checked.** GitHub gives a `pull_request` workflow from a fork no secrets, so the gate
+  cannot call the model. The job fails as `not checked`; a maintainer gates the request by pushing its branch to the
+  repository.
+- **Model calls for both versions.** Each request that changes a pipeline's version pays for both versions' runs. When
+  `gate.yaml` names a price file, the comment states what each decision cost;
+  [Budgets: cost and latency](/docs/how-it-decides#budgets-cost-and-latency) shows how to set a cost budget. A request that leaves the version as it is gets `unchanged`, and nothing runs, unless it also
+  changes `ignore` or which files belong to which pipeline, or the target branch has no `gate.yaml`: then every
+  pipeline runs.
+- **A new pipeline is not compared.** A pipeline that the target branch's `gate.yaml` lacks gets `no base version`: the
+  candidate runs alone, its score and budget are reported, and the check passes.
+
+[Start](/docs/start) walks through the setup step by step.
+
+## How it differs from other tools
+
+Many tools run test cases against an LLM application. This section compares only one thing: how each decides whether a
+new version is worse than the old one. The statements about other tools come from their documentation as the author
+checked it in October 2026. These tools change quickly; check their current documentation before you rely on a
+detail. Where this page says a tool's documentation does not describe something, that is what the checked pages said,
+not a claim that the tool cannot do it.
+
+### What the gate does
+
+Today:
+
+- **It runs the base itself, at the same time as the candidate.** When a request changes the version, the gate runs the
+  version on the target branch and the version in the request, fresh, in the same job, each from its own checkout with
+  its own code (the request's `prepare` runs in both). It does not reuse earlier runs of the target branch.
+- **It knows what a version is.** A version is its config, its prompts and the repository's code as git sees it. A
+  request that leaves the version as it is gets `unchanged` and costs nothing, with the exceptions listed under
+  [What it needs today](#what-it-needs-today).
+- **It refuses to compare what is not comparable.** Runs on different test sets, scored by different scorers, or with a
+  case missing on one side give `infra error` (exit 20), never a verdict about quality.
+- **It decides with a threshold.** One run per version, block when the mean drops by more than `delta` points; budgets on
+  cost and latency on top.
+
+Planned for stage C: an interval over repeated runs on your fixed cases, three outcomes, and an anchor comparison. The
+rest of this section says which of these the other tools already have.
+
+<Fig id="limits-2" caption={"When the base ran earlier, anything that changed at the provider in between counts as an effect of your change. When both versions run together, a shift that hits both cancels out in the difference; run-to-run noise remains in both cases."} alt={"Two timelines. In the first, the base version ran last week and the candidate runs today; the difference between them mixes the effect of the change with anything that changed at the provider in between, plus run-to-run noise. In the second, both versions run in the same job at the same time, so a shift at the provider affects both, and the difference shows the change plus run-to-run noise, without the drift."} />
+
+### Evaluation frameworks and platforms
+
+These are broad tools for writing and running evaluations. In the documentation pages the author checked for the four
+below, none describes a built-in rule that decides whether a drop against a baseline is larger than run-to-run noise.
+
+- **promptfoo.** Its `eval` command returns exit code 100 when at least one test case fails or when the pass rate is
+  below the threshold in `PROMPTFOO_PASS_RATE_THRESHOLD`, which defaults to 100 %. It can repeat tests (`--repeat`) and
+  apply shared assertions to every test (`defaultTest`). Its documented exit code depends on the pass rate of one
+  evaluation.
+- **Braintrust.** It matches test cases across experiments by their `input` field and summarises per-score
+  improvements, regressions and differences. A case can run several times (`trial_count`). Its comparison labels
+  (improvement, regression, tradeoff, tie) come without a described statistical basis in the pages checked.
+- **Inspect AI.** It runs each sample several times (`epochs`) and combines the scores per sample with a reducer, for
+  example `pass_k_{k}` or `at_least_{k}`. Its metrics can carry an interval, which its documentation describes as "[u]seful
+  for deciding, for example, whether two models' accuracy intervals overlap".
+- **LangSmith.** It can repeat an experiment and report the standard deviation over the repetitions, and it highlights
+  regressions when you compare experiment results against a baseline experiment.
+
+Today this gate's own rule does not separate a drop from noise either: it is a threshold on one run per version. What
+it does now is the comparison itself: both versions on the same cases, run together in the pull request's job, ending in
+a verdict and an exit code that a required check can block on. Separating a drop from noise is the job of the planned
+statistical rule.
+
+### Small statistical gates
+
+A handful of small tools on GitHub and PyPI, first released in 2026, already gate a change with a statistical rule.
+If you need a statistical rule in CI today, they have one; this gate's is planned. In plain terms, each puts a
+statistical test or an interval around the difference between two versions instead of comparing two numbers. Some also
+accept a margin of loss (statgate, assay-evals, pytest-probability), answer "not sure" (statgate), or buy more runs
+where the answer is unclear (assay-evals, flipcheck). All four below pair the two versions case by case.
+
+- **statgate.** It compares a candidate with a baseline using "a BCa bootstrap confidence interval on their mean, a
+  sign-flip permutation test as a cross-check, a non-inferiority decision rule … and a mixture SPRT for always-valid
+  sequential stopping". Its outcomes are SHIP (exit 0), BLOCK and INCONCLUSIVE, with a separate code for a tool error.
+  Repeated runs of a case are averaged per case. Its GitHub Action guide leaves the baseline to your workflow; the
+  documented ways include re-running on main ("check out the base branch, run the suite, then run it on the head
+  branch") and a baseline file committed to the repository and "refreshed deliberately".
+- **assay-evals** (`tap222/assay-evals` on GitHub). In CI it uses "a paired t interval over the checks" and fails "when
+  even the optimistic end of the interval is lower than `tolerance` (default 0.01) allows", plus a one-sided Fisher test
+  per check with a Benjamini–Hochberg correction. `--rerun-unsure` "gives more attempts only to the cases that could be
+  worse". Each case's baseline "is its last passing run", and a case whose pass rate dropped within chance keeps its old
+  one, so the baseline does not drift down. It compares document fields by value ("1,250.00" and 1250 are one value),
+  and it has a server-side release gate that rolls back, holds or advances.
+- **pytest-probability.** It runs each case several times and, with `--prob-baseline` and `--prob-margin`, "pairs every
+  case with its row in an earlier `--prob-json` report and fails a function whose pass rate may have dropped by more than"
+  the margin. With enough inputs, its interval comes from "a paired bootstrap over inputs".
+- **flipcheck.** "Each test item runs k times per version"; it applies a "Fisher exact test plus Benjamini-Hochberg
+  correction", and "[e]xtra samples go only to uncertain items".
+
+Three outcomes, a margin and buying more runs where the answer is unclear are therefore not new: these tools have them
+in some form. Where this gate differs is in details, the first of them today and the other two planned:
+
+- **Where the base comes from.** Whenever this gate compares, it runs the target branch's version in the same job. In
+  pytest-probability the base is an earlier report, in assay-evals each case's last passing run, and in statgate the
+  workflow's choice among several documented ways.
+- **What the interval is about (planned).** statgate averages repeated runs per case and pytest-probability bootstraps
+  over inputs; both treat the cases as a sample of possible inputs. The planned interval of this gate treats your cases
+  as fixed and measures the run-to-run noise on them. The two answer different questions: "would this hold on other
+  inputs like these?" and "did this change make these cases worse?".
+- **Losses that add up (planned).** assay-evals keeps a case's baseline from drifting down. The planned anchor of this
+  gate is a second comparison, in addition to the base, against a version that only a person moves.
+
+### Statistical gates are older than LLMs
+
+A CI system that accepts a new model only when a statistical condition against the old one holds was published in 2019:
+ease.ml/ci (Renggli et al., MLSys 2019) describes itself as, "to our best knowledge, the first continuous integration
+system for machine learning". What LLMs add is that the same version gives different answers from run to run.
+
+### What is not shown yet
+
+statgate and assay-evals document checks of their false alarms on synthetic or simulated data ("against synthetic data";
+"simulated unchanged pull requests"), and flipcheck reports the accuracy of its decisions on synthetic items. This gate
+has no such numbers yet. The author's planned experiments will measure how often it blocks a harmless change and how
+many deliberately broken versions it catches, on recorded runs of real applications. Until then, nothing on this site
+claims that the gate decides better than the tools above. [Method](/docs/method) describes the experiments.

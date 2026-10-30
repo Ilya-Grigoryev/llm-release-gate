@@ -1,0 +1,647 @@
+import project from "@/content/schemas/project.schema.json";
+
+export const metadata = { title: "Reference" };
+
+# Reference
+
+This page lists the exact names of everything you write for the gate and everything it writes back: `gate.yaml`, a
+version's config, cases and checks, the protocol for programs in other languages, the commands, the exit codes and the
+records of runs. Tables labelled "from … .schema.json" are built from the JSON Schemas the gate itself validates
+against; the other tables are written by hand and describe release `v0.1.0-dev.9`.
+
+Today the gate decides with the naive rule: one run per version, block when the mean score drops by more than `delta`
+points (5 by default). A statistical rule is planned; where it will change a field or an outcome, this page says so.
+[How it works](/docs/how-it-works) and [How it decides](/docs/how-it-decides) explain the behaviour behind the names.
+
+## Terms
+
+- **Pipeline**: one LLM part of your application that the gate checks on its own, with its own version, test set,
+  verdict and comment. `gate.yaml` names each one ([How it works](/docs/how-it-works#one-pull-request-start-to-end)).
+- **Version**: a pipeline's config, the bytes of its prompts and the repository's code as git sees it
+  ([What a version is](/docs/how-it-works#what-a-version-is)).
+- **Base and candidate**: the version on the target branch (the branch the pull request merges into) and the version
+  in the request.
+- **Case, check, run**: a case is one test: its inputs and expected values; its checks score an answer from 0 to 1; a
+  run is one version handling one case once, `k` times per case ([Cases](/docs/how-it-works#cases)).
+- **Runner, adapter, the action**: the runner (`llm-release-gate run`) makes the runs of one version, and `pr` starts
+  one for each version. It calls your application through an adapter (a Python module) or a program
+  ([Connect your app](/docs/connect)). The action is the GitHub Action that runs `pr` and `comment` for one pipeline.
+
+## Files you write
+
+| File | Where | Read by |
+|---|---|---|
+| `gate.yaml` | the project's directory: the repository's root, or the directory you pass as `--project` (`project-dir` in the action) | `pr` and the action; `run` too, to know which files are not the version's code (it takes the nearest `gate.yaml` above the config) |
+| a version's config | any path; `gate.yaml` names it under `pipelines.NAME.config` | the runner |
+| prompt files | paths relative to the config | your adapter or program; their bytes are part of the version |
+| cases | one YAML file per case, directly in the test set's directory; inputs anywhere inside the set | the runner, `pr` and `golden validate` |
+| price file | any path; `gate.yaml` names it under `prices` | the comparison (`gate`). The runner reads a price file only when you pass `run --prices` yourself; `pr` does not |
+| manifest | any path outside the test set's directory; `gate.yaml` names it under `pipelines.NAME.manifest` | `pr` and `golden validate --manifest` |
+| the workflow | `.github/workflows/` | GitHub Actions |
+
+## gate.yaml
+
+Settings at the top apply to every pipeline; a setting in a pipeline's own entry replaces the top one. The rules (`k`,
+`delta`, `prices`, `budgets`) come from the target branch's `gate.yaml`: a request that edits them still runs under the
+old ones, and the new ones apply after merge. Two exceptions: a pipeline that is new in the request follows the target
+branch's top-level rules, and when the target branch has no `gate.yaml`, or an invalid one (the comment then warns),
+the request's rules apply ([Whose rules apply](/docs/how-it-works#whose-rules-apply)).
+
+Every field, for reference. Most projects need only `pipelines` and `delta`.
+
+```yaml
+pipelines:
+  invoice:                                # names the comment and the artifact
+    config: configs/invoice.yaml          # the version
+    golden: golden/invoices               # its test set
+    manifest: manifests/invoices.yaml     # ids and hash the set must match
+    inputs-url: https://files.example.com/invoices/{path}
+  booking:
+    config: configs/booking.yaml
+    golden: golden/booking
+    k: 3                                  # this pipeline's own setting wins
+    budgets: {cost_per_run_usd: 0.02, latency_s: 30}  # replaces the top-level budgets as a whole
+k: 1
+delta: 5
+prices: prices.yaml
+budgets:
+  cost_per_run_usd: 0.002
+  latency_s: 8
+  latency_quantile: 0.95
+prepare: [npm, ci]
+ignore: [web/, "**/*.ipynb", "!docs/kb/"]
+```
+
+### Top-level fields
+
+<SchemaTable schema={project} label="Top-level fields of gate.yaml" describe={false} source="project.schema.json" links={{ "#/$defs/pipeline": "#fields-of-one-pipeline-pipelines-name", "#/$defs/budgets": "#budgets" }} />
+
+### Fields of one pipeline (`pipelines.NAME`)
+
+<SchemaTable schema={project} at="#/$defs/pipeline" label="Fields of one pipeline" describe={false} source="project.schema.json" links={{ "#/$defs/budgets": "#budgets" }} />
+
+### `budgets`
+
+<SchemaTable schema={project} at="#/$defs/budgets" label="Fields of budgets" source="project.schema.json" />
+
+What the schema does not say:
+
+- **Names.** A pipeline's name may hold letters, digits, `_`, `-` and `.`, and may not start with `.`. It names the
+  comment, the artifact and the directory `OUT/NAME`.
+- **Paths.** `config`, `golden`, `manifest` and `prices` are relative to the project's directory. Both versions run on
+  the request's copy of the test set; the comment says when a request changes it.
+- **`k`.** The naive rule decides on the first run of each case; the budgets use all `k` runs. Planned: the statistical
+  rule uses every run.
+- **`delta`.** Points of the mean score: a case scores from 0 to 1, and the mean is read out of 100. A drop of exactly
+  `delta` passes; only a larger drop blocks. From `gate.yaml` it is always absolute; a threshold relative to the base
+  mean exists only as the `gate` command's `--relative` flag. Today `delta` is the naive rule's threshold. Planned: in
+  the statistical rule it is the loss you accept.
+- **`budgets`.** A pipeline's own `budgets` replaces the top-level mapping; keys are not merged. In the example,
+  `booking` has no `latency_quantile`, so it uses the default 0.95. `cost_per_run_usd` needs `prices`, at the top or in
+  the same pipeline.
+- **`prices`.** Commit the price file. The gate copies the target branch's price files before `prepare` runs. `pr`
+  passes the price file to the comparison only, so the verdict's `cost_usd` and `prices_hash` come from it; the records
+  of a `pr` run have `prices_hash: null`, and their `usage` holds a cost only where your pipeline reported one.
+- **`prepare`.** Runs in both trees (the target branch's and the request's), then the gate runs `uv sync --locked` in
+  each.
+- **`ignore`.** Glob patterns from the project's directory: `*` stays within a directory, `**` crosses directories, a
+  trailing `/` takes the whole directory, a pattern without `/` matches a file name at any depth, and `!pattern` takes
+  files back (documentation too, for an application that reads `docs/kb/`). Documentation and CI never count, so you do
+  not list them.
+- **Changes that run every pipeline.** A request that changes `ignore`, adds, removes or renames a pipeline, changes
+  the files `gate.yaml` assigns to a pipeline (its config, prompts, test set, manifest or price file) or changes the
+  top-level `prices` path runs every pipeline, even one whose version hash did not change. So does every request while the target branch has no valid `gate.yaml`: `unchanged`
+  needs one.
+- **`inputs-url`.** For the dashboard: where it finds the set's files that the artifact leaves out, such as images.
+  `{path}` is replaced by the input's path as the case names it, `{name}` by its file name. Only `https` links are
+  shown.
+
+## A version's config
+
+A YAML file per version. It has no JSON Schema yet; the gate checks it when it loads it.
+
+```yaml
+# configs/invoice.yaml: the invoice reader (example), a Python adapter
+pipeline: invoice_reader.gate_adapter  # a module with build(config)
+model: gpt-4.1-mini-2025-04-14         # a dated snapshot
+prompt: ../prompts/extract.md          # relative to this file
+input: text                            # which input of a case this version reads
+params: {temperature: 0}
+max_retries: 5
+timeout_s: 60
+```
+
+```yaml
+# configs/booking.yaml: the booking assistant (example), a program in another language
+pipeline: command
+command: [node, agent.js]
+model: gpt-5.4-mini-2026-03-17
+prompt: {system: ../prompts/system.md, summary: ../prompts/summary.md}
+input: ticket
+params: {temperature: 0}
+timeout_s: 120
+```
+
+| Key | Required | Meaning |
+|---|---|---|
+| `pipeline` | yes | the import path of a Python module with `build(config)`, or `command` for a program |
+| `command` | with `pipeline: command`, and only then | the program and its arguments, as a list; relative paths resolve from the directory the runner runs in |
+| `model` | yes | the model name. Prefer a dated snapshot; a name without a date works, with the precautions in [How it decides](/docs/how-it-decides#why-both-versions-run-at-the-same-time) |
+| `prompt` | yes | one file, or a mapping of names to files, relative to the config |
+| `input` | yes | the name of the case input this version reads |
+| `params` | no | API parameters, passed on as they are; a whole float becomes an integer (`0.0` as `0`) |
+| `max_retries` | no, default 5 | how often the runner retries a run after `Retryable`, exit 75 or a program's timeout, with backoff 1, 2, 4… s (at most 60 s) |
+| `timeout_s` | no, default 60 | for `pipeline: command`: seconds before the gate kills the program and retries the run. A Python adapter receives it in its config; the runner does not enforce it |
+
+The version's hash covers every key and the bytes of each prompt; key order, YAML formatting and `0` versus `0.0` do
+not change it. It also covers the repository's code as git sees it: every tracked file by the id git gives its
+content, uncommitted edits included, untracked files not. These do not count:
+
+- documentation: `README`, `CHANGELOG`, `CONTRIBUTING`, `LICENSE`, bare or as `.md`, `.rst`, `.txt`, `.adoc`, in any
+  case and at any depth, and `docs/` at the root of the repository or of the project (a deeper `docs/` is code);
+- CI: `.github/` at the same two places;
+- `gate.yaml`, the price files and manifests it names, the paths in its `ignore`, its test sets and the files of its
+  other pipelines (their configs and prompts).
+
+There is no version number to bump. [What a version is](/docs/how-it-works#what-a-version-is) has examples.
+
+## Price file
+
+```yaml
+# prices.yaml: USD per 1M tokens, [input, output] or [input, output, cached input].
+# Example numbers: copy your provider's current list prices.
+gpt-4.1-mini: [0.40, 1.60, 0.10]
+gpt-5.4-mini: [0.75, 4.50, 0.075]
+```
+
+Each key is a prefix of model names; the longest matching prefix wins. Without the third price, cached input tokens
+cost the full input price. A model without a price leaves the cost unknown, and a cost budget then gives `infra error`.
+
+## Manifest
+
+For a test set built or fetched outside git. `pr` and `golden validate --manifest` fail unless the set has exactly
+these ids and this hash:
+
+```yaml
+# manifests/invoices.yaml: the case ids, and the hash `golden validate` prints for your set (example value)
+ids: [inv-001]
+sha256: 06a116fb83a555e7d4ee07df3de681cf15fc48f46a8d398f0c71ef21ae629f40
+```
+
+The hash covers the bytes of the inputs too, so copy it from `llm-release-gate golden validate` on your own set. Keep
+the manifest outside the test set's directory: every YAML file in that directory is read as a case.
+
+## Cases
+
+A test set is a directory. Each `.yaml` or `.yml` file directly in it is one case. Inputs are the other files the
+cases name, anywhere inside the set: next to the cases or in subdirectories. An input that is itself YAML goes in a
+subdirectory, since a YAML file directly in the set is read as a case. Input paths are relative to the case file and
+must lie inside the set. The set's hash covers each case's parsed content and the bytes of each input: reformatting a
+case keeps the hash, any edit to a case or an input changes it. `llm-release-gate golden validate DIR` checks the
+schema, unique ids, the inputs and every scoring block, and prints the hash.
+
+```yaml
+# golden/invoices/inv-001.yaml: the invoice reader (example)
+id: inv-001
+version: 1
+input:
+  text: inputs/inv-001.txt     # relative to this file, inside the set
+expected:
+  vendor: Northwind Supplies Ltd
+  date: "14.03.2026"
+  total: "1249.50"
+  po_number: null              # expected as null: not scored
+scoring:
+  method: field_match
+  normalise: [whitespace, casefold]
+  fields:
+    date: {type: date}
+    total: {type: number}
+```
+
+```yaml
+# golden/booking/late-cancel.yaml: the booking assistant (example)
+id: late-cancel
+version: 1                      # the case's own revision, not the pipeline's version
+input:
+  ticket: late-cancel.txt       # an input next to the case file
+expected:
+  state_change: {bookings: {B-1042: cancelled}}
+scoring:
+  method: checks
+  aggregate: all
+  checks:
+    - {id: state, kind: state, key: state_change}
+    - {id: looked-up, kind: order, first: find_booking, then: [cancel_booking]}
+    - {id: right-booking, kind: called, tool: cancel_booking, args: {booking_id: B-1042}}
+    - {id: no-fee-waiver, kind: not_called, tool: waive_fee}
+    - {id: steps, kind: max_steps, max: 12}
+    - {id: reply, kind: regex, field: reply, pattern: "B-\\d+"}
+```
+
+### Fields of a case
+
+| Field | Required | Meaning |
+|---|---|---|
+| `id` | yes | unique in the set; letters, digits, `.`, `_`, `-` |
+| `version` | yes | the case's own revision, a whole number ≥ 1; not the pipeline's version. The gate does not read it today |
+| `input` | yes | input name → file path. The version's config names the input it reads |
+| `expected` | yes | the values the checks compare against. A program under the protocol never receives them |
+| `scoring` | yes | how the answer is scored: the table below |
+| `slices` | no | labels, name → text. The gate does not read them today |
+| `source` | no | text. The gate does not read it today |
+| `note` | no | text. The gate does not read it today |
+
+Fields the gate does not read are still part of the set's hash.
+
+`scoring`:
+
+| Key | With method | Meaning |
+|---|---|---|
+| `method` | — | `field_match` or `checks` |
+| `aggregate` | both | how results become the case score: `mean` (default) or `all` (1 only if every scored result is full) |
+| `normalise` | `field_match` | normalisers for every string field: `whitespace`, `casefold` |
+| `fields` | `field_match` | field → `{type, normalise}`. `type` is `string` (default), `number` or `date`; a number or a date is compared by value, a label that does not parse as text |
+| `checks` | `checks` | a list of checks, each with `id` and `kind`: the next section |
+
+With `field_match`, a field expected as `null` is not scored, and the case score is the share of right fields among
+the scored ones.
+
+## Checks
+
+Each check gives true or false, a share from 0 to 1, or nothing when it does not apply. A check over many items gives
+one result each, named `id.FIELD` or `id.N:tool`. Check ids must be unique, and no id may start with another id
+followed by a dot.
+
+| `kind` | Keys besides `id` and `kind` | Passes when |
+|---|---|---|
+| `field_match` | `expected` (default `fields`), `field`, `normalise`, `fields` | one result per expected field, as in `scoring.method: field_match` |
+| `exact` | `value` or `expected`, `field` | the text equals the value, ignoring surrounding spaces |
+| `contains` | `value` or `expected`, `field` | the text contains the value, ignoring case |
+| `regex` | `pattern`, `field` | the pattern matches somewhere in the text |
+| `number` | `value` or `expected`, `field`, `tol` | the number is within `tol` (default 0) of the value; amounts such as `$1,249.50` count as numbers |
+| `json_schema` | `schema`, `field` | the value is valid against the JSON Schema (draft 2020-12) |
+| `refusal` | `value` or `expected`, `field` (default `answer`) | a refusal is expected and the field is present and `null`, or none is expected and the field is filled. A missing answer is not a refusal |
+| `called` | `tool`, `args`, `actor` | the actor called the tool with matching arguments, and the call went through |
+| `not_called` | `tool`, `args`, `actor` | the actor never tried the tool with such arguments; a call the tool refused counts as tried |
+| `order` | `first`, `then`, `actor` | every call of a `then` tool comes after a call of `first`; true when no `then` tool was called |
+| `max_steps` | `max`, `actor` | the actor's answered model calls, without those marked with a `purpose`, are at most `max`; a run with no model calls passes |
+| `active` | `actor` | the actor got at least one tool call through |
+| `actions` | `actions` or `expected`, `actor` | one result per expected action `{tool, args}`: the actor called it with matching arguments |
+| `state` | `key` (`final_state`, default, or `state_change`), `expected` | the trace's value under `key` equals the expected one (by default the case's expected value under the same name) |
+| `doc_found` | `ids` or `expected`, `actor` | a share: the expected document ids among those the actor retrieved. Not scored when no ids are expected |
+| `function` | `function` (`module:function`), and any keys of your own | your function returns true, false, a share or nothing; [What it catches](/docs/what-it-catches) shows how to write one |
+
+Shared keys:
+
+- `value` is the check's own value; `expected` is a dotted path into the case's `expected` values.
+- `field` is a dotted path into the answer; without it the check reads the whole answer.
+- `actor` is `agent` (default), `user`, `system` or `env`.
+- In `args`, a plain value must match exactly, and a mapping is a set of operators: `eq`, `ne`, `gt`, `gte`, `lt`,
+  `lte` (these four take a number) and `in` (a list of allowed values). `{eq: {...}}` matches a mapping value.
+- Trace checks look at the steps of the runner's last attempt, and fail when the run has no trace. `called`, `active`,
+  `actions` and `order` count calls that went through or whose outcome the trace does not know (`unknown`).
+- `golden validate` checks each check against the case's expected values without running it, and rejects keys a kind
+  does not know (except in `function`).
+
+## Protocol
+
+For a program in any language (`pipeline: command`), such as the booking assistant above. For each run the gate starts
+the program in the runner's working directory, writes one JSON request to its stdin and closes it, then reads one JSON
+answer from its stdout. Write logs to stderr. This is protocol version 1; the gate checks every answer against
+`protocol.schema.json`.
+
+The request for the case `late-cancel` under `configs/booking.yaml`:
+
+```json
+{"protocol": 1,
+ "case": {"id": "late-cancel", "inputs": {"ticket": "/abs/path/golden/booking/late-cancel.txt"}},
+ "config": {"model": "gpt-5.4-mini-2026-03-17",
+            "prompt": {"system": "/abs/path/prompts/system.md", "summary": "/abs/path/prompts/summary.md"},
+            "input": "ticket", "params": {"temperature": 0}}}
+```
+
+An answer that passes all six checks of that case:
+
+```json
+{"protocol": 1,
+ "output": {"reply": "Booking B-1042 is cancelled. The late-cancellation fee applies."},
+ "input_tokens": 3275, "output_tokens": 83,
+ "model": "gpt-5.4-mini-2026-03-17",
+ "trace": {"steps": [
+   {"kind": "llm", "actor": "agent", "status": "ok", "model": "gpt-5.4-mini-2026-03-17",
+    "tokens_in": 980, "tokens_out": 24, "cost_usd": null},
+   {"kind": "tool", "actor": "agent", "status": "ok", "name": "find_booking", "args": {"booking_id": "B-1042"}},
+   {"kind": "llm", "actor": "agent", "status": "ok", "model": "gpt-5.4-mini-2026-03-17",
+    "tokens_in": 1105, "tokens_out": 21, "cost_usd": null},
+   {"kind": "tool", "actor": "agent", "status": "ok", "name": "cancel_booking", "args": {"booking_id": "B-1042"}},
+   {"kind": "llm", "actor": "agent", "status": "ok", "model": "gpt-5.4-mini-2026-03-17",
+    "tokens_in": 1190, "tokens_out": 38, "cost_usd": null}],
+  "final_state": null, "state_change": {"bookings": {"B-1042": "cancelled"}}, "stop": "done"}}
+```
+
+### Request (stdin)
+
+| Field | Type | Required | Meaning |
+|---|---|---|---|
+| `protocol` | `1` | yes | the protocol version |
+| `case.id` | string | yes | the case's id |
+| `case.inputs` | object: name → string | yes | input name → absolute path of the file |
+| `config.model` | string | yes | the model of the version under test |
+| `config.prompt` | string, or object: name → string | yes | absolute path of the prompt, or prompt name → absolute path when the config names several |
+| `config.input` | string | yes | which input the version reads |
+| `config.params` | object | yes | the config's `params`; a whole float arrives as an integer (`1.0` as `1`) |
+
+### Answer (stdout)
+
+| Field | Type | Required | Meaning |
+|---|---|---|---|
+| `output` | object or `null` | yes | what the case's checks score; `null` when there is no answer |
+| `raw` | any | no | the model's text; any other value is kept as JSON. Default: `output` as JSON |
+| `input_tokens`, `output_tokens` | whole number ≥ 0 | no | default 0. When the trace has model steps, the gate prices those instead |
+| `model` | string or `null` | no | the model the provider reported. A run with neither `model` nor model steps stays unpriced |
+| `trace` | object or `null` | no | the run's steps and end state: the next table |
+| `protocol` | `1` | no | any other value stops the whole run, and the gate keeps none of that answer's trace |
+
+### `trace`
+
+| Field | Type | Required | Meaning |
+|---|---|---|---|
+| `steps` | list of steps | no | the run's steps in order: the step table below |
+| `final_state` | any | no | the world after the run, for `state` checks |
+| `state_change` | any | no | what the run changed in the world |
+| `stop` | string or `null` | no | why the run ended, such as `done`, `max_steps`, `error` |
+
+The fields a step needs depend on its `kind` and `status`, which a flat table cannot show; this table is written by
+hand. Every step has `kind` and `actor` (`agent`, `user`, `system`, `env`).
+
+| `kind` | Required | Often added |
+|---|---|---|
+| `llm`, `status: ok` | `model`, `tokens_in`, `tokens_out`, `cost_usd` (`null`: the gate prices the step) | `ts`, `latency_ms`, `tokens_cached`, `tokens_reasoning`, `finish_reason`, `text`, `tool_calls` (`[{id, name, args}]`), `request_id`, `purpose` |
+| `llm`, `status: error` | `error`, `attempt` (1 for the first failed try of a call) | `ts`, `latency_ms` |
+| `tool` | `status` (`ok`, `error`, `unknown`), `name`, `args` | `call_id`, `result`, `error`, `ts`, `latency_ms` |
+| `message` | nothing | `text` |
+| `retrieval` | nothing | `docs` (`[{id, …}]`, read by `doc_found`), `query` |
+
+- Token counts are whole-number literals: `3.0` is not a token count.
+- The gate numbers the steps and replaces any `seq` or `run_attempt` you send; it keeps other fields as they are.
+- A user simulator's calls go under `actor: user`, so their cost stays apart from the agent's.
+- Within protocol 1 the gate may add request fields: ignore those you do not know. A change that breaks programs gets
+  a new `protocol` number.
+
+Your program's exit codes (not the gate's):
+
+| Exit | Meaning |
+|---|---|
+| 0 | the answer is on stdout |
+| 75 | try again later (rate limit, upstream timeout): the runner backs off and retries |
+| 78, 126, 127 | stop the whole run (no quota, wrong key, program not found) |
+| any other | this run fails |
+
+A trace printed before a failed exit is kept, so paid steps count. An answer that breaks the schema fails the run. On
+timeout the gate kills the program with its children, loses that attempt's trace and retries the run;
+[Connect your app](/docs/connect#exit-codes-and-timeouts) has the details.
+
+## Commands
+
+Run the commands with `uv run llm-release-gate COMMAND` in a project that lists the gate as a dependency. Each command
+prints its flags with `--help`. Planned: running the gate through `uvx` without adding it as a dependency.
+
+### pr
+
+Gates a pull or merge request, from a git checkout of the request. It checks out the target branch in a second
+worktree and readies both trees. Then, for each pipeline in `gate.yaml`, it checks the request's test set and compares
+the two versions' hashes: equal hashes give `unchanged`, and nothing runs. Otherwise it runs both versions in
+parallel, each with its own code, compares them and writes the results to `OUT/NAME`. Both versions also run, whatever
+the hashes, when a request changes `ignore` or which files belong to which pipeline, and while the target branch has no
+valid `gate.yaml` (**Changes that run every pipeline** under [gate.yaml](#gate-yaml)).
+
+| Flag | Meaning |
+|---|---|
+| `--base REV` | the target branch's revision, e.g. `origin/main`; required unless `--list` |
+| `--out DIR` | where each pipeline's results go, as `DIR/NAME`; required unless `--list` |
+| `--project DIR` | the project's directory, with `gate.yaml`; default `.` |
+| `--pipeline NAME` | gate only this pipeline |
+| `--list` | check `gate.yaml` and print its pipelines; runs nothing |
+
+```sh
+uv run llm-release-gate pr --base origin/main --out gate-out
+```
+
+### run
+
+Runs one version over a test set, `k` times per case, and appends records to a JSONL file. A rerun with the same
+version and set pays only for the runs that are missing.
+
+| Flag | Meaning |
+|---|---|
+| `--config FILE` | the version's config; required |
+| `--golden DIR` | the test set; required |
+| `-k K` | runs per case; default 1 |
+| `--out FILE` | the JSONL file to append to; required |
+| `--workers N` | runs in parallel; default 4 |
+| `--prices FILE` | a price file: puts a list price on each model step of a trace and stamps `prices_hash` |
+
+```sh
+uv run --env-file .env llm-release-gate run --config configs/invoice.yaml --golden golden/invoices -k 3 --out runs/invoice.jsonl
+```
+
+### gate
+
+Compares two files of runs with the naive rule and writes the verdict. It pairs the runs case by case and refuses, as
+`infra error`, files with different set hashes, cases on one side only, or different scorer versions (unless
+`--golden` rescores both). For a model name without a date it also refuses runs with a pause longer than an hour or
+with different reported models ([How it decides](/docs/how-it-decides#why-both-versions-run-at-the-same-time)).
+
+| Flag | Meaning |
+|---|---|
+| `--base FILE` | runs of the base version; this or `--no-base` is required |
+| `--no-base` | there is no base version yet: report the candidate alone and exit 0 |
+| `--candidate FILE` | runs of the candidate version; required |
+| `--threshold PP` | block when the mean score drops by more than this many points; default 5 |
+| `--relative` | read `--threshold` as a percentage of the base mean |
+| `--golden DIR` | rescore both versions from their saved answers with the current scorer, without calling the model |
+| `--prices FILE` | a price file: adds the cost of the decision |
+| `--max-cost-per-run USD` | budget: the candidate's mean cost per run; needs `--prices` |
+| `--max-latency S` | budget: seconds for the candidate's latency quantile; blocks only when the quantile's whole interval lies above |
+| `--latency-quantile Q` | the quantile for `--max-latency`; default 0.95 |
+| `--json FILE` | write the verdict as JSON |
+| `--markdown FILE` | write the comment |
+
+```sh
+uv run llm-release-gate gate --base runs/base.jsonl --candidate runs/candidate.jsonl --golden golden/invoices --markdown comment.md --json verdict.json
+```
+
+### golden validate
+
+Checks a test set and prints `N cases, sha256 HASH`.
+
+| Argument | Meaning |
+|---|---|
+| `DIR` | the test set's directory |
+| `--manifest FILE` | also fail unless the ids and the hash match the manifest |
+
+```sh
+uv run llm-release-gate golden validate golden/invoices --manifest manifests/invoices.yaml
+```
+
+### comment
+
+Posts the gate's Markdown as one comment on the pull or merge request; later runs edit the same comment.
+
+| Argument | Meaning |
+|---|---|
+| `FILE` | the Markdown from `gate --markdown` or `OUT/NAME/comment.md`. When the file is missing, it posts an infra-error comment saying the job stopped before a verdict |
+| `--name NAME` | the pipeline's name, for one comment per pipeline on a request |
+| `--check` | only check that this job can comment, before paying for runs |
+| `--dry-run` | print the comment, post nothing |
+
+```sh
+uv run llm-release-gate comment gate-out/invoice/comment.md --name invoice
+```
+
+It comments from two places: a GitHub Actions job on a `pull_request` event, with `GITHUB_TOKEN` (or `GH_TOKEN`) that
+has `pull-requests: write`; and a GitLab CI merge request pipeline, with `GITLAB_TOKEN`, a project access token with
+the `api` scope. Anywhere else it cannot comment and exits 1.
+
+## GitHub Actions
+
+Two actions, pinned to the same release. The job runs on `pull_request`, needs `permissions: \{contents: read,
+pull-requests: write\}`, and gets the provider's key from the repository's secrets as an environment variable.
+
+`Ilya-Grigoryev/llm-release-gate/setup@v0.1.0-dev.9` installs Python, uv and the project's locked environment:
+
+| Input | Default | Meaning |
+|---|---|---|
+| `project-dir` | `.` | the project's directory in the repository |
+| `gate-ssh-key` | empty | a read-only deploy key of the gate's repository, while that repository is private |
+| `python-version` | `3.12` | Python for uv to find; the project's own pin wins |
+| `uv-version` | `0.11.25` | the uv release to install |
+
+`Ilya-Grigoryev/llm-release-gate@v0.1.0-dev.9` gates one pipeline per step, with `pr --pipeline NAME`:
+
+| Input | Default | Meaning |
+|---|---|---|
+| `pipeline` | empty | the pipeline in `gate.yaml`; may be left out when `gate.yaml` has one |
+| `project-dir` | `.` | the project's directory, with `gate.yaml` |
+| `github-token` | `${{ github.token }}` | writes the comment; needs `pull-requests: write` |
+| `cases` | `true` | upload the test set's text files as a second artifact, for the dashboard |
+| `cases-retention-days` | `30` | days GitHub keeps that artifact |
+
+The action keeps two artifacts per pipeline: `release-gate-NAME-ATTEMPT` (records, verdict, comment and the logs of
+the runners and the comparison) and `release-gate-NAME-ATTEMPT-cases` (the test set's text files). The logs of
+`prepare` are not in the artifact; the job log shows them. On a pull request from a fork it runs nothing and fails as `not checked`. Planned: a
+GitLab component; today, GitLab and other CI run `pr` and `comment` themselves.
+
+## Exit codes
+
+`gate` and `pr` exit with the verdict's code; the action's job fails on any code other than 0 and passes on 0.
+`verdict.json` writes these outcome names in its `outcome` field, except where the table says otherwise; today neither
+`inconclusive` nor `infra error` appears there.
+
+| Code | Outcome | When |
+|---|---|---|
+| 0 | `pass` | the mean score did not drop by more than `delta`, and no budget is exceeded |
+| 0 | `unchanged` | `pr` only: the two version hashes are equal, so nothing ran. It needs a valid `gate.yaml` on the target branch and a request that changes neither `ignore` nor which files belong to which pipeline |
+| 0 | no base version (`outcome: "no base"` in `verdict.json`) | the target branch has no version of this pipeline: the candidate runs alone; its score and budget are reported and do not block |
+| 10 | `quality fail` | the mean score dropped by more than `delta` |
+| 11 | `inconclusive` | today only when a request removes or renames a pipeline in `gate.yaml` (`pr`). Each remaining pipeline's comment keeps its own verdict and gets a note, but every `pr` step that would exit 0 exits 11; with the action, every step that would have passed turns red. A quality fail, budget fail or infra error keeps its code. The naive rule never gives it. Planned: "not sure yet" from the statistical rule |
+| 12 | `budget fail` | quality passed; a cost or latency limit did not |
+| 20 | `infra error` | the runs cannot be compared, a step could not run, or the gate failed |
+| 1, 2 | — | left to Python (a crash) and its argument parser (a usage error), so a crash is never read as a verdict |
+
+`not checked` is not a code of the gate: on a pull request from a fork the action's step exits 1, so the job fails and
+a required check never passes an unchecked request.
+
+When `pr` gates several pipelines, it exits with the worst outcome, in this order: 20, 10, 12, 11, 0. A pipeline's
+`verdict.json` keeps its own outcome and code even when `pr` exits 11.
+
+The other commands:
+
+| Command | 0 | 1 | 2 |
+|---|---|---|---|
+| `run` | every run is done | some runs are not done, the account stopped the run (`Fatal`, exit 78, 126, 127), or the config, the set or the price file is broken | usage error |
+| `golden validate` | the set is valid (and matches the manifest) | it is not | usage error |
+| `comment` | posted, or with `--check`: can comment | cannot comment | usage error |
+
+## What a request writes
+
+`pr` writes each pipeline's results to `OUT/NAME`. The action uploads the records, the verdict, the comment and the
+logs of the runners and the comparison as the artifact `release-gate-NAME-ATTEMPT`, and `cases/` as
+`release-gate-NAME-ATTEMPT-cases`.
+
+| File | Contents |
+|---|---|
+| `comment.md` | the comment |
+| `verdict.json` | the verdict, below; missing after an `infra error` |
+| `base.jsonl`, `candidate.jsonl` | the records of each version's runs, below; no `base.jsonl` without a base version or when nothing ran |
+| `base.native.jsonl`, `candidate.native.jsonl` | the raw provider responses, when the pipeline recorded them |
+| `base.log`, `candidate.log`, `gate.log` | the logs of the two runners and of the comparison |
+| `.prepare-base.log`, `.prepare-candidate.log` | the logs of `prepare` and `uv sync --locked` in each tree. Not in the artifact; `pr` prints them to the job log |
+| `cases/` | the test set's text files (`.yaml`, `.yml`, `.json`, `.txt`, `.md`, `.csv`), never images; `inputs-url.txt` when `inputs-url` is set. The second artifact, when `cases` is `true` |
+
+`verdict.json`:
+
+| Field | Meaning |
+|---|---|
+| `outcome`, `exit_code` | `pass`, `quality fail`, `budget fail`, `no base` or `unchanged`, and its code |
+| `base_mean`, `candidate_mean` | the mean score over the first run of each case, from 0 to 1; `null` for a side that did not run |
+| `diff_pp`, `limit_pp` | candidate minus base, in points; the largest drop that still passes |
+| `rule` | the rule, in words |
+| `cases`, `worse` | the number of cases; the cases that scored lower, as `[case, base, candidate]`, largest drop first |
+| `threshold_pp`, `relative` | the threshold as given |
+| `base_config`, `candidate_config`, `set_hash` | the two versions' hashes and the test set's |
+| `scorer_version`, `rescored` | the scorer, and whether the gate rescored the saved answers |
+| `cost_usd`, `prices_hash` | `{base, candidate}` at the gate's prices, and the hash of its price table; `null` without prices |
+| `budget` | the budget check: `outcome` (`within` or `over`), `over`, `unchecked`, `runs`, `retried`, `cost_per_run`, `cost_limit`, `latency_q`, `latency_s`, `latency_ci`, `latency_limit`, `level`; `null` without budgets |
+| `models_without_date` | model names without a date in the runs |
+| `runs_per_case` | `{base, candidate}`: runs per case; the naive rule uses the first |
+
+Two outcomes write fewer fields:
+
+- `unchanged` writes only `outcome`, `exit_code`, `base_mean`, `candidate_mean` and `diff_pp` (all three `null`),
+  `base_config`, `candidate_config` and `set_hash`.
+- `no base` has no `limit_pp`, `rule`, `cases`, `worse`, `threshold_pp`, `relative` or `rescored`. Its `base_mean`,
+  `diff_pp` and `base_config` are `null`, `cost_usd`, when there are prices, has `base: null`, and
+  `runs_per_case.base` is `0`.
+
+Planned: the statistical rule adds its interval and the seed it used to the verdict.
+
+## The record of a run
+
+One JSON line per run of a case and repetition, record version 6. A run that produced no answer is recorded too, with
+`error` set; a run that the account stopped before it paid for anything is not. A rerun appends lines for the runs
+that are still missing, so a file can hold several lines for one case and repetition; the gate reads the last one
+without an `error`.
+
+| Field | Meaning |
+|---|---|
+| `record_version` | the record's format |
+| `config_hash`, `set_hash` | the version (config, prompts, code) and the test set; runs on different sets are never paired |
+| `commit` | the project's commit, with `+dirty` for uncommitted edits; to find the code, not to compare |
+| `case`, `rep`, `run_id`, `timestamp` | which case, which repetition (from 0), which invocation of the runner, when (UTC) |
+| `requested_model`, `model` | the model the config asked for, and the one the provider reported |
+| `prices_hash` | the hash of the price table the runner used for `usage`; `null` without one, as in every run `pr` starts |
+| `output`, `raw` | the parsed answer and the model's text |
+| `input_tokens`, `output_tokens`, `reasoning_tokens` | token counts |
+| `latency_s`, `wall_s` | the time of the attempt that answered; the clock time of the run, backoff included |
+| `fingerprint`, `finish_reason`, `request_id` | what the provider reported |
+| `trace` | the run's steps, below; `null` for a pipeline that records none |
+| `usage` | per actor: `llm_calls`, `tokens_in`, `tokens_out`, `cost_usd`; `usage_error` when a step could not be summed |
+| `scorer_version`, `hits`, `score`, `score_error` | the scorer; each check's result by id; the case score from 0 to 1; why scoring failed |
+| `retries`, `error` | the backoffs used; why the run produced no answer (`null` when it answered) |
+
+The trace:
+
+| Field | Meaning |
+|---|---|
+| `v` | the trace's format |
+| `steps` | the steps in order, each with `seq`, `kind`, `actor`, `ts` and `run_attempt`, and the fields of its kind (the step table in [Protocol](#protocol)) |
+| `final_state`, `state_change` | the world after the run and what changed, as your adapter or program reports them |
+| `stop` | why the run ended, as your adapter or program says (`done`, `user_stop`, `max_steps`, `max_turns`, `error`, `aborted`); the runner sets `error` on a failed run with steps and no `stop`. The gate does not check the value |
+| `last_attempt` | the number of the runner's final attempt; checks look at its steps |
+| `notes` | calls that went unrecorded, and why |
+| `native` | the file with the raw provider responses |
+
+Any step may carry `extra` for what the format does not name. A model step stores only its new output, not the full
+prompt: the system prompt and the tools are part of the version.

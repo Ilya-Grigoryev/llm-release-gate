@@ -123,7 +123,7 @@ export default async function Case(props: PageProps<"/[owner]/[repo]/runs/[id]/[
     <section>
       <Crumbs
         items={[
-          { href: "/", label: "Projects" },
+          { href: "/projects", label: "Projects" },
           { href: `/${repo.full_name}`, label: repo.full_name },
           { href: `/${repo.full_name}/runs/${run.artifact_id}`, label: title },
           { label: row.case },

@@ -1,0 +1,584 @@
+export const metadata = { title: "Get started" };
+
+# Get started
+
+This page takes you from a GitHub repository to a first pull request that the gate answers with a comment. You add the
+gate as a dependency, describe one version of your LLM application and one test case, and add the gate to your
+workflow. Most steps end with a command that tells you whether the step worked, so most mistakes show up on your
+machine and not in CI.
+
+## Before you start
+
+You need:
+
+- **Access to the gate.** The gate's repository is private today. Only private repositories of its owner can use it:
+  the owner shares the gate's actions with them and gives each one a read-only deploy key
+  ([step 1](#1-get-access-while-the-gate-is-private)). Other projects wait for the public release, which is planned.
+- **A GitHub repository** with Actions turned on. Outside GitHub Actions, see [Other CI](#other-ci).
+- **A uv project**: `pyproject.toml` and `uv.lock` at the project's root, Python 3.12 or newer. The gate installs the
+  project with `uv sync --locked`, so the lock file must be committed and up to date. This holds for an application in
+  another language too: today it still needs a small `pyproject.toml` that lists the gate. (Planned: the gate installs
+  itself, and a project without Python needs no `pyproject.toml`.)
+- **An API key** for your model provider. The examples use OpenAI.
+
+The examples on this page use a made-up application, an **invoice reader**: one model call reads the vendor, the date
+and the total from the text of an invoice. Your application can be anything from one call to an agent with tools;
+[Connect your app](/docs/connect) covers the other kinds.
+
+Words this page uses ([How it works](/docs/how-it-works) explains each):
+
+- A **version** of your application is its config file, the bytes of the prompt files the config names, and the
+  repository's code as git sees it ([step 4](#4-describe-the-version-and-connect-your-app) has the details).
+- A **case** is one situation your application must handle: a YAML file with its inputs, the expected values and how to
+  score an answer. A directory of cases is a **test set**.
+- A **run** is a version handling one case once.
+- The **base** is the version on the target branch of a pull request; the **candidate** is the version in the request.
+- The **verdict** is the gate's answer for a pipeline, posted as a comment on the request;
+  [What each outcome means](#what-each-outcome-means) lists them all.
+
+What you get today: on each pull request that changes the application, the gate runs the base and the candidate once
+on every case, and blocks when the candidate's mean score is lower than the base's by more than `delta` points (5 by
+default; the mean score runs from 0 to 1 and is read in points out of 100). This is the naive rule. It is naive because
+a model answers differently from run to run, so one run of each version can block or pass by chance. A statistical
+rule, with several runs, an interval and a third answer, "not sure yet", is planned ([How it decides](/docs/how-it-decides)).
+
+<Fig id="start-1" caption={"Seven new files, three edited ones and two secrets. The numbers are the steps below."} alt={"The setup does this, by step: 1, adds the secret `LLM_RELEASE_GATE_KEY`; 2, edits `pyproject.toml` and `uv.lock` to add the gate as a dependency; 3, adds `gate.yaml`; 4, adds the version's config `configs/invoice.yaml`, its prompt `prompts/extract.md` and an adapter `src/invoice_reader/gate_adapter.py`; 5, adds a first case `golden/invoices/inv-001.yaml` with its input file `golden/invoices/inputs/inv-001.txt`, and adds the lines `.env` and `runs/` to `.gitignore`; 6, adds the workflow `.github/workflows/release-gate.yml` and the secret `OPENAI_API_KEY`."} />
+
+## 1. Get access while the gate is private
+
+The owner of the gate's repository does this once per project. It has two parts.
+
+**Share the actions.** In the gate's repository, open Settings → Actions → General. Under Access, choose "Accessible
+from repositories owned by" the owner's account and save. The owner's private repositories can then use the gate's
+actions.
+
+**Give the project a deploy key.** Create a key pair, add its public half to the gate's repository as a deploy key
+without write access, and store its private half as a secret of your project:
+
+```sh
+ssh-keygen -t ed25519 -N "" -f llm-release-gate-key
+gh repo deploy-key add llm-release-gate-key.pub --repo Ilya-Grigoryev/llm-release-gate --title "your-project"
+gh secret set LLM_RELEASE_GATE_KEY < llm-release-gate-key   # run inside your project's repository
+```
+
+The repository settings do the same if you prefer the web page (Settings → Deploy keys in the gate's repository,
+Settings → Secrets and variables → Actions in yours). The workflow passes the secret to the gate's `setup` step as
+`gate-ssh-key` ([step 6](#6-add-the-gate-to-your-workflow)).
+
+**Check.** Before you delete the key files, read the gate's repository with the new key and no other, then list your
+project's secrets:
+
+```sh
+GIT_SSH_COMMAND="ssh -F /dev/null -i llm-release-gate-key -o IdentitiesOnly=yes" \
+  git ls-remote git@github.com:Ilya-Grigoryev/llm-release-gate.git v0.1.0-dev.9
+gh secret list   # run inside your project's repository
+```
+
+The first command prints one line: a commit id and `refs/tags/v0.1.0-dev.9`. On your first SSH connection to GitHub it
+asks you to accept GitHub's host key first. `Permission denied (publickey)` means the gate's repository does not know
+this key: add it again. `gh secret list` shows `LLM_RELEASE_GATE_KEY`. Whether the secret holds the right half shows
+only in CI: a wrong secret makes the `setup` step fail when it installs the project, before any model is called.
+
+Then delete the key files:
+
+```sh
+rm llm-release-gate-key llm-release-gate-key.pub
+```
+
+Planned: once the gate installs itself from its release, the deploy key and the `setup` step go away.
+
+## 2. Add the dependency
+
+Pin the gate to a release. `uv add` writes both parts of the dependency and updates the lock file:
+
+```sh
+uv add "llm-release-gate @ git+https://github.com/Ilya-Grigoryev/llm-release-gate" --tag v0.1.0-dev.9
+```
+
+```toml
+[project]
+dependencies = ["llm-release-gate"]
+
+[tool.uv.sources]
+llm-release-gate = { git = "https://github.com/Ilya-Grigoryev/llm-release-gate", tag = "v0.1.0-dev.9" }
+```
+
+Commit `pyproject.toml` and `uv.lock` together. In CI the gate installs each branch with `uv sync --locked`, and a
+stale lock file stops it.
+
+**Check.**
+
+```sh
+uv run llm-release-gate pr --help
+```
+
+```
+usage: llm-release-gate pr [-h] [--base BASE] [--project PROJECT] [--out OUT]
+                           [--pipeline PIPELINE] [--list]
+```
+
+It prints the help of `pr`, the command the gate runs in CI. If uv cannot fetch the gate, your git cannot read its
+repository: while it is private, only its owner's account can.
+
+## 3. Write gate.yaml
+
+`gate.yaml` at the project's root says what to gate. Each entry under `pipelines` names a version's config and the
+test set it runs on:
+
+```yaml
+pipelines:
+  invoice:                        # names the comment and the artifact
+    config: configs/invoice.yaml  # the version
+    golden: golden/invoices       # its test set
+delta: 5                          # block when the mean score drops by more than 5 points
+```
+
+A case scores from 0 to 1, and the mean score over all cases is read in points out of 100. With `delta: 5` the gate
+blocks a request when the mean score falls by more than 5 points, for example from 0.82 to 0.76. Other fields
+(`k`, `prices`, `budgets`, `ignore`, `prepare`) are optional; [Reference](/docs/reference) lists them all, and
+[Next steps](#next-steps) shows prices and budgets.
+
+The gate reads its rules (`delta`, `k`, `budgets`, `prices`) from the target branch's `gate.yaml`. A request that
+changes them still runs under the old ones; the new rules apply after merge, and the comment says so. When the target
+branch has no `gate.yaml` yet, as on your first request, the request's own rules apply. A pipeline that is new in the
+request follows the target branch's top-level rules.
+
+**Check.**
+
+```sh
+uv run llm-release-gate pr --list
+```
+
+```
+invoice
+```
+
+It prints the names of the pipelines. A broken file gives `infra error` and every problem it found, for example:
+
+```
+infra error: gate.yaml: missing pipelines.invoice.golden; pipelines.invoice: Additional properties are not allowed ('goldn' was unexpected)
+```
+
+`--list` checks `gate.yaml` only. It does not open the config, the prompt or your code; [step 5](#5-write-a-first-case)
+checks those by running one case.
+
+## 4. Describe the version and connect your app
+
+### The version's config
+
+The config says which code runs, with which model, prompt and parameters:
+
+```yaml
+# configs/invoice.yaml: the version in production
+pipeline: invoice_reader.gate_adapter  # the module with build(config)
+model: gpt-4.1-mini-2025-04-14         # a dated snapshot
+prompt: ../prompts/extract.md          # relative to this file
+input: text                            # which input of a case this version reads
+params: {temperature: 0}
+```
+
+The prompt, `prompts/extract.md`:
+
+```text
+Read the invoice below. Answer in JSON with the keys vendor, date and total, copied as they appear on the invoice.
+Use null for a value the invoice does not show.
+```
+
+Prefer a model name with a date. A name without one works, but the provider may change the model behind it. For such a
+name the gate warns in its comment, and it refuses to compare the two versions when their runs, taken together, have a
+pause longer than an hour, or when the same name got different models from the provider. Every run record keeps the
+model you asked for next to the one the provider reported.
+
+A pipeline with several prompts names them: `prompt: {extract: a.md, check: b.md}`. Optional fields are `params`,
+`max_retries` (default 5) and `timeout_s` (default 60); a program also names its `command`
+([Option B](#option-b-any-program)).
+
+**What counts as the version.** A version is its config, the bytes of its prompts and the repository's code as git sees
+it. Every file git tracks counts, by the id git gives its content, and uncommitted edits count too. Untracked files do
+not. Documentation (`README`, `CHANGELOG`, `CONTRIBUTING`, `LICENSE`, `docs/`), CI (`.github/`), `gate.yaml` with its
+price files, the paths in its `ignore`, its test sets and the files of its other pipelines do not count. You never bump
+a version number: when a request changes nothing that counts, the gate reports `unchanged` and calls no model. The
+exception is a request that changes `gate.yaml`'s `ignore`, which files belong to a pipeline (its config, test set,
+manifest, prompts or price file) or the top-level price file: then every pipeline runs, so a request cannot hide new
+code under a new rule ([When nothing runs](/docs/how-it-works#when-nothing-runs)).
+
+### Option A: a Python adapter
+
+The gate imports the module named in `pipeline` and calls its `build(config)`. The object it returns answers one case
+at a time with `run(case)`. Put the module inside your package, so the project's environment can import it. The
+project must be an installable package, with a `[build-system]` table in `pyproject.toml` as `uv init --package`
+writes it. Without one, uv does not install `src/invoice_reader`, and the check in step 5 stops with
+`pipeline 'invoice_reader.gate_adapter': cannot import (ModuleNotFoundError: No module named 'invoice_reader')`.
+
+```python
+# src/invoice_reader/gate_adapter.py
+"""The gate's view of the invoice reader: one model call per case."""
+
+import json
+import time
+
+import openai
+from openai import OpenAI
+
+from llm_release_gate.pipeline import Answer, Fatal, Retryable
+
+
+class InvoiceReader:
+    def __init__(self, config):
+        self.config = config
+        self.prompt = config.prompt.read_text()
+        self.client = OpenAI(max_retries=0, timeout=config.timeout_s)  # the gate retries, not the SDK
+
+    def run(self, case):
+        text = case.inputs[self.config.input].read_text()
+        start = time.perf_counter()
+        try:
+            r = self.client.chat.completions.create(
+                model=self.config.model,
+                messages=[
+                    {"role": "system", "content": self.prompt},
+                    {"role": "user", "content": text},
+                ],
+                response_format={"type": "json_object"},
+                **self.config.params,
+            )
+        except openai.RateLimitError as e:
+            if getattr(e, "code", None) == "insufficient_quota":
+                raise Fatal(str(e)) from e  # no call can succeed: stop all runs of the version
+            raise Retryable(str(e)) from e
+        except (openai.APIConnectionError, openai.InternalServerError) as e:
+            raise Retryable(str(e)) from e  # the same call may succeed later
+        except (openai.AuthenticationError, openai.NotFoundError) as e:
+            raise Fatal(str(e)) from e  # wrong key or model
+        raw = r.choices[0].message.content or ""
+        try:
+            output = json.loads(raw)
+        except json.JSONDecodeError:
+            output = None  # no answer: every field scores as wrong
+        return Answer(
+            output=output,
+            raw=raw,
+            input_tokens=r.usage.prompt_tokens,
+            output_tokens=r.usage.completion_tokens,
+            latency_s=time.perf_counter() - start,
+            model=r.model,  # the model the provider reports
+        )
+
+
+def build(config):
+    return InvoiceReader(config)
+```
+
+In this example the adapter is the whole invoice reader: it makes the one model call itself. If your application
+already has this code, call it from `run` instead and pass it the config's model, prompt and `params`, so the gate runs
+the code you ship and the version's config decides what that code gets. Point `prompt:` at the prompt file your
+application reads. [Connect your app](/docs/connect) shows an adapter that calls an application's own agent.
+
+Raise `Retryable` when the same call may succeed later (rate limit, timeout, server error): the gate retries with
+backoff of 1, 2, 4… seconds. Raise `Fatal` when no call can succeed (out of quota, wrong key): the gate stops all runs
+of the version, and cases that have not started do not run. An agent that calls tools records its steps into a trace;
+see [Connect your app](/docs/connect).
+
+Planned: the adapter returns a plain dictionary and no longer imports the gate.
+
+### Option B: any program
+
+An application in another language needs no Python adapter. Name the program in the config:
+
+```yaml
+# configs/invoice.yaml
+pipeline: command
+command: [node, extract.js]   # relative to where the gate runs: the project's directory in CI
+model: gpt-4.1-mini-2025-04-14
+prompt: ../prompts/extract.md
+input: text
+params: {temperature: 0}
+```
+
+For each run the gate writes one JSON request to the program's stdin and reads one JSON answer from its stdout:
+
+```js
+// extract.js: one request in, one answer out
+let input = "";
+process.stdin.on("data", (chunk) => (input += chunk));
+process.stdin.on("end", async () => {
+  const request = JSON.parse(input);
+  const text = require("fs").readFileSync(request.case.inputs.text, "utf8");
+  const answer = await readInvoice(text, request.config); // your application's code
+  process.stdout.write(JSON.stringify({ protocol: 1, output: answer }));
+});
+```
+
+The request holds the case's id and the paths of its inputs, and the version's model, prompt path and `params`. It
+never holds the expected values. Only `output` is required in the answer; tokens, the model and a trace are optional.
+Exit with 75 to have the run retried, and with 78 to stop all runs of the version. Write logs to stderr.
+[Connect your app](/docs/connect) has every field and the trace format.
+
+**Check.** You check this step in the next one, when there is a case to run.
+
+## 5. Write a first case
+
+A case is a YAML file in the test set's directory, with its inputs next to it. It says what goes in, what should come
+out, and how to score the answer:
+
+```yaml
+# golden/invoices/inv-001.yaml
+id: inv-001
+version: 1                   # the case's own revision, not your app's: raise it when you change what the case asks
+input:
+  text: inputs/inv-001.txt   # relative to this file
+expected:
+  vendor: Northwind Supplies Ltd
+  date: "14.03.2026"         # quote dates
+  total: "1249.50"
+scoring:
+  method: field_match
+  normalise: [whitespace, casefold]
+  fields:
+    date: {type: date}       # compared by value: 2026-03-14 matches too
+    total: {type: number}    # $1,249.50 matches too
+```
+
+Its input, `golden/invoices/inputs/inv-001.txt`:
+
+```text
+NORTHWIND SUPPLIES LTD
+12 Harbour Road, Leeds LS1 4AB
+
+INVOICE 2026-0412                 Date: 14.03.2026
+Bill to: Oakline Studio
+
+Printer paper A4, 20 boxes           420.00
+Toner cartridges, 6                  604.00
+Delivery                              17.25
+Subtotal                           1,041.25
+VAT 20 %                             208.25
+TOTAL DUE                          1,249.50
+```
+
+`field_match` compares each expected field with the answer: `vendor` as text after removing extra spaces and case,
+`date` and `total` by value. The case scores the share of right fields, so two right fields out of three give 0.67.
+Agents, dialogs and answers that are not fields use `method: checks` with checks over the answer and the steps of the
+run; [Write tests](/docs/write-tests) shows them. One case is enough to see the gate work. A useful set covers the cases
+your application must get right; [What it catches](/docs/what-it-catches) shows which kinds of change a set can reveal.
+
+**Check the case.**
+
+```sh
+uv run llm-release-gate golden validate golden/invoices
+```
+
+```
+1 cases, sha256 a5ccf81ed494830daa398147a6cbe118fccbd0fcd2e9f99ed98f677d91a56d57
+```
+
+It checks every case against the schema, that ids are unique and that every input exists inside the set, then prints
+a hash of the set. A problem names the file, for example an ISO date without quotes (`date: 2026-03-14`), which YAML
+reads as a date and not as text:
+
+```
+inv-001.yaml: non-JSON value, quote dates and times
+```
+
+**Check the version: run it once.** This calls the model once per case, so it costs the price of one call here. Add
+your key to `.env` and keep `.env` and `runs/` out of git: a run record you commit becomes part of the version.
+
+```sh
+echo "OPENAI_API_KEY=sk-..." >> .env
+printf '.env\nruns/\n' >> .gitignore
+uv run --env-file .env llm-release-gate run --config configs/invoice.yaml --golden golden/invoices --out runs/first.jsonl
+```
+
+```
+1 records written, 1 of 1 done, mean score 1.000; config 1c633f39602e, set a5ccf81ed494
+```
+
+Your score and hashes will differ. The config hash also changes once you commit these files in step 6: until then the
+new adapter is untracked, and untracked files are not part of the version. If the module cannot be imported, the
+prompt is missing or the key is wrong, the command stops and says which. `runs/first.jsonl` holds the answer, the score
+of each field and the tokens of the run.
+
+## 6. Add the gate to your workflow
+
+Add a job that runs on pull requests. Put your provider's key in the repository's secrets as `OPENAI_API_KEY`
+(`gh secret set OPENAI_API_KEY`), next to `LLM_RELEASE_GATE_KEY` from step 1:
+
+```yaml
+# .github/workflows/release-gate.yml
+name: release-gate
+on: pull_request
+jobs:
+  release-gate:
+    runs-on: ubuntu-latest
+    permissions: {contents: read, pull-requests: write}
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: Ilya-Grigoryev/llm-release-gate/setup@v0.1.0-dev.9
+        with:
+          gate-ssh-key: ${{ secrets.LLM_RELEASE_GATE_KEY }}  # while the gate's repository is private
+      - uses: Ilya-Grigoryev/llm-release-gate@v0.1.0-dev.9
+```
+
+`setup` installs Python, uv and your project's locked environment. The second step is the gate. It needs
+`pull-requests: write` to post its comment. Use the same tag as in `pyproject.toml`.
+
+Optionally, let a new push replace the run for the old one:
+
+```yaml
+    concurrency:
+      group: release-gate-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+```
+
+**Check: run the gate locally.** The action runs the same command. Commit your files first, so the local run sees what
+CI will see, then compare your branch with the target branch:
+
+```sh
+git fetch origin main
+uv run --env-file .env llm-release-gate pr --base origin/main --out ../release-gate-out
+```
+
+It readies both branches, runs what has to run and writes one directory per pipeline: `../release-gate-out/invoice/`
+holds `comment.md` (the comment CI would post, without the pipeline's name in front and the job-log link that posting
+adds), `verdict.json`, the runs of each side (`candidate.jsonl`, and `base.jsonl` once there is a base version), the
+logs and `cases/`. The exit code is the verdict's ([outcomes](#what-each-outcome-means)). On your first setup it is 0,
+with the comment shown in the figure under [step 7](#7-open-a-pull-request). If it is 20 instead, read `comment.md`:
+step 7 explains the most common cause.
+
+## 7. Open a pull request
+
+Push your branch and open a pull request. The gate's job then:
+
+1. stops as `not checked` if the request comes from a fork (see below);
+2. finds the pipeline in `gate.yaml` and checks that it can comment;
+3. checks out the target branch beside the request, readies both and checks the test set;
+4. runs what changed and decides;
+5. posts one comment, and edits that same comment on later pushes;
+6. keeps the runs as an artifact `release-gate-invoice-<attempt>`, and the test set's case files and text inputs as a
+   second one for 30 days, for the [dashboard](/docs/dashboard).
+
+**The first time: no base version.** The target branch has no `gate.yaml` and no file at the config's path yet, so
+there is nothing to compare with. The candidate runs alone; its score (and cost, if you set prices) is reported, and
+the job passes.
+
+<Fig id="start-2" caption={"The first comment. Nothing to compare with yet, so the job passes and the comment reports the candidate's score."} alt={"A comment on the pull request titled \"Release gate: no base version\". It says the target branch has no version of this pipeline yet, so there is nothing to compare with, and that the candidate scores 1.000 on 1 case, with the short hashes of the config and the test set."} />
+
+**If the first comment says infra error instead.** The gate readies the target branch with `uv sync --locked` too. If
+the target branch is not a uv project yet (no `pyproject.toml`), that fails and the comment reads "The target branch's
+project could not be prepared." Merge `pyproject.toml` and `uv.lock` in a pull request of their own first, then open
+the request that adds the gate. The local run in step 6 shows this before you push.
+
+**From the second request on.** After you merge, the target branch has a version, and every later request is compared
+with it:
+
+- A request that changes only documentation, CI or other files that do not count gets `unchanged`: nothing ran, no
+  model was called. The exception is a request that also changes `gate.yaml`'s `ignore`, which files belong to a
+  pipeline, or which price file it names: then every pipeline runs.
+- A request that changes the prompt, the config or the code runs both versions on every case and gets `pass`,
+  `quality fail` or, with budgets set, `budget fail`.
+
+**A request from a fork.** On `pull_request`, GitHub gives a fork's workflow no secrets, so the gate cannot call the
+model. The job fails as `not checked` and says why. To gate the request, a maintainer pushes its branch to your
+repository and opens the request from there.
+
+**Make it count.** The job fails with the gate's verdict, but it only advises until you make the `release-gate` job a
+required status check in your branch protection.
+
+## What each outcome means
+
+| Outcome | What happened | Exit code | Job |
+|---|---|---|---|
+| pass | The candidate's mean score did not drop by more than `delta`, and its budgets held | 0 | green |
+| quality fail | The mean score dropped by more than `delta` | 10 | red |
+| budget fail | Quality passed, a cost or latency budget did not | 12 | red |
+| inconclusive | Today only when the request removes a pipeline from `gate.yaml` (or renames it), so no version of it was compared | 11 | red |
+| infra error | The runs cannot be compared, or the tool failed; the comment says why and may show the end of a log | 20 | red |
+| unchanged | The version is the same in both branches, and `gate.yaml` keeps its `ignore`, which files belong to each pipeline and which price file it names; nothing ran | 0 | green |
+| no base version | The target branch has no version of this pipeline; the candidate ran alone | 0 | green |
+| not checked | The request comes from a fork; no secrets, so nothing ran and no comment is posted | — (the action's own step fails) | red |
+
+`llm-release-gate pr` gives every exit code in the table. `not checked` is the exception: the action reports it in a
+step of its own, before `pr` runs.
+
+The planned statistical rule adds a real "not sure yet" answer when the runs do not show clearly whether the change
+cost more than `delta`. [Read a verdict](/docs/read-a-verdict) explains each outcome and what to do next.
+
+## Next steps
+
+**Write more cases.** One case shows the gate working, but it only sees that one input: a change that breaks other
+inputs passes. Start with the cases your users depend on, add the edge cases, and see [Write tests](/docs/write-tests).
+
+**Add prices and budgets.** With a price file the comment shows what the decision cost, and a budget blocks a candidate
+that is too expensive or too slow:
+
+```yaml
+# gate.yaml
+pipelines:
+  invoice:
+    config: configs/invoice.yaml
+    golden: golden/invoices
+delta: 5
+prices: prices.yaml             # list prices, for the cost line and the cost budget
+budgets:
+  cost_per_run_usd: 0.002       # the candidate's mean cost per run
+  latency_s: 8                  # the candidate's 95th-percentile latency; blocks only when its whole interval is above
+```
+
+```yaml
+# prices.yaml: USD per 1M tokens, [input, output] or [input, output, cached input], matched by model name prefix.
+# Example numbers: copy your provider's current list prices.
+gpt-4.1-mini: [0.40, 1.60, 0.10]
+```
+
+Commit the price file. As with every rule, the request that adds prices and budgets runs under the target branch's
+rules, so its comment shows no cost and checks no budget yet; they apply from the next request after merge. Adding
+`prices` changes which price file `gate.yaml` names, so this request runs every pipeline even when the version is the
+same.
+
+A request that changes the version costs one run of each version per case, plus retries. With `k` set, each version
+runs `k` times per case; today the decision uses the first run of each case, and the other runs feed only the budgets.
+A request that changes nothing that counts costs nothing, unless it changes `gate.yaml`'s `ignore`, which files belong
+to a pipeline or which price file it names, as the request above does: then every pipeline runs.
+
+**More than one pipeline.** List each under `pipelines` and add one gate step per pipeline, with `if: $\{\{ !cancelled()
+\}\}` on all but the first, so a block in one does not skip the others. Each gets its own comment and artifact:
+
+```yaml
+      - uses: Ilya-Grigoryev/llm-release-gate@v0.1.0-dev.9
+        with: {pipeline: invoice}
+      - uses: Ilya-Grigoryev/llm-release-gate@v0.1.0-dev.9
+        if: ${{ !cancelled() }}
+        with: {pipeline: booking}
+```
+
+**Protect the gate's files.** The gate runs the request's code, workflow and lock file, so it catches mistakes, not a
+hostile author. Protect `.github/`, `gate.yaml` and the lock file with CODEOWNERS.
+
+## Other CI
+
+Outside GitHub Actions, the same command does the work from the repository's root:
+
+```sh
+uv run llm-release-gate pr --base origin/main --out OUT
+uv run llm-release-gate comment OUT/invoice/comment.md --name invoice
+```
+
+`pr` writes `OUT/NAME` for every pipeline (`--project DIR` when `gate.yaml` is not at the root). `comment` posts the
+verdict; on GitLab it needs `GITLAB_TOKEN`, a project access token with the `api` scope. `comment --check` tells
+beforehand whether the job can comment, and `--dry-run` prints the comment without posting it. The job must install
+the project with uv first, as `setup` does on GitHub. Planned: a GitLab CI/CD component.
+
+## What is planned for setup
+
+None of this exists yet; each item is planned:
+
+- `llm-release-gate init` writes `gate.yaml`, an example case, an adapter and the workflow, and overwrites nothing;
+  `llm-release-gate doctor` checks the setup before the first pull request.
+- The gate installs itself from its release: no `setup` step, no deploy key, and a project without Python needs no
+  `pyproject.toml`.
+- A Python adapter returns a plain dictionary and does not import the gate.
+- A GitLab CI/CD component.
+- The statistical rule (stage C): several runs per version, an interval, and three answers: pass, block, not sure yet.
+- A public release, open to any project.

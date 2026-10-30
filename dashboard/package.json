@@ -9,18 +9,24 @@
     "lint": "eslint",
     "typecheck": "next typegen && tsc --noEmit",
     "test": "vitest run",
-    "db:migrate": "node --env-file-if-exists=.env.local scripts/migrate.mjs"
+    "db:migrate": "node --env-file-if-exists=.env.local scripts/migrate.mjs",
+    "sync-schemas": "node scripts/sync-schemas.mjs"
   },
   "dependencies": {
+    "@mdx-js/loader": "^3.1.1",
+    "@mdx-js/react": "^3.1.1",
     "@neondatabase/serverless": "^1.2.0",
+    "@next/mdx": "^16.4.3",
     "fflate": "^0.8.3",
     "next": "16.4.3",
     "react": "19.3.0",
     "react-dom": "19.3.0",
+    "remark-gfm": "^4.0.1",
     "yaml": "^2.9.1"
   },
   "devDependencies": {
     "@tailwindcss/turbopack": "^4",
+    "@types/mdx": "^2.0.14",
     "@types/node": "^22.20.5",
     "@types/react": "^19",
     "@types/react-dom": "^19",

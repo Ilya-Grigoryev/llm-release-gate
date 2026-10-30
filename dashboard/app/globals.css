@@ -1,58 +1,307 @@
 @import "tailwindcss";
 
+/*
+ * Colour carries meaning only: the two arms (base = main, cand = the pull request) and the three signal lamps
+ * (go = pass, stop = block, wait = not sure yet). Everything else is ink on paper.
+ */
 :root {
   color-scheme: light;
-  --canvas: #f6f5f3;
+  /* The dashboard's palette (the owner's choice, 30.10.): warm neutrals, blue for main, orange for the request. */
+  --paper: #f6f5f3;
   --panel: #ffffff;
-  --line: #e4e2dd;
   --ink: #1b1a18;
   --ink-2: #55534e;
-  --ink-3: #8b8984;
+  --ink-3: #74726c;
+  --line: #e4e2dd;
   --base: #2a78d6;
   --cand: #eb6834;
-  --good: #0ca30c;
-  --warn: #fab219;
-  --bad: #d03b3b;
-  --none: #8b8984;
+  --go: #0ca30c;
+  --stop: #d03b3b;
+  --wait: #fab219;
+  /* text in the verdict colours: the fills are too light to read on paper */
+  --go-ink: #0a7a0a;
+  --stop-ink: #b42f2f;
+  --wait-ink: #8a5b00;
+  --neutral: #8b8984;
+  /* text in the arm colours */
+  --base-ink: #1f63b8;
+  --cand-ink: #b84a1c;
+  /* the signal head's housing: dark in both themes */
+  --housing: #1b1a18;
+
+  /* The dashboard's names, on the values above. */
+  --canvas: var(--paper);
+  --good: var(--go);
+  --bad: var(--stop);
+  --warn: var(--wait);
+  --none: var(--neutral);
   --tint-bad: #fbeaea;
   --tint-good: #e7f5e7;
+  --tint-wait: #fdf3dc;
+
+  --header: 3.5rem;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
     color-scheme: dark;
-    --canvas: #121211;
+    --paper: #121211;
     --panel: #1a1a19;
-    --line: #2e2e2b;
     --ink: #f0efec;
     --ink-2: #c3c2b7;
     --ink-3: #8f8e86;
+    --line: #2e2e2b;
     --base: #3987e5;
     --cand: #d95926;
+    --go-ink: #3fc23f;
+    --stop-ink: #f07070;
+    --wait-ink: #fab219;
     --tint-bad: #3a1f1f;
     --tint-good: #1b2e1b;
+    --tint-wait: #3a2f14;
+    --housing: #050505;
+    --base-ink: #5a9cf0;
+    --cand-ink: #f07a45;
   }
 }
 
 @theme inline {
+  --color-paper: var(--paper);
   --color-canvas: var(--canvas);
   --color-panel: var(--panel);
   --color-line: var(--line);
   --color-ink: var(--ink);
   --color-ink-2: var(--ink-2);
   --color-ink-3: var(--ink-3);
-  --color-base: var(--base);
-  --color-cand: var(--cand);
+  /* Not "base": text-base must stay a font size. */
+  --color-arm-base: var(--base);
+  --color-arm-cand: var(--cand);
+  --color-base-ink: var(--base-ink);
+  --color-cand-ink: var(--cand-ink);
+  --color-go: var(--go);
+  --color-stop: var(--stop);
+  --color-wait: var(--wait);
+  --color-go-ink: var(--go-ink);
+  --color-stop-ink: var(--stop-ink);
+  --color-wait-ink: var(--wait-ink);
+  --color-tint-wait: var(--tint-wait);
+  --color-neutral: var(--neutral);
   --color-good: var(--good);
   --color-warn: var(--warn);
   --color-bad: var(--bad);
   --color-tint-bad: var(--tint-bad);
   --color-tint-good: var(--tint-good);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font-body), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-display-face), ui-sans-serif, sans-serif;
+  --font-mono: var(--font-code), ui-monospace, monospace;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
 }
 
 body {
-  background: var(--canvas);
+  background: var(--paper);
   color: var(--ink);
+  font-size: 1.0625rem;
+  line-height: 1.65;
+}
+
+:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--base) 25%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-delay: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    transition-delay: 0ms !important;
+  }
+}
+
+@layer components {
+  /* Long-form text of the docs. Scale (rem): 0.875 1 1.125 1.375 1.75 2.25 3 3.75. */
+  .prose > * + * {
+    margin-top: 1rem;
+  }
+
+  .prose h1 {
+    font-family: var(--font-display-face);
+    font-weight: 800;
+    font-size: 2.25rem;
+    line-height: 1.05;
+    letter-spacing: -0.03em;
+    text-wrap: balance;
+  }
+
+  @media (min-width: 768px) {
+    .prose h1 {
+      font-size: 3rem;
+    }
+  }
+
+  .prose h1 + * {
+    margin-top: 1.25rem;
+  }
+
+  .prose .lead {
+    font-size: 1.125rem;
+    line-height: 1.55;
+    color: var(--ink-2);
+  }
+
+  .prose h2 {
+    font-family: var(--font-display-face);
+    font-weight: 600;
+    font-size: 1.75rem;
+    line-height: 1.15;
+    letter-spacing: -0.02em;
+    margin-top: 3rem;
+    text-wrap: balance;
+  }
+
+  .prose h3 {
+    font-weight: 700;
+    font-size: 1.125rem;
+    line-height: 1.35;
+    margin-top: 2rem;
+  }
+
+  .prose h2 + *,
+  .prose h3 + * {
+    margin-top: 0.625rem;
+  }
+
+  .prose :is(h2, h3)[id] {
+    scroll-margin-top: calc(var(--header) + 4rem);
+  }
+
+  .prose a {
+    text-decoration: underline;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 0.2em;
+    text-decoration-color: color-mix(in srgb, var(--ink) 45%, transparent);
+  }
+
+  .prose a:hover {
+    text-decoration-color: var(--ink);
+  }
+
+  .prose strong {
+    font-weight: 700;
+  }
+
+  /* Lists in the text; a figure's lists keep their own layout. */
+  .prose :is(ul, ol):not(figure *) {
+    padding-left: 1.375rem;
+  }
+
+  .prose ul:not(figure *) {
+    list-style: disc;
+  }
+
+  .prose ol:not(figure *) {
+    list-style: decimal;
+  }
+
+  .prose li + li:not(figure *) {
+    margin-top: 0.375rem;
+  }
+
+  .prose li::marker {
+    color: var(--ink-2);
+  }
+
+  .prose :not(pre) > code {
+    font-family: var(--font-code);
+    font-size: 0.875em;
+    padding: 0.1em 0.35em;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    background: var(--panel);
+    overflow-wrap: anywhere;
+  }
+
+  .prose hr {
+    border: 0;
+    border-top: 1px solid var(--line);
+    margin-block: 2.5rem;
+  }
+
+  .prose .table-scroll {
+    overflow-x: auto;
+  }
+
+  .prose table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 1rem;
+    line-height: 1.5;
+  }
+
+  .prose th {
+    text-align: left;
+    font-weight: 700;
+    vertical-align: bottom;
+    border-bottom: 1px solid var(--ink-3);
+  }
+
+  .prose td {
+    vertical-align: top;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .prose :is(th, td) {
+    padding: 0.5rem 1rem 0.5rem 0;
+  }
+
+  .prose :is(th, td):last-child {
+    padding-right: 0;
+  }
+
+  /* Width: text keeps the measure; a wide figure may use the whole column. */
+  .prose > * {
+    max-width: 72ch;
+  }
+
+  .prose > .wide {
+    max-width: none;
+  }
+
+  /* Steps: numbered circles joined by a line. */
+  .steps {
+    counter-reset: step;
+  }
+
+  .step {
+    counter-increment: step;
+  }
+
+  .prose .steps > .step {
+    margin-top: 0;
+  }
+
+  .step-number::before {
+    content: counter(step);
+  }
+
+  .step:not(:last-child)::before {
+    content: "";
+    position: absolute;
+    left: calc(1.125rem - 0.5px);
+    top: 2.25rem;
+    bottom: 0;
+    width: 1px;
+    background: var(--line);
+  }
 }

@@ -40,7 +40,7 @@ export default async function Project(props: PageProps<"/[owner]/[repo]">) {
 
   return (
     <section>
-      <Crumbs items={[{ href: "/", label: "Projects" }, { label: repo.full_name }]} />
+      <Crumbs items={[{ href: "/projects", label: "Projects" }, { label: repo.full_name }]} />
       <div className="flex flex-wrap items-center justify-between gap-4">
         <h1 className="text-2xl font-semibold tracking-tight">
           <a href={repo.html_url} className="hover:underline">

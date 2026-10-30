@@ -1,0 +1,547 @@
+export const metadata = { title: "What it catches" };
+
+# What it catches
+
+The gate notices a change when two things are true: the change is part of the version, so both versions run, and at
+least one of your cases checks the behaviour the change affects. This page goes through the kinds of changes teams make
+to LLM applications, what each can break, which checks see it, and what stays out of sight. The set of checks is open:
+you can add your own.
+
+The examples use three made-up applications: an invoice reader (one model call that extracts fields), a booking
+assistant (an agent with tools) and a support chat (a dialog with a simulated customer).
+
+## Two conditions
+
+A few terms first. A case is one test input with its expected values ([Cases](/docs/how-it-works#cases)). Its checks score
+each run of the case from 0 to 1 ([Checks](/docs/how-it-works#checks)). The base is the version on the target branch, and the
+candidate is the version in the request. A point is 0.01 of the mean score, so the default margin of 5 points is 0.05.
+
+**1. The change is part of the version.** A version is its config, the bytes of its prompts and the repository's code
+as git sees it ([What a version is](/docs/how-it-works#what-a-version-is)). Documentation (`README` and similar names, a
+`docs/` directory at the root), CI (`.github/`), `gate.yaml` with its price files and `ignore` paths, the test sets and
+the files of other pipelines do not count. If a request changes nothing that counts, the pipeline gets `unchanged` and
+nothing runs. Otherwise the gate runs the base and the candidate, each with its own code, on the request's test set.
+
+**2. A case looks at it.** Each case's checks score the run. Today the gate decides with the naive rule: one run per
+version, and it blocks (`quality fail`, exit 10) when the candidate's mean score is lower than the base's by more than
+`delta` points, 5 by default. A change that no check looks at cannot lower a score, so apart from noise the request
+passes.
+
+Budgets are a separate path. If `gate.yaml` sets a cost or latency budget, the gate checks the candidate against it
+whenever the versions run, whatever the cases look at. A pass that breaks a budget becomes `budget fail` (exit 12). A
+pipeline that gets `unchanged` runs nothing, so no budget is checked. A new pipeline gets `no base version`: its budget
+is reported but does not block.
+
+**What you see.** The comment on the request gives both mean scores, the difference, the rule, and up to five cases that
+got worse, with their base and candidate scores. It lists those cases even when the verdict is pass. The
+[dashboard](/docs/dashboard) shows the answer, the result of every check and the steps of every run on both sides.
+[Verdicts](/docs/how-it-works#verdicts) lists every outcome the gate can give.
+
+Planned: a statistical rule that runs each case several times, puts an interval around the difference, and gives one
+of three outcomes: pass, block, or not sure yet, with `delta` as the loss you accept. Until then, read every verdict on
+this page as a verdict of the naive rule.
+
+<Fig id="what-it-catches-1" caption={"A change reaches the verdict only if it is part of the version and a case checks what it affects. If gate.yaml sets budgets, they check the candidate whenever the versions run."} alt={"A change that is not part of the version gets \"unchanged\" and nothing runs. A change that is part of the version runs both versions on the same cases. If no case checks what it affects, the request passes. If a case does, the naive rule compares the mean scores. If gate.yaml sets cost or latency budgets, the gate also checks the candidate against them whenever the versions run."} />
+
+## Deliberate changes and engineering changes
+
+Changes come in two kinds, and the gate treats them the same way while you treat them differently.
+
+**A deliberate change of behaviour**, such as a new business rule, makes the old cases wrong. The cases still expect
+the old behaviour, so the gate blocks. That block is correct: update the cases in the same request, as you would update
+a unit test when the specification changes. Both versions run on the request's test set, so the base now misses the new
+expectation and the candidate meets it. The comment says when a request changes the test set.
+
+**An engineering change**, such as rewording a prompt, reordering it, fixing typos, switching the model, refactoring
+the code around the call or upgrading a library, should not change behaviour. The cases stay as they are, and the gate
+asks one question: did it get worse? Run-to-run noise matters most here. In the author's measurement on a support agent,
+one unchanged version scored a mean of 0.7, 0.6, 0.6, 0.7, 0.5, 0.6, 0.6, 0.4, 0.7, 0.7 and 0.6 over 11 runs of the same
+10 cases. With one run per version and a margin of 5 points, a harmless edit can be blocked by noise alone, and a real
+drop can pass. An edit meant to be harmless is not known to be harmless until it is measured.
+[How it decides](/docs/how-it-decides) shows the noise and the planned rule.
+
+## The catalog at a glance
+
+| Kind of change | Examples | Part of the version as | Checks that usually see it | Verdict when a case sees it |
+|---|---|---|---|---|
+| [Prompt and policy](#prompt-and-policy-edits) | rewrite, reorder, remove a rule, change a number, fix typos | prompt bytes | `order`, `called`, `not_called`, `actions`, `state`, `field_match`, `json_schema`, `contains`, `regex` | `quality fail`; a reworded or reordered prompt should pass, but today noise alone can block it |
+| [Model and parameters](#model-and-parameters) | another model, a model name without a date, `temperature`, `max_retries`, `timeout_s` | config fields | the whole set; `field_match` with types, `json_schema`, `max_steps`; budgets | `quality fail`, or `budget fail` for cost and latency; infra error when runs of a model without a date cannot be compared |
+| [Tools](#tools) | a tool's description, its arguments, a new tool | code, or prompt bytes | `called`, `not_called`, `actions`, `order`, `state`, `active` | `quality fail` |
+| [Code around the call](#code-around-the-call) | parsing the answer, retries, building the context, retrieval | code | `field_match`, `number`, `json_schema`, `max_steps`, `actions`, `state`, `doc_found`; budgets | `quality fail`, or `budget fail` when retries cost more or take longer |
+| [Dependencies](#dependencies) | an SDK upgrade, a new lock file | code (the lock file is a tracked file) | the whole set; budgets | `quality fail` or `budget fail`, in every pipeline |
+| [Knowledge files](#knowledge-files) | FAQ articles, policy documents, a product list the app reads | code, unless it counts as documentation | `doc_found`, `contains`, `exact`, `field_match` | `quality fail`; `unchanged` if the files count as documentation and `ignore` does not take them back |
+
+A `quality fail` needs the mean to drop by more than `delta`. One broken case on a large set can still pass
+([A change no case touches](#a-change-no-case-touches)).
+
+Trace checks (`called`, `not_called`, `order`, `max_steps`, `active`, `actions`, `state`, `doc_found`) read the steps
+of a run. They need a trace: wrap your model client and tools in a Python adapter, or report the steps from your
+program. A run without a trace fails every trace check. [Connect your app](/docs/connect) shows both ways.
+
+## Prompt and policy edits
+
+**What can go wrong.** A removed rule stops a required step: the assistant changes a booking without checking who is
+asking. A changed number lets the agent do what it should hand to a person. A reworded or reordered prompt shifts
+behaviour nobody meant to touch. A lost format instruction leaves an answer the code cannot parse.
+
+**Checks that see it.** `order` (look up first, act after), `not_called` with conditions on arguments (no credit above
+the limit), `called` and `actions` (the case expects a hand-off or a specific call), `state` (the world changed as
+expected and in no other way), and for the answer `field_match`, `json_schema`, `contains` and `regex`.
+
+**Example.** The booking assistant's policy says: "Credits above €30 go to a manager." This case has a customer
+cancel late a booking worth €45:
+
+```yaml
+# golden/booking/late-cancel-45.yaml
+id: late-cancel-45
+version: 1
+input: {ticket: late-cancel-45.txt}
+expected:
+  state_change: {B-104: cancelled}
+scoring:
+  method: checks
+  aggregate: all
+  checks:
+    - {id: acted, kind: active}
+    - {id: verified, kind: order, first: find_customer, then: [cancel_booking, grant_credit]}
+    - {id: no-big-credit, kind: not_called, tool: grant_credit, args: {amount_eur: {gt: 30}}}
+    - {id: escalated, kind: called, tool: escalate_to_manager}
+    - {id: state, kind: state, key: state_change}
+```
+
+A request raises the limit in the prompt to €75. The candidate now issues the €45 credit itself: `no-big-credit`,
+`escalated` and `state` fail, and with `aggregate: all` the case drops from 1 to 0. On a set of 10 cases where nothing
+else moves, the mean drops by 10 points and the gate blocks:
+
+```text
+**Release gate: ❌ quality fail**
+
+Mean score 0.900 → 0.800 (-10.00 points, blocks below -5.00); naive rule: block if the mean drops by more than 5 points.
+10 cases, first run of each version · config 4b0e91c2 → d27a6f05 · set 8c13e7aa
+
+| Case | Base | Candidate |
+|---|---|---|
+| late-cancel-45 | 1.00 | 0.00 |
+```
+
+If the new limit is intended, it is a deliberate change: in the same request, expect the credit in this case instead of
+the hand-off. The base then fails the case and the candidate passes it.
+
+**More edits of the same kind.** What each one should give, and what sees it:
+
+| Edit to the prompt | Should give | Seen by |
+|---|---|---|
+| remove "look up the customer before you change a booking" | block | `order` with `first: find_customer` |
+| remove "bookings last at most 4 hours" | block | `not_called` on `create_booking` with `{hours: {gt: 4}}`, in a case that asks for 5 hours |
+| remove "pick the smallest room that fits" | block | `actions` with the expected room, or `state` |
+| remove "do not guess which booking; ask" | block | `not_called` on `cancel_booking`, in a case where the customer has two bookings |
+| reorder sections, reword the style section, fix typos | pass, but measure it | the whole set; today noise alone can block |
+| raise the limit and clarify another rule in one request | block (the limit breaks a case) | the case on the limit. Today the mean may stay within `delta` because another case improves, so read the list of cases that got worse |
+
+**Out of sight.** An edit that no case crosses. If your cases have credits of €30, €45 and €60, raising the limit from
+€30 to €40 changes nothing for any of them: €30 needs no manager under either rule, €45 and €60 need one under both.
+
+## Model and parameters
+
+**What can go wrong.** Another model follows a rule less reliably, writes dates or amounts in another format, stops
+calling a tool, takes more steps, costs more or answers more slowly. A model name without a date can change behind
+you, because the provider may point it at a new model.
+
+**How the gate sees it.** `model`, `params`, `max_retries`, `timeout_s` and the prompt are fields of the version's
+config, so any change gives a new version. For a model name without a date (`gpt-6-luna` rather than
+`gpt-5.4-mini-2026-03-17`), every record keeps the requested model, the model the provider reported and the time, and
+the comment warns. For such a model the gate also refuses to compare, and reports an infra error, in two cases:
+
+- either version asked for a model without a date, and the runs of both versions, taken together, have a pause longer
+  than an hour;
+- both versions asked for the same model without a date, and the provider reported different models for them, or a run
+  does not say which model it got.
+
+**Checks that see it.** The whole set, since the model touches every case. `field_match` with typed fields keeps a
+harmless format change from failing as long as the answer still parses: a `date` or a `number` is compared by value, so
+`14/03/2026` matches `2026-03-14` and `$1,207.50` matches `1207.50`. A form the parser does not read fails, as the
+example below shows. `json_schema` catches a broken structure, `max_steps` a model that loops, and budgets catch cost
+and latency.
+
+**Example.** The invoice reader moves to a cheaper model. This case types its date and total:
+
+```yaml
+# golden/invoices/invoice-017.yaml
+id: invoice-017
+version: 1
+input: {document: invoice-017.txt}
+expected:
+  fields: {vendor: Northwind Office Supply, date: "2026-03-14", total: "1207.50"}
+scoring:
+  method: checks
+  checks:
+    - id: fields
+      kind: field_match
+      fields: {date: {type: date}, total: {type: number}}
+      normalise: [whitespace, casefold]
+```
+
+The new model answers `{"vendor": "NORTHWIND OFFICE SUPPLY", "date": "14/03/2026", "total": "€1207.50"}`. The vendor
+matches after `casefold`, and the date matches by value. The total does not: the expected total is a number, and
+`€1207.50` does not parse as one (the number parser reads plain numbers and the signs `$`, `US$`, `RM` and `MYR`, not
+`€`), so the field fails. The case scores 2 of 3. Whether that breaks anything depends on your code: code that reads the
+total as a plain number would break on the new answers.
+
+On a set of 10 cases where nothing else moves, this case alone lowers the mean by 3.3 points, and the request passes. If
+the new model writes every total this way and every case checks these three fields, each case loses a third, the mean
+drops by 33 points, and the verdict is `quality fail`.
+
+A cost budget in `gate.yaml` catches the opposite move, to a larger and more expensive model:
+
+```yaml
+# gate.yaml
+pipelines:
+  invoices:
+    config: configs/invoices.yaml
+    golden: golden/invoices
+delta: 5
+prices: prices.yaml          # model: [input, output] USD per 1M tokens
+budgets:
+  cost_per_run_usd: 0.002    # the candidate's mean cost per run
+  latency_s: 8               # the candidate's 95th percentile latency
+```
+
+If quality passes and the candidate's mean cost per run is above $0.002, the verdict is `budget fail`. Latency blocks
+only when the whole interval around the candidate's 95th percentile lies above the limit.
+
+**Out of sight.** A change the provider makes behind a model name, if it happens before both versions run. The gate
+runs base and candidate at the same time, so such a change hits both and does not show as a difference.
+
+## Tools
+
+This covers a tool's description, its arguments (its schema) and new tools.
+
+**What can go wrong.** A vaguer description makes the agent call the wrong tool or skip one. A changed argument (a new
+name, cents instead of euros) makes calls wrong or refused. A new tool gives the agent a shortcut it should not take,
+or lets it change more of the world than the case allows.
+
+**How the gate sees it.** Tool definitions live in your code or in a prompt file, so a change to them gives a new
+version.
+
+**Checks that see it.** `called` and `not_called` with conditions on arguments (`eq`, `ne`, `gt`, `gte`, `lt`, `lte`,
+`in`), `actions` (each expected call with its arguments, one result each), `order`, `active` (the agent called a tool
+itself), and `state` with `key: state_change`, which fails on any change to the world the case did not expect.
+
+**Example.** A request adds an `issue_voucher` tool to the booking assistant. On `late-cancel-45` the candidate
+escalates as before but also gives the customer a €20 voucher. `escalated` and `no-big-credit` still pass. The world now
+has a voucher the case did not expect, so `state` fails, and with `aggregate: all` the case drops to 0. On a set of 10
+cases where nothing else moves, the mean drops by 10 points: `quality fail`. The shape of `state_change` is whatever
+your adapter or program reports as the run's change to the world.
+
+A renamed argument needs the cases to change too. If a request renames `amount_eur` to `amount_cents`, the condition
+`args: {amount_eur: {gt: 30}}` never matches again, so `not_called` passes whatever the agent does. Update such
+conditions in the same request.
+
+**Out of sight.** A tool whose behaviour lives in a service outside the repository: both versions call the same service,
+so a change there is not a difference between them.
+
+## Code around the call
+
+**Parsing the answer.** A new parser drops a field, reads `1,207.50` as `1.2075`, or rounds. `field_match`, `number`
+(with `tol`), `exact` and `json_schema` on the output see it.
+
+**Retries and error handling.** Two kinds of retry show up in different places.
+
+- Your application's own retries happen inside one run. A loop that asks the model again after an answer it cannot parse
+  adds answered model calls, which `max_steps` counts. Every answered model call counts toward the cost budget, and the
+  waiting counts toward the run's latency.
+- The gate's runner retries a whole run when your adapter raises `Retryable` or your program exits with 75. The cost
+  counts every attempt. Latency is the attempt that answered, without the backoff. When a budget is set, the comment
+  also says how many runs needed retries.
+
+**Building the context.** The support chat starts to keep only the last six messages. The customer gave a booking
+number early in the dialog, and the agent now cancels the wrong booking or asks again. `actions` with the expected
+arguments, and `state`, see it:
+
+```yaml
+    - id: cancelled-right-one
+      kind: actions
+      actions: [{tool: cancel_booking, args: {booking_id: B-221}}]
+```
+
+With `aggregate: all` in this case, a wrong cancellation drops it from 1 to 0. On a set of 10 cases where nothing else
+moves, that is 10 points, and the gate blocks.
+
+**Retrieval.** A new chunk size, a lower `top_k` or another ranking returns the wrong article. `doc_found` gives the
+share of the expected documents among those the agent retrieved:
+
+```yaml
+    - {id: right-article, kind: doc_found, ids: [kb-cancellation]}
+```
+
+A wrong article gives `right-article` 0 instead of 1. How far the case falls depends on its other checks and on
+`aggregate`: with `aggregate: all` it falls to 0, as above.
+
+The model and tool wrappers do not see retrieval, so record it yourself. In a Python adapter:
+
+```python
+from llm_release_gate import trace
+
+
+def search(query):
+    hits = index.search(query, k=5)
+    if (t := trace.current()) is not None:  # None outside the runner
+        t.step("retrieval", "agent", query=query, docs=[{"id": h.id} for h in hits])
+    return hits
+```
+
+A program reports the same step in its answer: `{"kind": "retrieval", "actor": "agent", "docs": [{"id": "kb-cancellation"}]}`.
+
+**Out of sight.** Code that git does not track, such as a file generated at build time and never committed.
+
+## Dependencies
+
+**What can go wrong.** A new SDK release changes a default (a timeout, a retry policy, how tool calls are sent). A
+library the parser uses reads numbers or dates differently. A model client is upgraded along with something unrelated
+in the same lock file.
+
+**How the gate sees it.** The lock file is a tracked file, so a change to it gives a new version. It belongs to no
+single pipeline, so every pipeline in `gate.yaml` runs. In a monorepo the same goes for shared code and the root lock
+file. Each version runs in its own environment, built from its own tree: the gate runs `prepare` (for example
+`[npm, ci]`) and syncs the locked Python environment in each. The base runs with the old dependencies, the candidate
+with the new ones.
+
+**Checks that see it.** The whole set, plus budgets for a change in cost or speed.
+
+**Example.** A request upgrades the booking assistant's model SDK, and the new release retries slow calls on its own
+with a longer wait. Every case still scores as before, but runs get slower. With `latency_s: 8` in `gate.yaml`, if the
+whole interval around the candidate's 95th percentile latency lies above 8 seconds, the verdict is `budget fail`
+(exit 12).
+
+**Out of sight.** Software installed outside the tree's lock file and `prepare`, such as a tool a CI step installs or a
+system library. Both versions run with the same one, and the version does not change.
+
+## Knowledge files
+
+**What can go wrong.** An edited FAQ article contradicts the prompt. A removed document makes retrieval return
+something else. A product list loses a line the agent needs.
+
+**How the gate sees it.** Files your application reads from the repository are code like any other tracked file. One
+exception matters here: a `docs/` directory at the root, and files named `README`, `CHANGELOG`, `CONTRIBUTING` or
+`LICENSE` (bare or as `.md`, `.rst`, `.txt`, `.adoc`, at any depth), are documentation and do not count.
+If your application reads them, take them back in `gate.yaml` with a `!` pattern:
+
+```yaml
+# gate.yaml
+pipelines:
+  support:
+    config: configs/support.yaml
+    golden: golden/support
+ignore:
+  - web/              # the marketing site: never reaches the model
+  - "!docs/kb/"       # the support chat reads these articles while it runs
+```
+
+Quote a pattern that starts with `!`: in YAML a bare `!` starts a tag. The gate skips a pipeline only when the target
+branch's `ignore` list and the request's are the same. A request that changes `ignore` runs every pipeline, so a new
+pattern cannot hide the request's own code.
+
+**Checks that see it.** `doc_found` (the right article was retrieved), `contains` and `exact` on the reply,
+`field_match` on extracted values, and the trace checks for what the agent did with the answer.
+
+**Example.** An article now says cancellations are free only at least 48 hours ahead, instead of 24. In the support
+chat, a customer cancels 30 hours ahead, which was free under the old rule:
+
+```yaml
+    - {id: right-article, kind: doc_found, ids: [kb-cancellation]}
+    - {id: no-fee, kind: not_called, tool: charge_cancellation_fee}
+    - {id: says-free, kind: contains, field: reply, value: free of charge}
+```
+
+If the change is intended, this case's expectations change in the same request. If the article was edited by mistake,
+`no-fee` and `says-free` break. If these are the case's only checks, the default `aggregate: mean` drops the case from 1
+to 1/3. On a set of 10 cases where nothing else moves, the mean drops by 6.7 points and the gate blocks. On 14 cases or
+more the same drop is under 5 points and the request passes. With `aggregate: all` the case drops to 0 instead.
+
+**Out of sight.** Knowledge kept outside the repository: a database, a content system, a search index built elsewhere,
+a page fetched while the app runs. Both versions read the same content at run time, so a change there is not a change
+of the version.
+
+## What it cannot see
+
+### A change no case touches
+
+The gate measures only what your cases exercise. The €30 → €40 credit limit above passes, apart from noise, because no
+case has a credit above €30 and at most €40. A pass speaks for your cases, not for inputs your set does not have.
+
+A change that one case touches can still pass on a large set. With 20 cases, one case going from 1 to 0 lowers the
+mean by exactly 5 points, and a drop exactly at the limit passes. The comment still lists that case among the ones that
+got worse, so read the table even on a pass.
+
+To find gaps, break your application on purpose in a branch (delete one rule from the prompt, change one number) and
+open a request: if the gate does not block, no case checks that rule (or noise hid it; see below). The author's
+experiments will measure how many such deliberately broken versions the gate catches. They have not run yet, so there
+are no numbers to report.
+
+### Changes outside the version
+
+| A request that changes only | Gets |
+|---|---|
+| documentation or `docs/`, CI (`.github/`), files under the paths in `ignore` | `unchanged`, nothing runs |
+| `delta`, `k` or `budgets` in `gate.yaml`, or the contents of a price file | `unchanged`; the comment says the rules change, and the new rules apply after merge |
+| the cases of a test set | `unchanged`; the comment says the test set changes. The new cases first run on a request that changes the version |
+| the contents of another pipeline's config or prompt files | `unchanged` for this pipeline (unless the config starts naming other prompt files: see the last row) |
+| the `ignore` list, the `prices` path, or which files belong to which pipeline: a config, test set, manifest or price path, or the prompt files a config names | every pipeline runs |
+
+`k` is the number of runs per case and version, 1 by default; the naive rule decides on the first run of each.
+
+Never part of the version: untracked files, data outside the repository, environment variables, and a change the
+provider makes to a model behind its name.
+
+### Changes smaller than the noise
+
+Today the gate decides on one run per version. When one unchanged version's mean can move between 0.4 and 0.7 from run
+to run, as in the author's measurement above, a drop of a few points cannot be told apart from noise. The planned
+statistical rule repeats the runs and answers "not sure yet" when the data cannot decide. How often the gate is wrong
+will be known after the author's experiments, which have not run yet.
+
+### Requests the gate does not compare
+
+- **From a fork.** GitHub gives a `pull_request` workflow from a fork no secrets, so the gate cannot call the model. The
+  job fails as `not checked`; a maintainer gates the request by pushing its branch to the repository.
+- **Removing a pipeline.** A request that removes a pipeline from `gate.yaml`, or renames it, fails as `inconclusive`
+  (exit 11): no version of it was compared. A maintainer merges it over the check if that is intended.
+- **A new pipeline.** It gets `no base version`: the candidate runs alone, its score and budget are reported, and the
+  check passes.
+- **A hostile author.** The gate runs the request's code, its workflow and its lock file. It catches mistakes, not
+  someone who wants to get past it. Protect `.github/`, `gate.yaml` and the lock file with CODEOWNERS.
+
+### Qualities no code check expresses
+
+Tone, politeness and helpfulness are not in the built-in checks: every built-in check is code and asks no model for an
+opinion. If you can express a quality in code, write a `function` check. An opt-in LLM judge may be added if time
+allows; it is not built yet.
+
+## The list grows
+
+The check library has 16 kinds today. Answer checks: `field_match`, `exact`, `contains`, `regex`, `number`,
+`json_schema`, `refusal`. Trace checks: `called`, `not_called`, `order`, `max_steps`, `active`, `actions`, `state`,
+`doc_found`. And `function`, which runs your own code. [Write tests](/docs/write-tests#answer-checks) says when each kind
+passes, and [Reference](/docs/reference#checks) lists every key. You can widen what the gate catches in three ways today, and
+more is planned.
+
+**Today**
+
+- **Your own check.** A `function` check calls a Python function you write, with the case's expected values, the answer,
+  the trace and the check's own settings. See [Add your own check](#add-your-own-check).
+- **Any program.** An application in any language runs through the protocol: one JSON request on stdin, one JSON answer
+  on stdout. The steps it reports in its answer feed the same trace checks as a Python adapter's:
+
+  ```json
+  \{"protocol": 1,
+   "output": \{"reply": "Booking B-104 is cancelled. A manager will look at your credit today."\},
+   "trace": \{"steps": [
+     \{"kind": "retrieval", "actor": "agent", "query": "late cancellation", "docs": [\{"id": "kb-cancellation"\}]\},
+     \{"kind": "tool", "actor": "agent", "status": "ok", "name": "find_customer", "args": \{"email": "ana@example.com"\}\},
+     \{"kind": "tool", "actor": "agent", "status": "ok", "name": "cancel_booking", "args": \{"booking_id": "B-104"\}\},
+     \{"kind": "tool", "actor": "agent", "status": "ok", "name": "escalate_to_manager", "args": \{"booking_id": "B-104"\}\}],
+    "final_state": null, "state_change": \{"B-104": "cancelled"\}, "stop": "done"\}\}
+  ```
+
+- **Your own steps.** `trace.current().step(kind, actor, ...)` records what the wrappers cannot see, as in the retrieval
+  example above, and the trace checks read it.
+
+**Planned**
+
+- **Shared checks for a test set.** A file next to the cases with checks that apply to every case; a case overrides a
+  shared check or turns it off. Policy rules, the output format and a step limit are then written once.
+- **New check kinds** can join the library in later releases and are then used like the built-in ones. Until a kind
+  exists, a `function` check covers it.
+
+**Maybe later**
+
+Accepted for the gate, but not scheduled and not built yet. They come only if time allows.
+
+- **Proposed checks you approve.** The gate runs the base several times and suggests as checks only what stayed the
+  same in every run; you approve the ones you want. This suits a deliberate change: the new behaviour becomes checks
+  without writing each one by hand.
+- **An LLM judge**, as an opt-in check a team turns on for qualities code cannot express, such as politeness. The
+  author's evaluation of the gate's rules uses code checks only.
+
+**Ideas, not planned**
+
+- **Relative budgets**: "no more than 20 % more expensive than the base". Today budgets are absolute and apply to the
+  candidate. A relative budget changes the decision rule, so it needs its own design first.
+- **Ways to match a whole trajectory**: "at least these calls", "nothing outside these calls", arguments that match as a
+  subset.
+- **A coverage report**: the tools and rules that no check looks at.
+
+<Fig id="what-it-catches-2" caption={"Sixteen kinds of checks exist today, one of them your own code. The outlined and dashed tiles are not built yet."} alt={"Today the gate has seven answer checks (field_match, exact, contains, regex, number, json_schema, refusal), eight trace checks (called, not_called, order, max_steps, active, actions, state, doc_found) and the function check for your own code. Planned: shared checks for a test set and new check kinds. Maybe later: proposed checks you approve, and an opt-in LLM judge. Ideas: relative budgets, trajectory matching and a coverage report."} />
+
+## Add your own check
+
+A `function` check names a Python function as `module:function`. The gate calls it with four arguments:
+
+- `expected`: the case's expected values;
+- `output`: the parsed answer, or `None` when there is none;
+- `trace`: the run's trace, or `None`;
+- `spec`: the check's own entry from the case, including any keys you add.
+
+It returns `True`, `False`, a share between 0 and 1, or `None` when the check does not apply. To give one result per
+item, return a mapping of such values: the gate names each result `id.key`. Any other return value is an error: that run
+gets no score, and if the decision needs it, the gate reports an infra error instead of a verdict.
+
+This check makes sure the invoice reader's total equals the sum of the line items it extracted. Put it in your
+application's package, next to the adapter:
+
+```python
+# src/invoice_reader/checks.py
+from decimal import Decimal, InvalidOperation
+
+
+def total_adds_up(expected, output, trace, spec):
+    """The extracted total equals the sum of the extracted line amounts."""
+    if not expected.get("lines"):
+        return None  # this invoice has no line items: the check does not apply
+    try:
+        total = Decimal(str(output["total"]))
+        items = sum(Decimal(str(line["amount"])) for line in output["lines"])
+    except (KeyError, TypeError, InvalidOperation):
+        return False  # no answer, a missing field or a value that is not a number
+    return abs(total - items) <= Decimal(str(spec.get("tol", 0)))
+```
+
+Name it in a case by its import path. `tol` is a key of your own: the gate passes it on in `spec`.
+
+```yaml
+# golden/invoices/invoice-017.yaml
+id: invoice-017
+version: 1
+input: {document: invoice-017.txt}
+expected:
+  fields: {vendor: Northwind Office Supply, date: "2026-03-14", total: "1207.50"}
+  lines: [{amount: "1000.00"}, {amount: "207.50"}]
+scoring:
+  method: checks
+  checks:
+    - id: fields
+      kind: field_match
+      fields: {date: {type: date}, total: {type: number}}
+      normalise: [whitespace, casefold]
+    - {id: adds-up, kind: function, function: "invoice_reader.checks:total_adds_up", tol: 0.01}
+```
+
+Then validate the set. `golden validate` imports the function and checks that it can be called, without calling it:
+
+```sh
+uv run llm-release-gate golden validate golden/invoices
+```
+
+The gate's commands import the function from the project's environment, so the module must belong to an installed
+package: your application's package or another installed one. For your own package, `pyproject.toml` needs a
+`[build-system]` table, so that `uv sync` installs it ([Get started](/docs/start#option-a-a-python-adapter) shows this for
+the adapter). A loose `checks/` folder at the repository root is not on that path: `golden validate` stops with
+`cannot load 'checks.invoice:total_adds_up': ModuleNotFoundError`, and in CI the request gets an infra error ("The
+golden set is not valid").
+
+The module is code in your repository, so editing it gives a new version. Both versions' answers are scored by the
+checks from the request.
+
+With the cheaper model from [Model and parameters](#model-and-parameters), the answer
+`{"total": "€1207.50", "lines": [{"amount": "1000.00"}, {"amount": "207.50"}], ...}` fails `adds-up` as well: the
+currency sign is not a number.

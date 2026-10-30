@@ -44,6 +44,7 @@ the CI for the database: install the App only on repositories whose runs may lea
 | `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` | the App's OAuth credentials, for signing in |
 | `GITHUB_WEBHOOK_SECRET` | to check that a webhook comes from GitHub |
 | `SESSION_SECRET` | a long random string; encrypts the session cookie |
+| `DOCS_VIEWERS` | GitHub logins, comma-separated, that may read the docs; unset or empty means nobody |
 
 ## Deploy
 
@@ -60,7 +61,8 @@ vercel env pull .env.local       # or write the variables above into it
 npm run db:migrate               # creates the tables, once
 npm run dev                      # http://localhost:3000
 npm run lint && npm run typecheck && npm test
+npm run sync-schemas             # after a schema in ../src changes; a test fails until then
 ```
 
 The tests run without a network or a database: artifact parsing, the comparison of cases, the session cookie, the
-webhook signature and the App's token.
+webhook signature and the App's token, who may read the docs, the reference tables and the schema copies.

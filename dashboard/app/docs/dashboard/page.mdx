@@ -1,0 +1,195 @@
+export const metadata = { title: "Dashboard" };
+
+# Dashboard
+
+The dashboard keeps the gate's results and shows them by repository: each pipeline's verdict on each pull request, the
+cases that changed between the two versions, and what each version answered, called and scored on every case. It reads
+the results from GitHub after each workflow, so your CI sends nothing and your workflow stays as it is. It is part of
+this site: open **Projects** in the header.
+
+The page uses the terms from [How it works](/docs/how-it-works). The base is the target branch's
+[version](/docs/how-it-works#what-a-version-is) and the candidate is the request's. Each [case](/docs/how-it-works#cases) is
+scored from 0 to 1 by its [checks](/docs/how-it-works#checks); a point is 0.01 of that score. A run is one version handling
+one case once, and each version runs every case [`k`](/docs/how-it-works#whose-rules-apply) times. Each time your workflow gates a pipeline on a pull request,
+the result is a **gate run**: the [verdict](/docs/how-it-works#verdicts), the runs of both versions and the comment. The
+dashboard's labels say "Runs" for gate runs, and "run 1", "run 2" on a case page for the runs of that case. Today the
+verdict comes from the naive rule
+([The decision today](/docs/how-it-works#the-decision-today)), and [Read a verdict](/docs/read-a-verdict) says what to do with each
+outcome.
+
+## What it shows
+
+The dashboard has four levels. You go down them in the order you would look for a problem.
+
+**Projects.** The repositories where the dashboard's GitHub App is installed and you have access on GitHub. Each row
+shows the last verdict, its pull request, the date and the number of stored gate runs.
+
+**A project.** One repository's history. This page loads the project's 300 newest gate runs; the four numbers, the
+chart and the table below cover those.
+
+- Four numbers at the top:
+  - **Runs**: the gate runs stored. The note under it ("with a verdict") counts the ones that scored both versions;
+    `unchanged`, `no base` and `infra error` have no two scores, so it leaves them out.
+  - **Blocked**: how many gate runs got quality fail or budget fail. The note under it counts `inconclusive`.
+  - **Same version, different score**: of the gate runs with the same version on both sides, how many still scored
+    differently, shown as "N of M". See [Same version on both sides](#same-version-on-both-sides) below.
+  - **Cost of the decisions**: both versions together, at list prices. Only gate runs with `prices` count, and
+    `prices`, like `k` and `delta`, comes from the target branch's `gate.yaml`
+    ([Whose rules apply](/docs/how-it-works#whose-rules-apply)).
+- A chart with one column per gate run that scored both versions, oldest on the left: the target branch's mean score
+  as a ring, the request's as a dot, an arrow from one to the other when they are apart, and the verdict under the
+  column. A dashed line follows the target branch's mean over time. Pointing at a column reads it out above the chart;
+  clicking it opens the gate run. Gate runs that are `unchanged`, `no base` or `infra error` appear in the table, not in
+  the chart.
+- A table of the gate runs, newest first: pull request and title, verdict, mean score base → candidate, the difference
+  in points, cost and date. With several pipelines in `gate.yaml`, each pipeline's gate run is its own row, labelled
+  with the pipeline's name. A re-run of the workflow shows its attempt number, and a gate run with the same version on
+  both sides says so.
+
+Today the `inconclusive` count stays at 0. The gate gives `inconclusive` (exit code 11) only when a request removes or
+renames a pipeline in `gate.yaml`, and that is the job's result, not a pipeline's: each remaining pipeline's artifact
+keeps its own verdict ([Verdicts](/docs/how-it-works#verdicts)). So for such a request the dashboard can show `pass` while
+the check on GitHub failed. Planned: the statistical rule's "not sure yet" (stage C) will count here.
+
+**A gate run.** One pipeline on one pull request, gated once. At the top: the verdict and the rule that produced it,
+the two mean scores, the difference in points and the limit below which the gate blocks (`delta`, 5 points by
+default), the number of cases and runs per case, the cost of each side, short hashes of both versions and of the test
+set, and any model named without a date. For `unchanged`, `no base` (its label for "no base version") and
+`infra error`, the page shows the gate's comment instead, if there is one, since there are no two scores to compare. A gate run whose
+artifact holds no verdict, because the job failed before the gate decided, shows as `infra error`.
+
+Below comes the table of cases. A case counts as changed when its score, any check's result or the presence of an
+error differs between the two versions. Changed cases come first, the one that lost the most at the top; the rest
+follow in grey. Each row gives the base score, the candidate score and the checks that changed, with ✓, ✕ or the
+share of runs that passed on each side.
+
+If the target branch's `gate.yaml` sets `k` above 1, the table averages the `k` runs of each case. Today's verdict
+still compares only the first run of each case (the naive rule), so the table and the verdict can differ; the page
+says so. It also warns when the two branches use different releases of the gate: then the gate scored both sides
+again with the request's release, while the table shows the scores each side recorded.
+
+**A case.** One case in one gate run, both versions side by side: **Base · target branch** on the left and
+**Candidate · pull request** on the right. Above them, the case's input and expected answer, taken from the test set.
+For every run of the case (`k` on each side), each side shows:
+
+- the score, the model, tokens in and out, the time it took, retries, and the error if the run failed;
+- the answer: the reply text, or the fields of a structured answer, each with ✓ or ✕ and, where a field missed, the
+  expected value;
+- the result of every check; checks that differ between the two sides are in bold;
+- the steps: each model call with its tokens and the tools it asked for, each tool call with its arguments and result,
+  and each message of a simulated user. Steps of an earlier attempt, before the runner retried, are dimmed;
+- the state change and the final state, if your application reports them, and the output as recorded.
+
+<Fig id="dashboard-1" caption={"A case on the dashboard: the same case run by both versions. The candidate waived the late-cancellation fee, so two checks fail and the case scores 0. Example data."} alt={"Mock of a dashboard case page for the example case cancel-after-deadline. The base version looked the booking up and cancelled it; all five checks pass and the score is 1.00. The candidate looked it up, waived the fee, then cancelled; its state change has the waived fee as well, so the checks cancelled and no-fee-waiver fail and the score is 0.00."} />
+
+### Same version on both sides
+
+Usually the gate skips a pipeline whose version did not change: it reports `unchanged` and runs nothing. It runs both
+sides anyway, so the same version can turn up on both, only in a few cases:
+
+- the target branch has no `gate.yaml` yet, or a broken one: every pipeline runs;
+- the request changes what `gate.yaml` ignores, which files belong to which pipeline (adding, removing or renaming a
+  pipeline does that), or the top-level `prices` file: every pipeline runs, even one the request did not touch;
+- the gate could not work out the version's hash in one of the two branches: that pipeline runs.
+
+The gate run's page, the chart and the table mark such a gate run: any gap between the two sides is the model's
+run-to-run noise, not an effect of the request. The third number on a project's page counts these gate runs, so it
+grows slowly. Noise can be this large: in the author's measurement on a support agent, one version, left as it was,
+ran 11 times on the same 10 cases, and its mean score ranged from 0.4 to 0.7. [How it decides](/docs/how-it-decides)
+explains what the gate does about it.
+
+## How gate runs get there
+
+Your CI sends nothing to the dashboard. The gate action already keeps its results on GitHub as build artifacts, and
+the dashboard reads them from there:
+
+1. When a workflow run in your repository finishes, GitHub notifies the dashboard's App.
+2. The dashboard downloads that run's gate artifacts: `release-gate-NAME-ATTEMPT` (the records of both versions, the
+   verdict and the comment) and `release-gate-NAME-ATTEMPT-cases` (the test set's case files and text inputs). NAME is
+   the pipeline and ATTEMPT the workflow's attempt number, for example `release-gate-booking-1`.
+3. It stores each pipeline's artifact as one gate run in its database.
+
+Your workflow needs no extra step and no extra secret.
+
+<Fig id="dashboard-2" caption={"The gate action leaves its results on GitHub; the dashboard's App reads them from there after each run."} alt={"Diagram: the gate action in your workflow uploads artifacts to GitHub. When the run finishes, the dashboard's GitHub App reads those artifacts and stores them; a button reads them again by hand. You see them after signing in with GitHub. Your workflow never sends anything to the dashboard."} />
+
+If a notification fails, the dashboard logs it and moves on. To catch up, open the project and click **Read runs from
+GitHub**: it reads the gate runs among the repository's 1,000 newest artifacts and stores the ones it does not have.
+
+Once stored, a gate run stays in the dashboard after GitHub deletes the artifact. GitHub keeps artifacts for 90 days
+by default; for the case files, the action asks GitHub to keep them for 30 days (`cases-retention-days`). A gate run
+the dashboard reads after its case files are gone shows its cases without input and expected answer.
+
+**Inputs that are not text.** The gate uploads only the text files of the test set (`.yaml`, `.yml`, `.json`, `.txt`,
+`.md`, `.csv`), and the dashboard shows those up to 64 KB each. For other inputs, such as scanned invoices, tell the
+dashboard where to find them with `inputs-url` on the pipeline. The address must start with `https://`; with any other
+value the inputs get no link. `{path}` stands for the input's path as the case names it, inside the test set; `{name}`
+for its file name:
+
+```yaml
+pipelines:
+  invoice:
+    config: configs/invoice.yaml
+    golden: golden/invoices
+    inputs-url: https://github.com/OWNER/REPO/blob/main/golden/invoices/{path}
+```
+
+The case page then links each such input to that address.
+
+**Keeping case files out, or for less time.** The case files are a separate artifact. Turn it off, or shorten how long
+GitHub keeps it, on the gate's step:
+
+```yaml
+      - uses: Ilya-Grigoryev/llm-release-gate@v0.1.0-dev.9
+        with:
+          cases: false               # no case files: the case page shows no input or expected answer
+          # cases-retention-days: 7  # or keep them for 7 days instead of 30
+```
+
+**What does not arrive.** A pull request from a fork stops as `not checked` before the gate runs, so it uploads no
+artifact and does not appear on the dashboard. Results from CI systems other than GitHub Actions do not reach it
+either.
+
+## Add a repository
+
+Install the dashboard's GitHub App on the repository. On the **Projects** page, **Add repositories** opens GitHub's
+installation page; pick the repositories that run the gate action. The App asks for two read-only permissions:
+Actions (to read workflow runs and artifacts) and Metadata. It writes nothing to your repository.
+
+Right after you install it, the dashboard reads the gate runs GitHub still keeps, among each repository's 1,000 newest
+artifacts. New gate runs arrive as their workflows finish.
+
+**Today the App is private.** Like the gate itself, it can be installed only on repositories of the gate's owner.
+Other projects wait for the public release, which is planned.
+
+**What leaves your CI.** The records hold what your application answered, its tool calls with their results and the
+state it ended in; the case files hold your test inputs. Installing the App copies them from GitHub into the
+dashboard's database. Install it only on repositories whose results may leave CI.
+
+**Removing a repository.** Uninstall the App from it on GitHub. Its stored gate runs stay in the database, and nobody
+sees them until the App is installed on it again.
+
+## Sign in
+
+Open **Projects** in this site's header (https://llm-release-gate.vercel.app). If you are not signed in yet, click
+**Sign in with GitHub**. Signing in goes through the same App, so there is no separate account.
+
+You see a repository when the App is installed on it and you have access to it on GitHub. The dashboard checks this
+against GitHub on every page, so losing access on GitHub hides the repository here too. Teammates with access to the
+repository see the same gate runs once they sign in.
+
+A sign-in lasts eight hours, as long as the App's token for you. After that, the next page sends you through GitHub
+again; if you have already authorised the App, GitHub does not ask a second time.
+
+## What is planned
+
+The dashboard shows today's verdicts, which come from the naive rule: one run per version, block when the mean score
+drops by more than `delta` points (5 by default). Planned:
+
+- why a request passed or was blocked, with the interval of the statistical rule (stage C) and its third outcome,
+  "not sure yet";
+- noise by check, and cost and time set against the budgets;
+- the difference in the config and the prompts between the two versions;
+- a way to look at example gate runs without signing in;
+- suggestions for the rules, such as `k` from the noise the dashboard has seen, offered as a pull request against
+  `gate.yaml`. The rules themselves stay in `gate.yaml`; the dashboard only reads.

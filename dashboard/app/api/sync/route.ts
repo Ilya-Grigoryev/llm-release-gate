@@ -10,7 +10,7 @@ export async function POST(req: NextRequest) {
   const origin = req.headers.get("origin");
   if (origin && origin !== req.nextUrl.origin) return new NextResponse("cross-site request", { status: 403 });
   const user = await currentUser();
-  if (!user || user.expires < Date.now()) return NextResponse.redirect(new URL("/api/auth/login", req.nextUrl.origin), 303);
+  if (!user || user.expires < Date.now()) return NextResponse.redirect(new URL("/api/auth/login?next=/projects", req.nextUrl.origin), 303);
   const name = String((await req.formData()).get("repo") ?? "").toLowerCase();
   const repo = (await userRepos(user.token)).find((r) => r.full_name.toLowerCase() === name);
   if (!repo) return new NextResponse("not found", { status: 404 });

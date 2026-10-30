@@ -1,0 +1,319 @@
+export const metadata = { title: "How it works" };
+
+# How it works
+
+On every pull request, the gate runs two versions of your LLM application on the same test cases: the version on the
+target branch and the version in the request. It scores both and posts a comment on the request for each pipeline. The
+comment says whether the mean score on your cases dropped by more than you allow. When the gate can tell that the
+request does not change a pipeline, it runs nothing for it. This page follows one request from start to end.
+
+## One pull request, start to end
+
+You tell the gate what to check in `gate.yaml`, a file at the root of your project. Each entry under `pipelines` is one
+pipeline: a name, the config of a version, and the directory of its test set (`golden`). Most applications have one
+pipeline. An application with separate LLM parts, or variants you want checked apart, can name several; each gets its
+own verdict and its own comment. [Reference](/docs/reference) lists every field of `gate.yaml`.
+
+Take a booking assistant. It is a made-up example: an agent that books, moves and cancels rooms through tools. Its
+`gate.yaml` names one pipeline, `booking`. A teammate opens a pull request that rewrites the cancellation rule in the
+assistant's system prompt. Here is what the gate does with that request.
+
+1. **The job starts.** The gate runs as a step in your CI job. Before it pays for any model call, it checks that the
+   request does not come from a fork, that `gate.yaml` is valid, and that it can post a comment on the request.
+2. **The gate checks out the target branch next to the request.** It adds a second working tree of the target branch
+   (usually `main`) beside the request's checkout and readies both: your `prepare` command, if `gate.yaml` has one,
+   then each tree's locked dependencies. From here on, each version has its own code and its own dependencies.
+3. **Each tree works out its version.** The gate checks the request's test set, then the gate in each tree hashes the
+   pipeline's [version](#what-a-version-is). If the two hashes are equal, the pipeline is `unchanged`: nothing runs and
+   no model is called.
+4. **Both versions run.** Otherwise the base (the target branch's version) and the candidate (the request's version)
+   run in parallel, each in its own tree, on the request's test set. Each version runs `k` times per
+   [case](#cases). A run is the version handling one case once; `k` is set in `gate.yaml` and is 1 by default.
+5. **Checks score every run.** The case's [checks](#checks) look at each answer and at the [trace](#traces) of steps
+   that produced it. They give the run a score from 0 to 1.
+6. **The gate decides and answers.** It pairs the two versions case by case and applies today's rule, the naive rule:
+   it takes the first run of each version and blocks if the mean score drops by more than `delta` (see
+   [The decision today](#the-decision-today)). It posts the [verdict](#verdicts) as a comment on the request, and the
+   job passes or fails with it. The runs are kept as build artifacts, and the [dashboard](/docs/dashboard) shows them.
+
+<Fig id="how-it-works-1" caption={"One pull request through the gate. Both versions run on the same cases, each with its own code; the gate compares them and answers in the request. Example numbers."} alt={"Two versions of the application, the one on the target branch and the one in the request, are checked out side by side. If their version hashes are equal, the gate stops and reports \"unchanged\". Otherwise both run on the same 20 cases and checks score each run. In this example two cases get worse, the mean score falls from 0.800 to 0.725, a drop of 7.5 points against an allowed 5, and the gate blocks. The result is a comment for this pipeline on the pull request: pass or block today; \"not sure yet\" is planned."} />
+
+## What a version is
+
+A version is three things: its config file, the bytes of the prompt files the config names, and the code of the
+repository as git sees it. You do not bump a version number: the gate reads the version from git.
+
+```yaml
+# configs/booking.yaml: one version of the booking assistant
+pipeline: booking_assistant.gate_adapter  # your adapter module; `command` runs a program in any language
+model: gpt-4.1-mini-2025-04-14             # a dated snapshot if there is one
+prompt: ../prompts/system.md               # relative to this file
+input: request                             # which input of a case this version reads
+params: {temperature: 0}
+```
+
+- **The config.** Every field counts: `pipeline`, `model`, `prompt`, `input`, `params`, `max_retries`, `timeout_s`,
+  and `command` for a program in another language. The config file is also tracked by git, so it counts as code too:
+  any edit to it, even reordering keys or reformatting, gives a new version.
+- **The prompts.** The bytes of each prompt file the config names. A changed comma is a new version.
+- **The code.** Every file git tracks in the repository, by the id git gives its content. Uncommitted edits count.
+  Untracked files, such as run records and downloaded data, do not, so writing results never changes the version. In
+  a monorepo, shared code and the root lock file count too.
+
+These files do not count:
+
+- documentation: `README`, `CHANGELOG`, `CONTRIBUTING` and `LICENSE` (bare, or as `.md`, `.rst`, `.txt`, `.adoc`, in
+  any case, in any directory), and a `docs/` directory at the root of the repository or of the project;
+- CI: `.github/`, at the same two places;
+- `gate.yaml`, and the price files and manifests it names;
+- the paths listed in its `ignore`;
+- the test sets `gate.yaml` names. A test set it does not name counts as code: name it, or put it in `ignore`;
+- the files of the other pipelines in the same `gate.yaml` (their configs and prompts).
+
+A `docs/` directory deeper in the tree is code. A `!` pattern in `ignore` takes documentation, CI or ignored paths
+inside the project back into the version (see [When nothing runs](#when-nothing-runs)). It cannot take back
+`gate.yaml`, its price files and manifests, test sets or other pipelines' files.
+
+| The request changes | New version? |
+|---|---|
+| a prompt file | yes |
+| anything in the config file, even its formatting | yes |
+| application code: a tool, its description, how an answer is parsed | yes |
+| the lock file, for example a new SDK release | yes, for every pipeline |
+| `README.md` or a file under the root `docs/` | no |
+| a case or an input in the test set | no; the comment notes that the test set changed |
+| the rules in `gate.yaml`: `delta` (the allowed drop, see [The decision today](#the-decision-today)), `k` or a budget | no; the comment notes that the rules changed |
+| an untracked file | no |
+
+Name a dated model snapshot when the provider offers one. A name without a date works, but the provider may change the
+model behind it. The gate then takes three precautions. Every record keeps the model the config asked for, the model
+the provider reported, and the time. The comment warns about the name. And the gate refuses to compare two versions
+whose runs, taken together, have a pause longer than an hour, or that asked for the same model and got different ones
+(or do not say which one they got).
+
+Each record also carries the commit, with `+dirty` for uncommitted edits. That is for finding the code later, not for
+comparing versions.
+
+<Fig id="how-it-works-2" caption={"A version is its config, its prompts and the code git tracks. Documentation, CI, gate settings, ignored paths and test sets do not count. Example repository."} alt={"In the example repository, editing the system prompt, the config, the code, the lock file or a file under docs/kb/ makes a new version, so both versions run. The files under docs/kb/ count because gate.yaml takes them back with \"!docs/kb/\". Editing README.md, docs/guide.md, web/ (listed in ignore), a test case or a rule in gate.yaml leaves the version as it is, so the gate reports \"unchanged\"."} />
+
+## When nothing runs
+
+If a request leaves a pipeline's version as it is, the gate reports `unchanged` for that pipeline and runs nothing, so
+it costs nothing. A pipeline's own files do not count for the others: a request that edits one pipeline's prompt leaves
+the other pipelines unchanged.
+
+The gate skips a pipeline only when the target branch's `gate.yaml` and the request's agree on two things: the
+`ignore` list, and which files belong to which pipeline (each pipeline's config, test set, manifest, price file and
+prompts). A request that changes either runs every pipeline, so it cannot hide new code from its own gate. If the
+target branch has no `gate.yaml` yet, or a broken one, every pipeline runs.
+
+A request that only edits test cases is `unchanged` too: the version did not change, so there is nothing new to run.
+The comment notes that the test set changed.
+
+Use `ignore` for files that never change what the model gets, such as a web front end. A trailing `/` takes a
+directory, `**` crosses directories, and `!` takes files back, for an application that reads part of its
+documentation:
+
+```yaml
+# gate.yaml
+pipelines:
+  booking:
+    config: configs/booking.yaml
+    golden: golden/booking
+ignore:
+  - web/          # the front end never reaches the model
+  - "!docs/kb/"   # the assistant reads its knowledge base from docs/kb/
+```
+
+## Both versions at the same time
+
+The gate does not reuse earlier results for the target branch. A model answers differently from run to run, and the
+service behind it can change over time. Comparing the request today with the target branch last week would mix the
+change with that drift. So both versions run in the same window, on the same cases, and the gate compares them case by
+case.
+
+Each version runs with its own code. The base runs in the target branch's tree with that branch's lock file; the
+candidate runs in the request's tree. A request that updates an SDK is therefore compared with the old SDK, not with
+itself.
+
+The base runs the target branch's config of the pipeline, matched by the pipeline's name in `gate.yaml`, so renaming
+the config file keeps the comparison. If the target branch has no `gate.yaml`, or a broken one, the base is the file at
+the request's config path; if the target branch has no file there, the pipeline gets `no base version`.
+
+The gate runs the request's code, its workflow and its lock file. It catches mistakes, not a hostile author. If you
+need protection against that, protect `.github/`, `gate.yaml` and the lock file with CODEOWNERS.
+
+## Whose rules apply
+
+The rules come from the target branch's `gate.yaml`: `delta` (how many points the mean score may drop), `k`, `budgets`
+and `prices`. What is tested comes from the request: the candidate's config, the test set, its manifest and `prepare`.
+A request therefore cannot loosen its own gate. If it raises `delta`, the new value applies after merge, and the
+comment says that the request changes the rules.
+
+- A pipeline that is new in the request follows the target branch's top-level rules. The comment says it is new.
+- If the target branch has no `gate.yaml`, or a broken one, the request's rules hold. For a broken one the comment
+  warns.
+- A request that removes a pipeline from `gate.yaml` fails as `inconclusive` (exit 11). Renaming a pipeline looks the
+  same. No version of it was compared, so a maintainer merges over the check if that is intended. The removed pipeline
+  gets no comment of its own. Every other pipeline's comment keeps its own verdict and adds a note about the removal,
+  but its exit code changes: a pipeline that passed, was `unchanged` or had `no base version` exits 11, so its job
+  fails too. A quality fail, budget fail or infra error keeps its own code. With one CI step per pipeline, every step
+  turns red; one command that gates all pipelines exits with the worst code.
+
+## Cases
+
+A case is one situation your application must handle. It is a YAML file with an id, a version number, its inputs
+(files next to it), the expected values, and a scoring block that says how to score an answer. A directory of cases is
+a test set, and `gate.yaml` names one per pipeline. The gate validates the set (every case against the schema, unique
+ids, that every input file exists inside the set, and the set's manifest if `gate.yaml` names one) and hashes it:
+reformatting a case keeps the hash, editing an expectation or an input changes it, and runs on different sets are never
+compared. Writing cases is the main work the gate asks of you, because the cases decide which changes it can see. A
+change that no case touches passes unseen. [Write tests](/docs/write-tests) shows how to write good cases;
+[What it catches](/docs/what-it-catches) lists the kinds of changes cases can catch and how that list grows.
+
+Here is one case of the booking assistant. A customer cancels late; the assistant must look the booking up first,
+cancel it, and not waive the fee.
+
+```yaml
+# golden/booking/cancel-after-deadline.yaml
+id: cancel-after-deadline
+version: 1   # the case's own revision, not the application's version
+input:
+  request: inputs/cancel-after-deadline.txt
+expected:
+  state_change: {bookings: {B-1042: cancelled}}
+scoring:
+  method: checks
+  aggregate: all
+  checks:
+    - {id: cancelled, kind: state, key: state_change}   # the booking system changed as expected, and nothing else
+    - {id: acted, kind: active}                         # the agent called a tool itself
+    - {id: looked-up, kind: order, first: find_booking, then: [cancel_booking]}
+    - {id: no-fee-waiver, kind: not_called, tool: waive_fee}
+    - {id: steps, kind: max_steps, max: 10}
+```
+
+Check the set before you commit it:
+
+```sh
+uv run llm-release-gate golden validate golden/booking
+```
+
+## Checks
+
+A check looks at one thing in a run and gives true or false, a share between 0 and 1, or nothing when it does not
+apply. Answer checks read the output: `field_match`, `exact`, `contains`, `regex`, `number`, `json_schema` and
+`refusal`. Trace checks read the steps: `called`, `not_called`, `order`, `max_steps`, `active`, `actions`, `state` and
+`doc_found`. A `function` check calls your own `module:function`. `aggregate` turns the results into the case score:
+`mean` (the default) or `all` (1 only if every check that applies passes). The record keeps every result, so you can
+see which check failed. For an invoice reader, another made-up example that extracts fields from an invoice in one
+model call, `method: field_match` compares each expected field with the answer, dates and numbers by value. The
+built-in checks are deterministic: none of them asks a model for an opinion. `golden validate` checks every check's
+configuration against the case's expected values before anything runs. [Write tests](/docs/write-tests) has examples of each
+check; [Reference](/docs/reference) has every field.
+
+## Traces
+
+A trace is the list of steps inside one run: model calls, tool calls, messages and retrievals. Each step has a kind
+(`llm`, `tool`, `message`, `retrieval`) and an actor (`agent`, `user`, `system`, `env`). The trace ends with the state
+of the world after the run and what changed, as your adapter reports them. A Python adapter records the trace with
+wrappers around the OpenAI client and your tool functions, without changing the application. A program in another
+language returns the trace in its JSON answer. Trace checks look at the agent's steps in the run's last attempt, unless
+a check's `actor` names another actor. A support chat, a third made-up example that talks to a simulated customer,
+marks the simulator's calls with `actor: user`, so their steps and cost stay apart from the agent's. The trace also
+gives the cost: each model step is priced at the list prices you give the gate. A run with no trace still gets its
+answer checks; its trace checks fail. [Connect your app](/docs/connect) shows both ways to record a trace.
+
+## The decision today
+
+Today the gate decides with the naive rule. It takes one run per version (the first, if `k` is more than 1) and
+computes each version's mean score over the cases. It blocks when the candidate's mean is lower than the base's by more
+than `delta` points: 5 by default, on a score from 0 to 1, so 5 points is 0.05. A drop exactly at the limit passes.
+The rule ignores runs beyond the first; the budgets and the cost of the decision count all of them.
+
+Budgets check the candidate alone: its mean cost per run at your list prices, and a latency quantile (0.95 by default)
+with an interval. Latency blocks only when the whole interval lies above the limit. A budget turns a pass into
+`budget fail`; a quality fail stays a quality fail.
+
+One run per version is not much. In the author's measurement on a support agent, one unchanged version ran 11 times on
+the same 10 cases. Its mean score was 0.7, 0.6, 0.6, 0.7, 0.5, 0.6, 0.6, 0.4, 0.7, 0.7 and 0.6. Nothing changed between
+these runs, yet two of them differ by as much as 30 points, six times the default `delta`. Under the naive rule, such
+an application can be blocked by a change that did no harm, and a change that did harm can pass. See
+[What a pass means](/docs/how-it-decides#what-a-pass-means).
+
+A statistical rule is planned for stage C of the roadmap ([Method](/docs/method#contribution) says what each stage adds).
+The gate will run each version several times, put an interval around the difference of the two means, and give one of
+three outcomes: pass, block, or not sure yet when the runs cannot tell the change from noise. `delta` will then be the
+loss you accept. How often the gate is wrong will be measured in the
+[planned stage D experiments](/docs/method#planned-experiments); the gate's error rates are not measured yet.
+[How it decides](/docs/how-it-decides) explains the rule and the noise in detail.
+
+## Verdicts
+
+Each pipeline gets one verdict. The exit code is what CI sees.
+
+| Verdict | When | Exit code |
+|---|---|---|
+| pass | the candidate's mean did not drop by more than `delta`, and no budget is exceeded | 0 |
+| quality fail | the candidate's mean dropped by more than `delta`: the request is blocked | 10 |
+| budget fail | quality passed, but a cost or latency limit did not | 12 |
+| inconclusive | today only when a request removes or renames a pipeline in `gate.yaml`; then every remaining pipeline that would exit 0 exits 11 (see [Whose rules apply](#whose-rules-apply)). The naive rule never gives it. Planned: "not sure yet" from the statistical rule | 11 |
+| infra error | the runs cannot be compared, a step could not run, or the gate failed | 20 |
+| unchanged | the request leaves the version as it is; nothing ran | 0 |
+| no base version | the target branch has no version of this pipeline; the candidate runs alone, and its score and budget are reported but do not block | 0 |
+| not checked | the request comes from a fork: GitHub gives such workflows no secrets, so the gate cannot call the model. The job fails, so a required check never passes an unchecked request. A maintainer gates it by pushing the branch to the repository | job fails |
+
+Exit codes 1 and 2 are left to Python and its argument parser, so a crash is never read as a verdict. When one command
+gates several pipelines, it exits with the worst outcome: infra error, then quality fail, budget fail, inconclusive,
+pass. [Read a verdict](/docs/read-a-verdict) says what to do with each one.
+
+## Where results go
+
+**The comment.** Each pipeline gets one comment on the request, edited on later pushes instead of posting a new one. It
+holds the verdict, the two mean scores and the difference, the rule, the number of cases, short hashes of both versions
+and the test set, the cost of the decision if you gave prices, the budget line if you set budgets, the cases that got
+worse (up to five), and notes: changed rules, a new pipeline, a changed test set, a removed pipeline, a model without a
+date. The version hashes are labelled `config` in the comment, but each covers the whole version: config, prompts and
+code. An example, with made-up numbers:
+
+```text
+`booking` · **Release gate: ❌ quality fail**
+
+Mean score 0.800 → 0.725 (-7.50 points, blocks below -5.00); naive rule: block if the mean drops by more than 5 points.
+20 cases, first run of each version · config 3f9a1c0e → 8b42d7aa · set 51c0e9d2
+Cost of this decision $0.142: base $0.071, candidate $0.071 (successful calls, list prices).
+
+| Case | Base | Candidate |
+|---|---|---|
+| cancel-after-deadline | 1.00 | 0.00 |
+| cancel-on-arrival | 1.00 | 0.50 |
+
+[Job log](https://github.com/OWNER/REPO/actions/runs/RUN_ID)
+```
+
+**The check.** The job passes or fails with the verdict. It only advises until you make it a required check for the
+target branch.
+
+**The artifacts.** The job keeps the records of both versions, the verdict as JSON, the comment and the logs as one
+artifact, `release-gate-NAME-ATTEMPT`. It keeps the test set's case files and text inputs as a second one,
+`release-gate-NAME-ATTEMPT-cases`, for 30 days (set `cases: false` on the action to leave it out). Each record is one
+JSON line per run: the version's hash, the test set's hash, the answer, the trace with tokens per actor, and every
+check's result. The gate prices the tokens when it decides; the cost is in the verdict JSON and the comment.
+
+**The dashboard.** Install the dashboard's GitHub App on the repositories that run the gate, and sign in with GitHub.
+It reads the artifacts after each run; your workflow needs no change. It shows each request's verdict, the cases that
+changed between the two versions, and each run's answer, checks and steps on both sides. The records leave CI for the
+dashboard's database, so install the App only on repositories whose runs may leave CI. See [Dashboard](/docs/dashboard).
+
+**Outside the GitHub Action.** Run the same steps from the repository's root. `llm-release-gate pr` gates every
+pipeline in `gate.yaml` and writes each one's comment, verdict, records and logs to `OUT/NAME`:
+
+```sh
+uv run llm-release-gate pr --base origin/main --out gate-out
+uv run llm-release-gate comment gate-out/booking/comment.md --name booking
+```
+
+`comment` posts only from a GitHub Actions job on a pull request or from a GitLab CI merge request pipeline (with
+`GITLAB_TOKEN`, a project access token with the `api` scope). The GitLab path is tested so far only against a mocked
+GitLab API; a GitLab CI component is planned. In another CI, run `pr` and post `OUT/NAME/comment.md` yourself.
+`--check` tells beforehand whether the job can comment, and `--dry-run` prints the comment without posting it.

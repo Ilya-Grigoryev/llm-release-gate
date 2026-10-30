@@ -1,48 +1,78 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Atkinson_Hyperlegible, Bricolage_Grotesque, JetBrains_Mono } from "next/font/google";
 import Link from "next/link";
+import { SiteNav } from "@/components/site-nav";
 import { currentUser } from "@/lib/auth";
 import "./globals.css";
 
-const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
-const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
+const display = Bricolage_Grotesque({ variable: "--font-display-face", subsets: ["latin"], axes: ["opsz"] });
+const body = Atkinson_Hyperlegible({
+  variable: "--font-body",
+  subsets: ["latin"],
+  weight: ["400", "700"],
+  style: ["normal", "italic"],
+});
+const code = JetBrains_Mono({ variable: "--font-code", subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: { default: "Release gate", template: "%s · Release gate" },
-  description: "The runs of llm-release-gate on your pull requests: verdicts, cases, answers and traces.",
+  title: { default: "Release gate", template: "%s | Release gate" },
+  description: "llm-release-gate: a CI release gate for LLM apps, and the runs it decided on your pull requests.",
+  robots: { index: false, follow: false },
 };
 
 async function Account() {
   const user = await currentUser();
-  if (!user) return null;
+  if (!user)
+    return (
+      <form action="/api/auth/login">
+        <button className="text-sm text-ink-2 underline-offset-4 hover:text-ink hover:underline">Sign in</button>
+      </form>
+    );
   return (
-    <div className="flex items-center gap-3 text-sm">
+    <div className="flex items-center gap-2 sm:gap-3 text-sm">
       {/* eslint-disable-next-line @next/next/no-img-element -- a 24px avatar from GitHub */}
-      <img src={user.avatar} alt="" className="size-6 rounded-full" />
-      <span className="text-ink-2">{user.login}</span>
+      <img src={user.avatar} alt="" className="hidden size-6 rounded-full sm:block" />
+      <span className="hidden text-ink-2 sm:inline">{user.login}</span>
       <form action="/api/auth/logout" method="post">
-        <button className="text-ink-3 hover:text-ink">Sign out</button>
+        <button className="text-ink-2 underline-offset-4 hover:text-ink hover:underline">Sign out</button>
       </form>
     </div>
   );
 }
 
+/** Two tracks under a barrier: the gate's mark. */
+function Mark() {
+  return (
+    <svg viewBox="0 0 24 24" className="size-6" aria-hidden>
+      <path d="M8 3v18" stroke="var(--base)" strokeWidth="2.5" strokeLinecap="round" />
+      <path d="M16 3v18" stroke="var(--cand)" strokeWidth="2.5" strokeLinecap="round" />
+      <path d="M3 10.5h18" stroke="var(--ink)" strokeWidth="3" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="en" className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}>
+    <html lang="en" className={`${display.variable} ${body.variable} ${code.variable} h-full antialiased`}>
       <body className="flex min-h-full flex-col font-sans">
-        <header className="border-b border-line bg-panel">
-          <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-4">
-            <Link href="/" className="flex items-center gap-2 font-semibold tracking-tight">
-              <span aria-hidden className="grid size-6 place-items-center rounded bg-ink text-xs text-panel">
-                ▲▼
-              </span>
+        <a href="#content" className="sr-only z-50 rounded bg-ink px-3 py-2 text-paper focus:not-sr-only focus:fixed focus:top-2 focus:left-2">
+          Skip to content
+        </a>
+        <header className="sticky top-0 z-30 h-(--header) border-b border-line bg-paper/95 backdrop-blur-sm">
+          <div className="flex h-full items-center gap-4 px-4 whitespace-nowrap sm:gap-6 sm:px-6">
+            <Link href="/" className="flex shrink-0 items-center gap-2 font-display text-base font-extrabold tracking-tight sm:text-lg">
+              <Mark />
               release gate
             </Link>
-            <Account />
+            <SiteNav />
+            <div className="ml-auto">
+              <Account />
+            </div>
           </div>
         </header>
-        <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-8">{children}</main>
+        <div id="content" className="flex flex-1 flex-col">
+          {children}
+        </div>
       </body>
     </html>
   );

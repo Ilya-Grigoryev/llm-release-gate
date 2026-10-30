@@ -31,7 +31,7 @@ export default async function Run(props: PageProps<"/[owner]/[repo]/runs/[id]">)
 
   return (
     <section>
-      <Crumbs items={[{ href: "/", label: "Projects" }, { href: `/${repo.full_name}`, label: repo.full_name }, { label: title }]} />
+      <Crumbs items={[{ href: "/projects", label: "Projects" }, { href: `/${repo.full_name}`, label: repo.full_name }, { label: title }]} />
       <div className="flex flex-wrap items-baseline justify-between gap-3">
         <h1 className="text-2xl font-semibold tracking-tight">
           {title} <span className="font-normal text-ink-2">{run.title}</span>
