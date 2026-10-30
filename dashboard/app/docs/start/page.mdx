@@ -264,7 +264,7 @@ tests](/docs/write-tests)). **Check the case:**
 uv run llm-release-gate golden validate golden/invoices
 ```
 
-It prints the set's hash, or names the file with a problem, such as a date without quotes.
+It prints the set's hash, or names the file with a problem, such as an ISO date without quotes.
 
 **Check the version: run it once.** This costs one model call per case. Keep `.env` and `runs/` out of git: a run record
 you commit becomes part of the version.
@@ -332,7 +332,8 @@ If the target branch is not a uv project yet, the comment reads "The target bran
 (`infra error`): merge `pyproject.toml` and `uv.lock` in a pull request of their own first.
 
 After you merge, later requests are compared with the target branch's version. One that changes only documentation or
-other files that do not count gets `unchanged` and calls no model. A request from a fork gets no secrets and fails as
+other files that do not count gets `unchanged` and calls no model
+([When nothing runs](/docs/how-it-works#when-nothing-runs) has the exceptions). A request from a fork gets no secrets and fails as
 `not checked`. The job only advises until you make `release-gate` a required status check.
 
 ## What each outcome means

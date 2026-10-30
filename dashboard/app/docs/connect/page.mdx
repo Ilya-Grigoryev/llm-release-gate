@@ -193,18 +193,18 @@ pipeline gets `infra error`. Merge the package files first, or use
 
 ## Exit codes and timeouts
 
-| Adapter raises | Program exits | What the gate does |
+| Python adapter | Program exits | What the gate does |
 |---|---|---|
 | returns | 0 | reads the answer |
-| `Retryable` | 75 | rate limit, timeout: retries after 1, 2, 4… seconds (at most 60), up to `max_retries` times |
-| `Fatal` | 78; 126, 127 from a shell in `command` | no quota, wrong key: stops all runs of this version |
-| any other exception | any other code | records the error, goes on with the other cases |
+| raises `Retryable` | 75 | rate limit, timeout: retries after 1, 2, 4… seconds (at most 60), up to `max_retries` times |
+| raises `Fatal` | 78; 126, 127 from a shell in `command` | no quota, wrong key: stops all runs of this version |
+| raises any other exception | any other code | records the error, goes on with the other cases |
 
 A program the gate cannot start also stops all runs. A run with no answer after its retries gives the pipeline
 [`infra error`](/docs/read-a-verdict#infra-error) (exit 20), not a lower score, so return a wrong answer as an answer.
 
-`timeout_s` bounds a whole program: on timeout the gate kills its process group (POSIX only) and retries the run like
-an exit 75; a child that leaves the group (`setsid`, `docker run`) survives. The gate does not stop a Python `run`:
+`timeout_s` bounds a whole program: on timeout the gate kills its process group (POSIX only), loses that attempt's trace and
+retries the run like an exit 75; a child that leaves the group (`setsid`, `docker run`) survives. The gate does not stop a Python `run`:
 pass `config.timeout_s` to your SDK and turn off its retries (`max_retries=0`), so the gate counts every retry.
 
 On a pull request up to eight runs go at once, four per version, so size shared resources for that. An adapter's

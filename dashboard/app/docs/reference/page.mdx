@@ -365,7 +365,7 @@ uv run --env-file .env llm-release-gate run --config configs/invoice.yaml --gold
 
 Compares two files of runs case by case with the naive rule. It gives `infra error` for different set hashes, cases on
 one side only, different scorer versions (unless `--golden` rescores both) and, for a model name without a date, a
-pause over an hour or different reported models ([why](/docs/how-it-decides#why-both-versions-run-at-the-same-time)).
+pause over an hour or, when both asked for it, different reported models ([why](/docs/how-it-decides#why-both-versions-run-at-the-same-time)).
 
 | Flag | Meaning |
 |---|---|
