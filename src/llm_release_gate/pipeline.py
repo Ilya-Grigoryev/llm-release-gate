@@ -1,11 +1,10 @@
-"""What the gate knows about a pipeline: cases in, answers out, a YAML config per version."""
+"""What the gate knows about a pipeline: cases in, answers out, a YAML config per version. The program that answers
+runs in `command.py`."""
 
-import importlib
 import math
 import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from types import ModuleType
 from typing import Any, Protocol
 
 import yaml
@@ -38,11 +37,11 @@ class Answer:
 
 
 class Retryable(Exception):
-    """Raised by a pipeline when the same call may succeed later: rate limit, timeout, server error."""
+    """The same run may succeed later: rate limit, timeout, server error."""
 
 
 class Fatal(Exception):
-    """Raised by a pipeline when no further call can succeed, e.g. the account is out of quota."""
+    """No further run can succeed, e.g. the account is out of quota."""
 
 
 class Pipeline(Protocol):
@@ -51,7 +50,9 @@ class Pipeline(Protocol):
 
 @dataclass(frozen=True)
 class PipelineConfig:
-    pipeline: str
+    command: tuple[
+        str, ...
+    ]  # the program that answers one case: [program, argument, ...]
     model: str
     prompt: (
         Path | dict[str, Path]
@@ -60,7 +61,6 @@ class PipelineConfig:
     params: dict[str, Any] = field(default_factory=dict)
     max_retries: int = 5
     timeout_s: float = 60.0
-    command: tuple[str, ...] | None = None  # `pipeline: command` runs this program
 
 
 def plain_numbers(value: Any) -> Any:
@@ -92,8 +92,8 @@ def prompt_files(raw: Any, base: Path) -> Path | dict[str, Path]:
 def load_config(path: Path) -> PipelineConfig:
     """Read a pipeline config. Prompt paths are relative to the config file."""
     raw = yaml.safe_load(Path(path).read_text())
-    optional = {"params", "max_retries", "timeout_s", "command"}
-    keys = {"pipeline", "model", "prompt", "input"} | optional
+    optional = {"params", "max_retries", "timeout_s"}
+    keys = {"command", "model", "prompt", "input"} | optional
     if not isinstance(raw, dict) or not raw.keys() <= keys:
         raise ValueError(f"{path}: expected a mapping with keys from {sorted(keys)}")
     missing = keys - optional - raw.keys()
@@ -108,12 +108,8 @@ def load_config(path: Path) -> PipelineConfig:
         raise ValueError(f"{path}: input must be a name, got {raw['input']!r}")  # noqa: TRY004 - a config error like the others
     if not isinstance(raw["model"], str) or not raw["model"]:
         raise ValueError(f"{path}: model must be a name, got {raw['model']!r}")
-    command = raw.get("command")
-    if (raw["pipeline"] == "command") != (command is not None):
-        raise ValueError(
-            f"{path}: `command` goes with `pipeline: command`, and only with it"
-        )
-    if command is not None and not (
+    command = raw["command"]
+    if not (
         isinstance(command, list)
         and command
         and all(isinstance(c, str) and c for c in command)
@@ -124,35 +120,19 @@ def load_config(path: Path) -> PipelineConfig:
     except ValueError as e:
         raise ValueError(f"{path}: {e}") from None
     return PipelineConfig(
-        pipeline=raw["pipeline"],
+        command=tuple(command),
         model=raw["model"],
         prompt=prompt,
         input=raw["input"],
         params=plain_numbers(raw.get("params") or {}),
         max_retries=retries,
         timeout_s=float(timeout),  # 60 and 60.0 must hash alike
-        command=tuple(command) if command else None,
     )
 
 
 def is_alias(model: str | None) -> bool:
     """A model name without a date: the provider may change the model behind it (D-018)."""
     return bool(model) and not SNAPSHOT.match(model)
-
-
-def pipeline_module(name: str) -> ModuleType:
-    """The module named in `pipeline:` by its import path, e.g. `my_app.gate_adapter`; `command` is the gate's own."""
-    if name == "command":
-        name = "llm_release_gate.command"
-    try:
-        module = importlib.import_module(name)
-    except Exception as e:  # foreign code: any failure here is a config error
-        raise ValueError(
-            f"pipeline {name!r}: cannot import ({type(e).__name__}: {e})"
-        ) from e
-    if not callable(getattr(module, "build", None)):
-        raise ValueError(f"pipeline {name!r}: no build(config) function")  # noqa: TRY004 - a config error like the others
-    return module
 
 
 def config_hash(config: PipelineConfig) -> str:
@@ -166,8 +146,3 @@ def config_hash(config: PipelineConfig) -> str:
             else {name: file_hash(p) for name, p in prompt.items()},
         }
     )
-
-
-def load_pipeline(config: PipelineConfig, **kwargs) -> Pipeline:
-    """Build the pipeline with the `build(config)` function of the module named in the config."""
-    return pipeline_module(config.pipeline).build(config, **kwargs)

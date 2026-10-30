@@ -25,7 +25,7 @@ def git(repo, *args):
 
 def version(repo, mode, gate=GATE):
     (repo / "demo.yaml").write_text(
-        f"pipeline: command\ncommand: [sh, {AGENT}]\nmodel: fake-model-2026-01-01\n"
+        f"command: [sh, {AGENT}]\nmodel: fake-model-2026-01-01\n"
         f"prompt: prompt.md\ninput: text\nparams: {{mode: {mode}}}\n"
     )
     (repo / "gate.yaml").write_text(gate)

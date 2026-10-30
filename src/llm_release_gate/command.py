@@ -1,6 +1,5 @@
-"""Pipeline `command`: any program, in any language, as a pipeline.
+"""The program a version's config names, in any language, as the pipeline:
 
-    pipeline: command
     command: [node, agent.js]
 
 For each run the gate starts the program, writes one JSON request to its stdin and reads one JSON answer from its stdout,
@@ -39,10 +38,6 @@ def kill(p: subprocess.Popen) -> None:
 
 class Command:
     def __init__(self, config: PipelineConfig):
-        if not config.command:
-            raise ValueError(
-                "pipeline command needs `command: [program, argument, ...]`"
-            )
         self.config = config
 
     def request(self, case: Case) -> dict:
@@ -123,6 +118,10 @@ class Command:
             model=reply.get(
                 "model"
             ),  # what the program reports; None leaves a run without a trace unpriced
+            fingerprint=reply.get("fingerprint"),
+            reasoning_tokens=reply.get("reasoning_tokens", 0),
+            finish_reason=reply.get("finish_reason"),
+            request_id=reply.get("request_id"),
         )
 
 
@@ -181,7 +180,3 @@ def record(sent: Any) -> None:
     t.final_state = sent.get("final_state", t.final_state)
     t.state_change = sent.get("state_change", t.state_change)
     t.stop = sent["stop"] if sent.get("stop") is not None else t.stop
-
-
-def build(config: PipelineConfig) -> Command:
-    return Command(config)

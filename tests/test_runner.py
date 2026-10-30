@@ -208,7 +208,7 @@ def test_config_hash_follows_prompt_text_and_retry_policy(tmp_path):
     prompt = tmp_path / "prompt.md"
     prompt.write_text("Extract fields.")
     config = PipelineConfig(
-        "replay_pipeline", "gpt-4.1-mini-2025-04-14", prompt, "text", {"seed": 0}
+        ("sh", "agent.sh"), "gpt-4.1-mini-2025-04-14", prompt, "text", {"seed": 0}
     )
     before = config_hash(config)
     assert config_hash(replace(config, params={"seed": 0})) == before
@@ -219,7 +219,7 @@ def test_config_hash_follows_prompt_text_and_retry_policy(tmp_path):
 
 def test_load_config_reads_the_retry_policy(tmp_path):
     (tmp_path / "c.yaml").write_text(
-        "pipeline: replay_pipeline\nmodel: gpt-4.1-mini-2025-04-14\nprompt: p.md\ninput: text\n"
+        "command: [sh, agent.sh]\nmodel: gpt-4.1-mini-2025-04-14\nprompt: p.md\ninput: text\n"
         "max_retries: 2\ntimeout_s: 30\n"
     )
     config = load_config(tmp_path / "c.yaml")
@@ -239,7 +239,7 @@ def test_load_config_reads_the_retry_policy(tmp_path):
 )
 def test_load_config_rejects_a_bad_retry_policy(tmp_path, extra):
     (tmp_path / "c.yaml").write_text(
-        "pipeline: replay_pipeline\nmodel: gpt-4.1-mini-2025-04-14\nprompt: p.md\ninput: text\n"
+        "command: [sh, agent.sh]\nmodel: gpt-4.1-mini-2025-04-14\nprompt: p.md\ninput: text\n"
         + extra
     )
     with pytest.raises(ValueError):
@@ -247,7 +247,7 @@ def test_load_config_rejects_a_bad_retry_policy(tmp_path, extra):
 
 
 def test_timeout_written_as_int_or_float_hashes_alike(tmp_path):
-    base = "pipeline: replay_pipeline\nmodel: gpt-4.1-mini-2025-04-14\nprompt: p.md\ninput: text\n"
+    base = "command: [sh, agent.sh]\nmodel: gpt-4.1-mini-2025-04-14\nprompt: p.md\ninput: text\n"
     (tmp_path / "p.md").write_text("Extract fields.")
     (tmp_path / "a.yaml").write_text(base + "timeout_s: 60\n")
     (tmp_path / "b.yaml").write_text(base + "timeout_s: 60.0\n")
@@ -348,8 +348,9 @@ def test_records_carry_the_scorer_version(tmp_path):
     assert {r["record_version"] for r in read_records(out)} == {runner.RECORD_VERSION}
 
 
-def test_cli_stamps_every_record_with_both_hashes(tmp_path, capsys):
-    # no monkeypatch: the runner imports replay_pipeline by the name in the config
+def test_cli_stamps_every_record_with_both_hashes(tmp_path, capsys, monkeypatch):
+    # no monkeypatch of the program: the runner starts the one in the config, relative to where it runs
+    monkeypatch.chdir(FIXTURES)
     out = tmp_path / "runs.jsonl"
     config_path = FIXTURES / "config.yaml"
     args = ["--config", str(config_path), "--golden", str(FIXTURES / "golden")]
@@ -384,7 +385,7 @@ def test_cli_fails_when_calls_fail(tmp_path, monkeypatch):
     def broken(case, n):
         raise RuntimeError("400 bad parameter")
 
-    monkeypatch.setattr(runner, "load_pipeline", lambda config: Replay(fail=broken))
+    monkeypatch.setattr(runner, "Command", lambda config: Replay(fail=broken))
     config_path = FIXTURES / "config.yaml"
     out = tmp_path / "runs.jsonl"
     with pytest.raises(SystemExit, match="not done: 1 of 1; last error: RuntimeError"):
@@ -431,7 +432,7 @@ def test_cli_counts_only_the_requested_repetitions(tmp_path, monkeypatch):
         str(tmp_path / "r.jsonl"),
     ]
     monkeypatch.setattr(
-        runner, "load_pipeline", lambda c: Replay(fail=first_rep_fails, delay=0.01)
+        runner, "Command", lambda c: Replay(fail=first_rep_fails, delay=0.01)
     )
     with pytest.raises(SystemExit):
         runner.main([*args, "-k", "5", "--workers", "1"])
@@ -440,15 +441,13 @@ def test_cli_counts_only_the_requested_repetitions(tmp_path, monkeypatch):
         runner.main([*args, "-k", "3", "--workers", "1"])
 
 
-def test_cli_reports_a_bad_pipeline_without_a_traceback(tmp_path):
+def test_cli_reports_a_bad_config_without_a_traceback(tmp_path):
     body = (FIXTURES / "config.yaml").read_text()
     config_path = tmp_path / "c.yaml"
-    config_path.write_text(body.replace("replay_pipeline", "no_such_app.adapter"))
+    config_path.write_text(body + "pipeline: my_app.gate_adapter\n")
     (tmp_path / "prompt.md").write_text("Extract fields.")
     args = ["--config", str(config_path), "--golden", str(FIXTURES / "golden")]
-    with pytest.raises(
-        SystemExit, match="pipeline 'no_such_app.adapter': cannot import"
-    ):
+    with pytest.raises(SystemExit, match="expected a mapping with keys from"):
         runner.main([*args, "--out", str(tmp_path / "o.jsonl")])
     assert not (tmp_path / "o.jsonl").exists()
 

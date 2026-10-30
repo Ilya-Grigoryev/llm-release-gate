@@ -6,15 +6,10 @@ from pathlib import Path
 import pytest
 
 from llm_release_gate import command, protocol, runner, trace
+from llm_release_gate.command import Command
 from llm_release_gate.golden import load_cases, validate
 from llm_release_gate.metrics import hits
-from llm_release_gate.pipeline import (
-    Fatal,
-    Retryable,
-    config_hash,
-    load_config,
-    load_pipeline,
-)
+from llm_release_gate.pipeline import Fatal, Retryable, config_hash, load_config
 from llm_release_gate.runner import read_records
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -26,7 +21,6 @@ WRAPPER = FIXTURES / "command" / "wrapper.sh"
 def config(tmp_path, mode="answer", timeout=10, command=None):
     path = tmp_path / "command.yaml"
     path.write_text(
-        "pipeline: command\n"
         f"command: {json.dumps(command or ['sh', str(AGENT)])}\n"
         "model: fake-model-2026-01-01\n"
         f"prompt: {FIXTURES / 'prompt.md'}\n"
@@ -39,7 +33,7 @@ def config(tmp_path, mode="answer", timeout=10, command=None):
 
 def run_case(cfg):
     [case] = load_cases(GOLDEN)
-    return load_pipeline(cfg).run(case)
+    return Command(cfg).run(case)
 
 
 def traced(cfg):
@@ -57,7 +51,7 @@ def test_a_program_answers_and_the_record_keeps_its_trace(tmp_path):
     set_hash, _ = validate(GOLDEN)
     out = tmp_path / "runs.jsonl"
     runner.run(
-        load_pipeline(config(tmp_path)),
+        Command(config(tmp_path)),
         load_cases(GOLDEN),
         1,
         out,
@@ -121,12 +115,30 @@ def test_the_program_gets_the_case_and_the_version_but_not_the_expected_values(
         ("numbermodel", ValueError, "model: 4 is not of type 'string', 'null'"),
         ("negtokens", ValueError, "input_tokens: -1 is less than the minimum of 0"),
         ("floattokens", ValueError, "output_tokens: 2.5 is not of type 'integer'"),
+        ("baddetails", ValueError, "fingerprint: 5 is not of type 'string', 'null'"),
         ("otherprotocol", Fatal, "answer speaks protocol 2, the gate 1"),
     ],
 )
 def test_exit_codes_map_to_retry_stop_or_a_failed_run(tmp_path, mode, error, match):
     with pytest.raises(error, match=match):
         run_case(config(tmp_path, mode))
+
+
+def test_the_providers_details_reach_the_record(tmp_path):
+    a = run_case(config(tmp_path, "details"))
+    assert (a.fingerprint, a.finish_reason, a.request_id, a.reasoning_tokens) == (
+        "fp_1",
+        "stop",
+        "req-1",
+        7,
+    )
+    b = run_case(config(tmp_path, "bare"))
+    assert (b.fingerprint, b.finish_reason, b.request_id, b.reasoning_tokens) == (
+        None,
+        None,
+        None,
+        0,
+    )
 
 
 @pytest.mark.parametrize(
@@ -258,7 +270,7 @@ def test_a_step_that_breaks_the_format_fails_the_run(tmp_path):
     set_hash, _ = validate(GOLDEN)
     out = tmp_path / "runs.jsonl"
     runner.run(
-        load_pipeline(config(tmp_path, "badstep")),
+        Command(config(tmp_path, "badstep")),
         load_cases(GOLDEN),
         1,
         out,
@@ -280,9 +292,10 @@ def test_the_command_is_part_of_the_version(tmp_path):
 @pytest.mark.parametrize(
     "extra, match",
     [
-        ("pipeline: command\n", "goes with"),
-        ("pipeline: replay_pipeline\ncommand: [sh, x.sh]\n", "goes with"),
-        ("pipeline: command\ncommand: sh x.sh\n", "must be a list"),
+        ("", "missing \\['command'\\]"),
+        ("command: sh x.sh\n", "must be a list"),
+        ("command: []\n", "must be a list"),
+        ("command: [sh, x.sh]\npipeline: my_app.gate_adapter\n", "keys from"),
     ],
 )
 def test_bad_command_configs_are_refused(tmp_path, extra, match):

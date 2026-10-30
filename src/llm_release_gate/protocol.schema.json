@@ -49,6 +49,13 @@
         "input_tokens": {"$ref": "#/$defs/count"},
         "output_tokens": {"$ref": "#/$defs/count"},
         "model": {"description": "The model the provider reported.", "type": ["string", "null"]},
+        "fingerprint": {
+          "description": "The provider's mark of the system that answered, such as OpenAI's `system_fingerprint`: a change between runs can explain drift.",
+          "type": ["string", "null"]
+        },
+        "finish_reason": {"description": "Why the model stopped, as the provider says it.", "type": ["string", "null"]},
+        "request_id": {"description": "The provider's id of the call.", "type": ["string", "null"]},
+        "reasoning_tokens": {"$ref": "#/$defs/count"},
         "trace": {"$ref": "#/$defs/trace"}
       }
     },

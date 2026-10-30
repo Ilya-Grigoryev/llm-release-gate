@@ -1,17 +1,10 @@
 import ast
-import re
 import sys
 from pathlib import Path
 
 import pytest
 
-from llm_release_gate.golden import load_cases
-from llm_release_gate.pipeline import (
-    config_hash,
-    load_config,
-    load_pipeline,
-    plain_numbers,
-)
+from llm_release_gate.pipeline import config_hash, load_config, plain_numbers
 
 REPO = Path(__file__).parent.parent
 SRC = REPO / "src" / "llm_release_gate"
@@ -27,7 +20,7 @@ def test_load_config_resolves_prompt_next_to_config(tmp_path):
     config = load_config(
         write(
             tmp_path / "c.yaml",
-            "pipeline: replay_pipeline\nmodel: gpt-4.1-mini-2025-04-14\nprompt: prompt.md\n"
+            "command: [sh, agent.sh]\nmodel: gpt-4.1-mini-2025-04-14\nprompt: prompt.md\n"
             "input: text\nparams: {temperature: 0, seed: 0}\n",
         )
     )
@@ -38,13 +31,13 @@ def test_load_config_resolves_prompt_next_to_config(tmp_path):
 @pytest.mark.parametrize(
     "body",
     [
-        "pipeline: replay_pipeline\nmodel: ''\nprompt: p.md\ninput: text\n",  # no model
-        "pipeline: replay_pipeline\nmodel: gpt-4.1-mini-2025-04-14\nprompt: p.md\n",  # no input
+        "command: [sh, agent.sh]\nmodel: ''\nprompt: p.md\ninput: text\n",  # no model
+        "command: [sh, agent.sh]\nmodel: gpt-4.1-mini-2025-04-14\nprompt: p.md\n",  # no input
         (
-            "pipeline: replay_pipeline\nmodel: gpt-4.1-mini-2025-04-14\nprompt: p.md\ninput: text\n"
+            "command: [sh, agent.sh]\nmodel: gpt-4.1-mini-2025-04-14\nprompt: p.md\ninput: text\n"
             "temprature: 0\n"
         ),  # typo
-        "pipeline: replay_pipeline\nmodel: gpt-4.1-mini-2025-04-14\nprompt: p.md\ninput: 5\n",  # input not a name
+        "command: [sh, agent.sh]\nmodel: gpt-4.1-mini-2025-04-14\nprompt: p.md\ninput: 5\n",  # input not a name
     ],
 )
 def test_load_config_rejects_bad_files(tmp_path, body):
@@ -54,7 +47,7 @@ def test_load_config_rejects_bad_files(tmp_path, body):
 
 def test_load_config_accepts_both_snapshot_date_formats(tmp_path):
     for model in ("gpt-4.1-mini-2025-04-14", "claude-sonnet-4-5-20250929"):
-        body = f"pipeline: replay_pipeline\nmodel: {model}\nprompt: p.md\ninput: text\n"
+        body = f"command: [sh, agent.sh]\nmodel: {model}\nprompt: p.md\ninput: text\n"
         assert load_config(write(tmp_path / "c.yaml", body)).model == model
 
 
@@ -69,7 +62,7 @@ def imported_modules(path: Path) -> set[str]:
 
 
 def test_gate_code_imports_no_pipeline_and_no_provider():
-    """A pipeline reaches the gate only through `pipeline:` in its config."""
+    """The gate starts the program a config names; it imports no application and no provider's SDK."""
     allowed = set(sys.stdlib_module_names) | {"jsonschema", "yaml", "llm_release_gate"}
     for path in SRC.rglob("*.py"):
         absolute = {m.split(".")[0] for m in imported_modules(path) if m[:1] != "."}
@@ -77,7 +70,7 @@ def test_gate_code_imports_no_pipeline_and_no_provider():
 
 
 CONFIG = (
-    "pipeline: replay_pipeline\nmodel: gpt-4.1-mini-2025-04-14\nprompt: prompt.md\ninput: text\n"
+    "command: [sh, agent.sh]\nmodel: gpt-4.1-mini-2025-04-14\nprompt: prompt.md\ninput: text\n"
     "params: {temperature: 0, seed: 0}\n"
 )
 
@@ -93,7 +86,7 @@ def test_config_hash_ignores_key_order_and_formatting(tmp_path):
     reordered = (
         "# same version, written differently\n"
         "input: text\nparams:\n  seed: 0\n  temperature: 0.0\n"
-        "prompt: 'prompt.md'\nmodel: \"gpt-4.1-mini-2025-04-14\"\npipeline: replay_pipeline\n"
+        "prompt: 'prompt.md'\nmodel: \"gpt-4.1-mini-2025-04-14\"\ncommand: [sh, 'agent.sh']\n"
     )
     (tmp_path / "a").mkdir()
     (tmp_path / "b").mkdir()
@@ -106,6 +99,7 @@ def test_config_hash_ignores_key_order_and_formatting(tmp_path):
         {"body": CONFIG.replace("temperature: 0", "temperature: 1")},
         {"body": CONFIG.replace("2025-04-14", "2025-04-15")},
         {"body": CONFIG.replace("input: text", "input: image")},
+        {"body": CONFIG.replace("[sh, agent.sh]", "[sh, agent.sh, --fast]")},
         {"prompt": "Extract fields carefully."},
     ],
 )
@@ -155,69 +149,6 @@ def test_whole_floats_in_params_become_ints():
     assert plain_numbers(True) is True
 
 
-ADAPTER = """
-from llm_release_gate.pipeline import Answer
-
-
-class Echo:
-    def __init__(self, config):
-        self.model = config.model
-
-    def run(self, case):
-        return Answer(dict(case.expected), "{}", 1, 1, 0.1, self.model)
-
-
-def build(config):
-    return Echo(config)
-"""
-
-
-def project(tmp_path: Path, monkeypatch, files: dict[str, str]) -> Path:
-    """Another project's modules in tmp_path, importable as they would be from its root."""
-    for name, text in files.items():
-        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
-        (tmp_path / name).write_text(text)
-    monkeypatch.syspath_prepend(tmp_path)
-    (tmp_path / "prompt.md").write_text("Extract fields.")
-    return tmp_path
-
-
-def test_a_module_outside_the_gate_is_named_by_its_import_path(tmp_path, monkeypatch):
-    root = project(
-        tmp_path,
-        monkeypatch,
-        {"my_app/__init__.py": "", "my_app/gate_adapter.py": ADAPTER},
-    )
-    body = CONFIG.replace("replay_pipeline", "my_app.gate_adapter")
-    config = load_config(write(root / "c.yaml", body))
-    [case] = load_cases(REPO / "tests" / "fixtures" / "golden")
-    assert load_pipeline(config).run(case).output == case.expected
-    other = load_config(write(root / "d.yaml", CONFIG))
-    assert config_hash(config) != config_hash(other)
-
-
-@pytest.mark.parametrize(
-    "name, message",
-    [
-        ("no_such_app.adapter", "cannot import (ModuleNotFoundError"),
-        ("raising_adapter", "cannot import (RuntimeError: no API key)"),
-        ("llm_release_gate.hashing", "no build(config) function"),
-        ("", "cannot import (ValueError"),
-    ],
-)
-def test_a_bad_pipeline_name_is_a_config_error(tmp_path, monkeypatch, name, message):
-    root = project(
-        tmp_path,
-        monkeypatch,
-        {"raising_adapter.py": "raise RuntimeError('no API key')"},
-    )
-    config = load_config(
-        write(root / "c.yaml", CONFIG.replace("replay_pipeline", repr(name)))
-    )
-    with pytest.raises(ValueError, match=re.escape(message)):
-        load_pipeline(config)
-
-
 def test_load_config_accepts_a_model_without_a_date(tmp_path):
-    body = "pipeline: replay_pipeline\nmodel: gpt-6-luna\nprompt: p.md\ninput: text\n"
+    body = "command: [sh, agent.sh]\nmodel: gpt-6-luna\nprompt: p.md\ninput: text\n"
     assert load_config(write(tmp_path / "c.yaml", body)).model == "gpt-6-luna"

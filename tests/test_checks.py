@@ -437,7 +437,7 @@ def test_plain_numbers_compare_by_value():
 
 
 def test_the_runner_and_the_gate_give_the_same_verdicts_on_a_trace(tmp_path):
-    from agent_pipeline import Adapter, default_script
+    from scripted import answer, program
 
     from llm_release_gate import gate, runner
     from llm_release_gate.compare import load_arm
@@ -470,7 +470,7 @@ def test_the_runner_and_the_gate_give_the_same_verdicts_on_a_trace(tmp_path):
     assert not errors
     out = tmp_path / "runs.jsonl"
     runner.run(
-        Adapter({"synth-001": default_script}),
+        program(tmp_path, {"synth-001": [{"answer": answer()}]}),
         load_cases(golden),
         1,
         out,

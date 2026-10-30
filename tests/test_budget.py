@@ -132,7 +132,7 @@ def test_the_runner_stamps_the_hash_of_its_price_table(tmp_path, monkeypatch):
     from llm_release_gate import runner
     from llm_release_gate.hashing import canonical_hash
 
-    monkeypatch.setattr(runner, "load_pipeline", lambda c: Fixed())
+    monkeypatch.setattr(runner, "Command", lambda c: Fixed())
     out = tmp_path / "runs.jsonl"
     runner.main(["--config", str(config(tmp_path, "b", 0)), "--golden", str(GOLDEN), "--out", str(out),
                  "--prices", str(prices(tmp_path))])  # fmt: skip

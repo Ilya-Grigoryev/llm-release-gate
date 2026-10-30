@@ -1,7 +1,7 @@
 """Run a pipeline K times per case and append one JSON record per (case, repetition).
 
-Each run gets a trace (`trace.Trace`): the pipeline records its steps into it, and the record keeps them even when
-the run fails, with the raw provider responses in `<stem>.native.jsonl`.
+Each run gets a trace (`trace.Trace`) that holds the steps the program reports; the record keeps them even when the run
+fails. `<stem>.native.jsonl` is for raw provider responses, which nothing records yet.
 """
 
 import argparse
@@ -16,6 +16,7 @@ from dataclasses import asdict, fields
 from datetime import UTC, datetime
 from pathlib import Path
 
+from llm_release_gate.command import Command
 from llm_release_gate.golden import load_cases, validate
 from llm_release_gate.hashing import canonical_hash
 from llm_release_gate.metrics import aggregate, hits
@@ -26,7 +27,6 @@ from llm_release_gate.pipeline import (
     Pipeline,
     Retryable,
     load_config,
-    load_pipeline,
 )
 from llm_release_gate.prices import Prices, load_prices
 from llm_release_gate.trace import Trace, active, usage
@@ -127,7 +127,7 @@ def run(
     for the same config and set hash, so a rerun pays only for the rest.
     On Ctrl-C or a Fatal error the queued calls are dropped, backoffs are cut short and
     the calls already running finish and are written. A custom `wait` replaces the
-    stop-aware default and is not cut short. `prices` puts a list price on each model step;
+    stop-aware default and is not cut short. `prices` prices the model steps that carry no price;
     `model` is the model the config asks for, kept next to the one the provider reports; `commit` is the project's.
     """
     if type(max_retries) is not int or max_retries < 0:
@@ -244,7 +244,7 @@ def run(
     jobs: dict[Future, tuple[Case, int, Trace]] = {}
     try:
         for c, k in todo:
-            trace = Trace(prices)
+            trace = Trace()
             jobs[pool.submit(job, c, trace)] = (c, k, trace)
         for done_job in as_completed(jobs):
             write(done_job, *jobs[done_job])
@@ -301,7 +301,7 @@ def main(argv: Sequence[str] | None = None) -> None:
                 f"warning: {args.config} is not in git, so its version covers the config and prompts, not the code",
                 file=sys.stderr,
             )
-        pipeline = load_pipeline(config)
+        pipeline = Command(config)
         prices = load_prices(args.prices) if args.prices else None
     except (
         ValueError,

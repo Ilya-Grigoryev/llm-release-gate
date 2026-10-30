@@ -77,7 +77,7 @@ class Fixed:
 def config(tmp_path, name, temperature):
     path = tmp_path / f"{name}.yaml"
     path.write_text(
-        "pipeline: replay_pipeline\nmodel: gpt-4.1-mini-2025-04-14\n"
+        "command: [sh, agent.sh]\nmodel: gpt-4.1-mini-2025-04-14\n"
         f"prompt: {REPO / 'tests' / 'fixtures' / 'prompt.md'}\ninput: text\n"
         f"params: {{temperature: {temperature}, seed: 0}}\n"
     )
@@ -85,7 +85,7 @@ def config(tmp_path, name, temperature):
 
 
 def runs(tmp_path, monkeypatch, name, temperature, pipeline, golden=GOLDEN):
-    monkeypatch.setattr(runner, "load_pipeline", lambda c: pipeline)
+    monkeypatch.setattr(runner, "Command", lambda c: pipeline)
     out = tmp_path / f"{name}.jsonl"
     cfg = config(tmp_path, name, temperature)
     runner.main(["--config", str(cfg), "--golden", str(golden), "--out", str(out)])
@@ -193,7 +193,7 @@ def test_bad_numbers_are_refused(threshold, base, candidate):
 
 
 def test_the_report_says_how_many_runs_were_there(tmp_path, monkeypatch, capsys):
-    monkeypatch.setattr(runner, "load_pipeline", lambda c: Fixed())
+    monkeypatch.setattr(runner, "Command", lambda c: Fixed())
     base = tmp_path / "base.jsonl"
     cfg = config(tmp_path, "base", 0)
     runner.main(

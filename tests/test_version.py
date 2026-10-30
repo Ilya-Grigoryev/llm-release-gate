@@ -5,7 +5,7 @@ import pytest
 
 from llm_release_gate.version import code_hash, commit, matcher, version_hash
 
-CONFIG = "pipeline: command\ncommand: [sh, agent.sh]\nmodel: m-2026-01-01\nprompt: {p}\ninput: text\n"
+CONFIG = "command: [sh, agent.sh]\nmodel: m-2026-01-01\nprompt: {p}\ninput: text\n"
 
 
 def git(repo, *args):

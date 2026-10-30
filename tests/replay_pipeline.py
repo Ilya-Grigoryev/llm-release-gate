@@ -1,4 +1,4 @@
-"""A pipeline outside the gate's package for its tests: replays recorded answers, no key needed."""
+"""A stand-in for a program in the runner's tests: replays recorded answers, no key needed."""
 
 import json
 import threading
@@ -36,7 +36,3 @@ class Replay:
         finally:
             with self.lock:
                 self.active -= 1
-
-
-def build(config):
-    return Replay()

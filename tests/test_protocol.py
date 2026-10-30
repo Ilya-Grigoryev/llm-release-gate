@@ -6,8 +6,9 @@ from pathlib import Path
 import pytest
 
 from llm_release_gate import protocol
+from llm_release_gate.command import Command
 from llm_release_gate.golden import load_cases
-from llm_release_gate.pipeline import load_config, load_pipeline
+from llm_release_gate.pipeline import load_config
 
 ROOT = Path(__file__).parent.parent
 DOC = (ROOT / "docs" / "protocol.md").read_text()
@@ -25,16 +26,16 @@ def test_the_documents_examples_follow_the_schema(example):
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="needs node")
-def test_the_documents_node_program_answers_through_pipeline_command(tmp_path):
+def test_the_documents_node_program_answers_through_the_gate(tmp_path):
     [program] = blocks("js")
     (tmp_path / "agent.js").write_text(program)
     config = tmp_path / "command.yaml"
     config.write_text(
-        f"pipeline: command\ncommand: [node, {tmp_path / 'agent.js'}]\n"
+        f"command: [node, {tmp_path / 'agent.js'}]\n"
         f"model: m-2026-01-01\nprompt: {FIXTURES / 'prompt.md'}\ninput: text\n"
     )
     [case] = load_cases(FIXTURES / "golden")
-    assert load_pipeline(load_config(config)).run(case).output == {"id": case.id}
+    assert Command(load_config(config)).run(case).output == {"id": case.id}
 
 
 @pytest.mark.parametrize(
