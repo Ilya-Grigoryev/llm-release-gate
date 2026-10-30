@@ -4,85 +4,42 @@ export const metadata = { title: "How it decides" };
 
 The gate runs two [versions](/docs/how-it-works#what-a-version-is) of your application on the same
 [cases](/docs/how-it-works#cases): the base, from your target branch, and the candidate, from the pull request. Your
-[checks](/docs/how-it-works#checks) score each run, and the gate turns the difference between the two versions into a
-verdict. This page explains how far you can trust that verdict: how much scores move when nothing changed, what rule
-the gate uses today, and the statistical rule that is planned to replace it.
+[checks](/docs/how-it-works#checks) score each run.
 
 ## The same version answers differently
 
-Run the same version of an LLM application twice on the same cases and you can get two different scores. The model
-does not always produce the same answer, even at temperature 0, and the provider serves calls from server
-configurations that change over time. A dated model snapshot does not remove this.
-
-The figure shows the author's measurement on a support agent: an agent that works through support tickets on its own
-and uses tools, with no simulated customer. It ran on the same 10 cases, each a ticket that passes or fails. Nothing in
-the agent changed between the runs: the same config and prompts, the same agent code and tools, a dated model snapshot,
-temperature 0. Between some of the first eight runs, other files in its repository did change: a demo web page, a test
-file and the pinned version of the gate itself. None of them is part of the agent, but under today's definition each
-such edit makes a new version, so strictly those eight runs span several versions. The last three runs came from one
-call of the gate's `run` command in one checkout: one version in the strictest sense.
+The same version, run twice on the same cases, can get two different scores: the model does not always give the same
+answer, even at temperature 0 with a dated model snapshot. The figure shows the author's measurement: 11 runs of a
+support agent with nothing in it changed.
 
 <Fig id="how-it-decides-1" caption={"The same agent, with no change to its config, prompts or agent code, 11 runs: the mean score ranged from 0.40 to 0.70. The author's measurement on a support agent that works through 10 pass-or-fail tickets on its own; dated model snapshot, temperature 0."} alt={"Mean scores of 11 runs of the same support agent on the same 10 cases, with nothing in the agent changed, in the order their CI jobs started: 0.70, 0.60, 0.60, 0.70, 0.50, 0.60, 0.60, 0.40 (25 October, over about five hours), then 0.70, 0.70, 0.60 (26 October, within one minute). The range is 0.40 to 0.70, 30 points. Two cases passed in every run; the other eight passed in some runs and failed in others."} />
 
-What to take from it:
-
-- The mean ranged from 0.40 to 0.70: 30 points, six times the gate's default `delta` of 5 points. A twelfth run of
-  the same version, on 29 October as the base of a pull request, scored 0.80, so the range is at least 40 points.
-- Eight of the ten cases passed in some runs and failed in others.
-- The three runs made within one minute, one version in the strictest sense, still disagreed on 4 of the 10 cases.
-  Whether the runs on the first day also drifted over the afternoon cannot be told apart from this noise with these
-  data.
-- Each case passes or fails, so one case changing its result moves the mean by 10 points.
-
-Noise depends on the application and on its cases. In the author's runs of a one-call extraction pipeline on 30
-documents, with its config and prompts unchanged, the mean moved by less than 2 points over 10 runs. A fixed threshold
-that suits one application can be far too tight for another. The planned rule measures the noise of your application
-from repeated runs instead of assuming it.
+The mean ranged from 0.40 to 0.70: 30 points, six times the default `delta` of 5 points. A twelfth run of the same
+version, on 29 October, scored 0.80. Files outside the agent changed between some of the first eight runs, but even the
+last three, from one `run` call in one checkout, disagreed on 4 of the 10 cases. Noise depends on the application: in
+the author's runs, a one-call extraction pipeline on 30 documents moved by less than 2 points over 10 runs.
 
 ## Why one run is not enough
 
-Today the gate decides on one run of each version per case. That works when the change moves the score far more than
-the noise does. When it does not, one run of each version cannot tell an effect of the change from the version moving
-by itself.
-
-On the same support agent, a pull request that only fixed typos in the agent's instructions scored 0.60, against 0.70
-for the base (the base run is run 1 of the series above). The naive rule blocked it. Was it a real loss? From one run
-of each version you cannot tell: with nothing in it changed, the agent moved between 0.40 and 0.70 by itself. A typo
-fix is meant to change nothing, but models can react to wording, so "meant to be harmless" is not proof either. Only
-repeated runs can settle it.
+A pull request to the same agent that only fixed typos in its instructions scored 0.60 against 0.70 for the base, and
+the naive rule blocked it. One run of each version cannot tell whether that loss is real: the unchanged agent moved
+between 0.40 and 0.70 by itself.
 
 <Fig id="how-it-decides-2" caption={"A pull request that only fixed typos scored 10 points lower and was blocked. The unchanged agent alone covered 30 points, so one run of each version cannot say whether the drop is real."} alt={"The base scored 0.70 and the typo fix 0.60, a drop of 10 points; the naive rule blocks drops of more than 5 points, so it blocked. Both scores lie inside the range 0.40 to 0.70 that the same agent covered on its own, with nothing in it changed."} />
 
-It works the other way too. If the base run happens to land low, a candidate that is worse on average can still score
-higher and pass. With one run per version, a block can be noise and a pass can be noise, and a single comparison does
-not show which one you are looking at.
-
-You can check this on the series above without any pull request. Take any two runs as if they were the base and the
-candidate. Whenever the second is lower than the first, it is lower by at least 10 points, and the naive rule would
-block, although nothing in the agent changed.
+Equally, a base run that lands low can let a worse candidate pass.
 
 ## Today: the naive rule
 
-This is what the gate does today on every pull request that changes the version, step by step:
+On every pull request that changes the version, the gate:
 
-1. **It runs both versions on the request's test set.** `k` in `gate.yaml` sets the runs per case and version (default
-   1). The quality rule looks only at the first run of each case. Extra runs are used by the cost and latency budgets.
-2. **It checks that the runs can be compared.** Both versions must have run on the same test set (the same set hash),
-   be scored by the same scorer and have a result for every case. The gate rescores both sides from their saved answers
-   with the current scorer, without calling the model. If anything does not match, the result is `infra error` (exit
-   20), never a verdict about quality.
-3. **It takes the mean.** Each case has a score from 0 to 1, given by its checks. The gate takes the mean over all cases
-   for each version.
-4. **It computes the difference in points:** 100 × (candidate mean − base mean). A drop from 0.80 to 0.74 is −6 points.
-5. **It blocks when the difference is below −`delta`.** The verdict is `quality fail` (exit 10). A drop exactly equal to
-   `delta` passes. Means are compared as exact fractions, so rounding cannot flip the result.
-6. **It checks the budgets, if you set any.** The comment reports them whatever the verdict, but a budget changes the
-   verdict only when quality passed: an exceeded budget then turns the pass into `budget fail` (exit 12). See
-   [Budgets: cost and latency](#budgets-cost-and-latency).
-
-`delta` defaults to 5 points. In `gate.yaml` it is always absolute: points of the mean score, where 5 points is 0.05.
-The gate's command has a `--relative` flag that reads the threshold as a percentage of the base mean, but `gate.yaml`
-has no such setting.
+1. runs both versions on the request's test set, `k` times per case (default 1), and uses only the first run of each
+   case for quality;
+2. returns `infra error` (exit 20) unless both sides have the same set hash, the same scorer and a result for every
+   case;
+3. takes each version's mean score and computes the difference in points: 100 × (candidate mean − base mean);
+4. blocks with `quality fail` (exit 10) when the difference is below −`delta`, 5 points by default;
+5. checks the [budgets](#budgets-cost-and-latency), if you set any.
 
 ```yaml
 pipelines:
@@ -93,117 +50,45 @@ k: 1        # runs per case and version; the quality rule uses the first
 delta: 5    # block when the mean score drops by more than 5 points
 ```
 
-The rules (`delta`, `k`, `budgets`, `prices`) come from the target branch's `gate.yaml`, not from the request's.
-Raising `delta` in a pull request does not loosen that pull request's gate: the new value applies after merge, and the
-comment says that the request changes the rules. A pipeline that is new in the request follows the target branch's
-top-level rules. If the target branch has no `gate.yaml`, or a broken one, the request's rules apply; for a broken one
-the comment warns. [Whose rules apply](/docs/how-it-works#whose-rules-apply) has the details.
-
-The comment states the rule it applied. For the typo fix above, today's comment would begin like this. In CI the
-pipeline's name comes first; the hashes here are placeholders:
-
-```text
-`support` · **Release gate: ❌ quality fail**
-
-Mean score 0.700 → 0.600 (-10.00 points, blocks below -5.00); naive rule: block if the mean drops by more than 5 points.
-10 cases, first run of each version · config 3f9c1a20 → 8b7d44e1 · set 5e02c7aa
-```
-
-Under these lines the comment lists up to five cases that got worse, with both scores.
-
-To make the same decision outside CI, run the gate's command on two files of runs. Its exit code is the verdict:
-
-```sh
-uv run llm-release-gate gate --base runs/base.jsonl --candidate runs/candidate.jsonl \
-  --golden golden/support --threshold 5 --markdown comment.md --json verdict.json
-echo $?   # 0 pass, 10 quality fail, 20 infra error (12 budget fail needs --max-cost-per-run or --max-latency)
-```
-
-The naive rule is simple and predictable, and it catches large losses. It does not know how much your application's
-scores move by themselves, so near the threshold its blocks and its passes can both be noise. That is why the gate's
-rule is going to change.
+The rules come from the target branch's `gate.yaml`, so raising `delta` in a pull request does not loosen its own gate
+([Whose rules apply](/docs/how-it-works#whose-rules-apply)). Outside CI, the `gate` command
+([Reference](/docs/reference)) gives the same verdict from two files of runs.
 
 ## Planned: several runs and an interval
 
-> **Planned.** Nothing in this section is in the gate yet. The interval rule and its three outcomes are planned for
-> stage C of the project; buying more runs automatically when the rule is not sure comes after them, in stage D.
-> Details marked "not decided" may still change.
+> **Planned.** None of this is in the gate yet (stages C and D).
 
-The planned rule keeps the comparison case by case but stops trusting single runs.
+The new version runs K times on each case, at least twice, and the gate reports the difference with an interval: the
+range in which the true difference on these cases plausibly lies, given the run-to-run noise. `delta` (δ in the
+figures) becomes the loss you accept, stated before you see any results. The interval is compared with −`delta`:
 
-**Several runs per case (K).** The planned rule runs the new version K times on each case. The runs show how much each
-case moves by itself. One run cannot separate noise from the effect of the change, so the new version needs at least
-two runs per case. Whether the base also runs again on every request, or its earlier runs may be reused for a while,
-is not decided yet (see [Why both versions run at the same time](#why-both-versions-run-at-the-same-time)).
-
-**An interval around the difference.** Instead of one difference of means, the gate reports the difference with an
-interval: the range in which the true difference on these cases plausibly lies, given the run-to-run noise. More runs
-make the interval narrower. The interval has to stay valid when the gate adds runs after seeing the first ones; which
-method meets that best is not decided yet.
-
-**`delta` as the loss you accept.** `delta` (written δ in the figures below) stops being a guard against noise and
-becomes a statement you make before you see any results: "we accept a loss of up to `delta` points on these cases in
-exchange for this kind of change", for example a cheaper model or a shorter prompt. If the interval is too wide to
-decide against your `delta`, the remedy is more runs or more cases, not a larger `delta`.
-
-**Three outcomes.**
-
-- **pass**: the interval shows that the candidate is not worse by more than `delta`.
-- **block**: the interval shows that the candidate is worse by more than `delta`.
-- **not sure yet**: the interval reaches across −`delta`, so the runs cannot tell. This outcome will use exit code 11
-  (`inconclusive`), which today is given only when a request removes or renames a pipeline.
-
-When the interval shows a loss that is real but smaller than `delta`, the verdict is a pass with a visible warning.
-
-**Buying more runs when unsure.** On "not sure yet", the gate is to run more, by a rule fixed in advance, up to a
-maximum number of runs. If it is still not sure at the maximum, the check stays red until a person approves the merge,
-and the comment shows the interval. How many runs to add at each step, and on which cases, is not decided yet; the
-plan is to spend them where the two versions disagree.
+- **pass**: the candidate is shown not worse by more than `delta`, with a warning when a smaller loss is shown.
+- **block**: it is shown worse by more than `delta`.
+- **not sure yet**: the interval reaches across −`delta`. The gate runs more, up to a maximum; if still not sure, the
+  check stays red until a person approves the merge. This will use exit code 11 (`inconclusive`).
 
 <Fig id="how-it-decides-3" caption={"The planned rule: pass, block or not sure yet. When it is not sure, it runs more; at the limit, a person decides."} alt={"Planned, not in the gate yet. The gate puts an interval around the difference between the two versions and compares it with \u2212\u03b4. If the whole interval lies above \u2212\u03b4, the request passes, with a warning when a smaller loss is shown. If the whole interval lies below \u2212\u03b4, the request is blocked. If the interval reaches across \u2212\u03b4, the answer is 'not sure yet': the gate runs more and computes the interval again, up to a maximum number of runs. If it is still not sure then, the check stays red until a person approves the merge."} />
 
-**A second comparison against an anchor.** Each pull request is compared with the current target branch, so losses
-smaller than `delta` could add up over many merges. The plan adds a second comparison against an anchor: a fixed
-earlier version that only a person moves, on purpose. A request passes only if it is also not worse than the anchor by
-more than an agreed loss, so small losses cannot pile up unseen.
-
 <Fig id="how-it-decides-4" caption={"Simulation. Each step of the slider is what the planned rule does on its own when it is not sure yet: buy more runs. A noisy application with few cases needs many runs before it can say \"pass\"; more cases help as much as more runs."} alt={"A simulation of the planned rule on a support agent modelled from the author's measurement, with \u03b4 = 5 points and both versions running K times per case. With 10 cases, the 95 % interval around the difference is about 26 points either side at 2 runs per version, 12 at 10 runs and 5 at 50 runs. A change that breaks two always-passing cases (\u221220 points) is blocked once the whole interval lies below \u22125, at around 10 runs. A harmless change is still on the edge at 50 runs, because the interval is about as wide as \u03b4. With 40 cases the widths halve: the breaking change is blocked from about 3 runs and the harmless change passes at around 20."} />
 
-How often the planned rule will give a wrong answer is not known yet. It will be measured in experiments after the
-rule is built; until then this site states no error rates.
+Not decided yet: how many runs to add, and the interval method. A second comparison against an anchor, a fixed
+earlier version that only a person moves, is planned so that small losses cannot pile up.
+Until experiments measure the rule, this site states no error rates.
 
 ## Why both versions run at the same time
 
-On every pull request that changes the version, the gate runs both versions fresh, at the same time, each in its own
-checkout with its own code. It does not reuse earlier runs of the target branch.
+The gate runs both versions fresh and at the same time, each in its own checkout, because a model's behaviour under one
+name can shift. In the author's runs with a dated snapshot, the server configuration the provider reported changed
+between repeats of the same request, and the level of noise differed between two days. Run together, both versions
+meet the same conditions, so a shift that hits both cancels out.
 
-The reason is that a model's behaviour under one name can shift over time. In the author's runs with a dated
-snapshot, the server configuration the provider reported changed between repeats of the same request, and none of
-the values seen on one day reappeared six days later. The level of noise also differed between the two days. If the
-gate compared today's candidate with last week's base, it would count such a shift as an effect of your change.
-Running both versions together exposes them to the same conditions, so a shift that hits both cancels out in the
-difference.
-
-**Models without a date.** A model name without a date is accepted, but the provider may change the model behind it
-at any time, so prefer a dated snapshot when your provider offers one. For a model without a date, the gate takes
-three precautions:
-
-- Every record keeps the model the config asked for, the model the provider reported, and the time.
-- The comment warns that the model has no date.
-- The gate refuses to compare (`infra error`) when some runs have no time, or when the runs of both versions, taken
-  together, have a pause longer than one hour. For a model without a date that both versions asked for, it also
-  refuses when the provider reported different models to the two versions, or when some runs do not say which model
-  answered (a pipeline reports this in the `model` field of its answer).
-
-**Planned.** Today the two versions run side by side, and each works through its cases on its own. The plan is for the
-runner to alternate between the versions case by case, so that both meet the provider in the same moments as closely
-as possible. Open: whether the base's runs may be reused for a limited time when the model is dated, which would halve
-the cost of a decision, together with a regular measurement of drift. For a model without a date, reuse is ruled out.
+Prefer a dated snapshot. For a model without a date, the comment warns, and the gate refuses to compare
+(`infra error`) runs with a pause longer than one hour or with different models reported to the two versions. Whether
+the base's runs may be reused for a dated model is open.
 
 ## Budgets: cost and latency
 
-The gate can hold the candidate to a cost budget and a latency budget. Both work today, and you set them in
-`gate.yaml`:
+Both work today and are set in `gate.yaml`:
 
 ```yaml
 pipelines:
@@ -223,68 +108,25 @@ budgets:
 gpt-5.4-mini-2026-03-17: [0.75, 4.50, 0.075]
 ```
 
-**Cost.** The gate prices every model call of each candidate run at the prices in `prices`, takes the mean cost per
-run and compares it with `cost_per_run_usd`. For a pipeline that records a trace, the cost includes every attempt the
-runner paid for and, in a dialog with a simulated user, the simulator's calls. It blocks when the mean is above the
-limit. There is no interval around the cost yet. `cost_per_run_usd` needs `prices`: without it, `gate.yaml` is
-rejected and the result is an `infra error`; with a cost budget, a model missing from the price file is an
-`infra error` too. With `prices`, the comment also reports what the decision cost: every successful call of both
-versions.
+**Cost.** The gate prices every model call of each candidate run and blocks when the mean cost per run is above
+`cost_per_run_usd`. Without `prices`, or with a model missing from the price file, the result is `infra error`.
 
-**Latency.** A run's latency is the time of the attempt that answered; backoff and failed attempts are left out, and
-the comment counts the runs that needed retries. The gate takes a quantile of the candidate's run latencies (0.95 by
-default) with a 95 % interval from order statistics, which assumes nothing about how latencies are distributed. It
-blocks only when the whole interval lies above the limit. With 10 runs, the 95th percentile is the slowest run and the
-lower end of its interval is the third slowest, so latency blocks only when at least three of the ten runs are over the
-limit. With too few runs for a lower end, the comment says the limit could not be checked.
+**Latency.** The gate blocks only when a 95 % interval around the quantile of the candidate's run latencies (0.95 by
+default) lies wholly above the limit: with 10 runs, at least three must be over it. A run with no answer is an error,
+not a latency, and with `k` above 1 the interval is narrower than it should be.
 
-Two caveats. The interval assumes independent runs; repeated runs of one case are not independent, so with `k` above 1
-the interval is narrower than it should be. And a run that produced no answer, a timeout on every attempt for example,
-is not in the budget: it shows up as an error, and slow runs that time out make the quantile look lower than it is.
-
-**Order.** Quality comes first. A quality fail stays a quality fail; a budget only turns a pass into `budget fail`
-(exit 12). When the target branch has no version of the pipeline yet, the budget is reported but does not block. When
-the budget holds, the comment says it was "not shown over its limits": that is a weaker statement than "under its
-limits", for the reasons above.
+A budget only turns a quality pass into `budget fail` (exit 12).
 
 ## What a pass means
 
-Today a pass means exactly this: on the cases in your test set, the first run of the candidate had a mean score no more
-than `delta` points below the first run of the base, under the rules on the target branch; and, if you set budgets, the
-candidate was not shown to be over them.
+Today a pass means: on your cases, the candidate's first run had a mean score no more than `delta` points below the
+base's, under the target branch's rules, and the candidate was not shown over any budget you set. It does not mean:
 
-A pass does not mean:
+- **The change is safe on new inputs.** The gate answers only for your cases.
+- **Nothing got worse.** Losses smaller than `delta` pass and can add up, and a mean that holds can hide one check
+  that got worse.
+- **Every change was tested.** Say your booking assistant (a made-up example) may refund up to €30 without approval,
+  and your cases ask for €20 and €60. Raise the limit to €40, and no case can tell the two versions apart.
+- **The author meant well.** The gate catches mistakes, not a hostile author.
 
-- **The change is safe on new inputs.** The gate answers for the cases in your set. The planned rule keeps this scope:
-  its interval is about these cases, not about every input your users will send.
-- **The result is free of noise.** With one run per version, a pass can be noise just as a block can. The planned rule
-  answers "not sure yet" when it cannot tell.
-- **Nothing got worse.** A loss smaller than `delta` passes, and small losses can add up over many pull requests; the
-  planned anchor comparison is meant to catch that. A mean that holds can also hide one check that got worse. A rule
-  per check exists in the gate's code but is not part of the verdict yet; it is planned.
-- **Every change was tested.** The gate sees a change only through cases it affects. Say your booking assistant (a
-  made-up example) may refund up to €30 without approval, and your cases ask for refunds of €20 and €60. Raise the limit
-  to €40, and no case can tell the two versions apart, so whatever the gate answers is not about the new limit.
-- **The text is good.** The gate scores what your checks check. It does not grade text with a model by default; a
-  model-graded check that you turn on is planned. Today a `function` check can call any code of yours.
-- **The author meant well.** The gate runs the request's code, workflow and lock file. It catches mistakes, not a
-  hostile author. Protect `.github/`, `gate.yaml` and the lock file with CODEOWNERS if you need that.
-
-Some outcomes look like a pass in CI but compare nothing:
-
-- **unchanged** (exit 0): the request leaves the version as it is, so nothing ran. A version is its config, the bytes of
-  its prompts and the repository's code as git sees it: tracked files by git's ids, with uncommitted edits counted and
-  untracked files left out. Documentation, CI, `gate.yaml` and its price files, the paths in its `ignore`, test sets
-  and other pipelines' files do not count.
-- **no base version** (exit 0): the target branch has no version of this pipeline. The candidate runs alone; its score
-  and budget are reported, and the check passes.
-
-And two outcomes do not pass:
-
-- **not checked**: the request comes from a fork. GitHub gives such workflows no secrets, so the gate cannot call the
-  model, and the job fails. A maintainer gates the request by pushing its branch to the repository.
-- **inconclusive** (exit 11): today only when a request removes or renames a pipeline in `gate.yaml`. No version of it
-  was compared, so a maintainer merges over the check if that is intended.
-
-[How it works](/docs/how-it-works#verdicts) lists every verdict with its exit code, and [Read a verdict](/docs/read-a-verdict) says
-what to do with each one.
+[Read a verdict](/docs/read-a-verdict) covers outcomes that pass without comparing anything, and those that do not pass.

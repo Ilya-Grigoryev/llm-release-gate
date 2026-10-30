@@ -2,116 +2,31 @@ export const metadata = { title: "Write tests" };
 
 # Write tests
 
-The gate notices a change only where one of your cases looks. This page shows how to decide what a case should
-check, how to write a case file, what each check does, and the habits that stop a test set from passing a change it
-should catch.
-
-The page uses the terms from [How it works](/docs/how-it-works). A [version](/docs/how-it-works#what-a-version-is) of your app is
-its config, its prompts and its code. For each pipeline, an LLM part of your app, `gate.yaml` names the config of one
-version and one test set. On a pull request the gate compares two versions: the base (the target branch's) and the candidate (the
-request's), as in [One pull request, start to end](/docs/how-it-works#one-pull-request-start-to-end). A run is one answer of
-a version to one case, saved as a record. The gate posts a comment on the request with its
-[verdict](/docs/how-it-works#verdicts).
+The gate notices a change only where one of your cases looks. [Reference](/docs/reference#terms) defines the terms.
 
 ## Four questions for every case
 
-A case is one situation your app must handle: its inputs, what you expect, and the checks that compare a run with
-that expectation. Before you write the checks, answer four questions about the situation.
+A case is one situation your app must handle: its inputs, what you expect, and the checks that compare a run with that
+expectation. Answer four questions:
 
-1. **The result.** What must the answer say? The fields of an invoice, a booking number in the reply, a refusal.
-2. **The actions.** What must the app do, in which order, and what must it never do? For example: look the customer
-   up before you change a booking; never refund more than €50 without a person.
-3. **The state of the world.** What must have changed when the run is over, and what must not? The booking is
-   cancelled, and nothing else is.
-4. **The limits.** How many steps may the run take, and which calls are off limits whatever the customer says?
+1. **The result**: what must the answer say? ([Answer checks](#answer-checks))
+2. **The actions**: what must the app do, in which order, and never do? ([Trace checks](#trace-checks))
+3. **The state of the world**: what must have changed, and what not? (`state`)
+4. **The limits**: how many steps, which calls are off limits? (`max_steps`, `not_called`)
 
-| Question | Checks |
-|---|---|
-| The result | `field_match`, `exact`, `contains`, `regex`, `number`, `json_schema`, `refusal` |
-| The actions | `called`, `not_called`, `order`, `actions`, `active`, `doc_found` |
-| The state of the world | `state` |
-| The limits | `max_steps`, `not_called` with conditions on arguments |
-| Anything else you can write in code | `function` |
-
-Cost and latency are not checked per case. They are budgets for the whole version, set in `gate.yaml` under
-`budgets`.
-
-How many of the questions apply depends on the app. The three apps on this page are made-up examples:
-
-- An **invoice reader** makes one model call and changes nothing. The result is all there is to check.
-- A **booking assistant** is an agent that acts on a booking system through tools. All four questions matter, and the
-  wording of the reply often matters least.
-- A **support chat** is a dialog with a simulated customer. It adds one more question: who did it. Both sides of the
-  conversation take steps, and the checks must look at the agent's.
-
-Answer checks read the app's output. Trace checks read the steps of the run: model calls, tool calls, messages and
-retrievals. They need a trace, which your adapter or program records; [Connect your app](/docs/connect) shows how.
+Anything else goes in a [`function` check](#your-own-check). Cost and latency are budgets for the whole version in
+`gate.yaml`, not per-case checks.
 
 <Fig id="write-tests-1" caption={"Answer checks read the output; trace checks read the steps; `state` reads the world after the run. Example run."} alt={"A run has three parts the checks can read. The answer is read by field_match, exact, contains, regex, number, json_schema and refusal. The steps are read by called, not_called, order, actions, active, max_steps and doc_found. The world after the run, its final state or the change, is read by state. A function check gets all three."} />
 
 ## The case file
 
-Each case is one YAML file at the top of the test set's directory. Put its input files in a subdirectory such as
-`inputs/`: every `.yaml` or `.yml` file at the top level is read as a case, so a YAML input there fails validation.
-`gate.yaml` names one test set per pipeline. The format is defined by `case.schema.json` in the gate's repository.
+Each case is one YAML file at the top of the test set's directory ([fields](/docs/reference#fields-of-a-case)). Put
+input files in a subdirectory such as `inputs/`, since every YAML file at the top level is read as a case, and quote
+dates.
 
-| Field | Required | What it holds |
-|---|---|---|
-| `id` | yes | The case's name, unique within the set: letters, digits, `.`, `_` and `-`. The comment and the dashboard show it. |
-| `version` | yes | The case's own revision number, a whole number from 1. It is not the version of your app that the gate compares. Raise it when you change what the case asks. The gate does not interpret it, but like every field it is part of the set's hash. |
-| `input` | yes | Input names mapped to file paths, relative to the case file and inside the set. Your app gets the path of every input; the `input` field of your app's config names the one it reads. |
-| `expected` | yes | Any mapping with at least one key: the values your checks compare with. |
-| `scoring` | yes | How to score a run: `method` (`field_match` or `checks`), `aggregate` (`mean` or `all`) and the method's settings. |
-| `slices` | no | Labels as name and text, such as `{topic: refunds}`. Nothing reads them yet: neither the verdict nor the dashboard. |
-| `source` | no | Text: where the case came from. |
-| `note` | no | Text: anything a reader of the case should know. |
-
-Quote dates and times in a case. YAML reads an unquoted `2026-10-03` as a date, and `golden validate` rejects the file
-with `non-JSON value, quote dates and times`.
-
-### An invoice reader: the fields of one answer
-
-The invoice reader turns one invoice into a few fields. This invoice has no VAT id.
-
-```yaml
-# golden/invoices/missing-vat-id.yaml
-id: missing-vat-id
-version: 1
-slices: {layout: one-page}
-source: a supplier's sample invoice, names changed
-input:
-  text: inputs/missing-vat-id.txt   # the OCR text, relative to this file
-expected:
-  vendor: Lindqvist Office Supplies
-  invoice_date: "2026-10-03"        # quoted: unquoted, YAML reads it as a date and validate rejects it
-  total: "1190.00"
-  vat_id: null                      # this invoice has none: the field is not scored
-scoring:
-  method: field_match
-  normalise: [whitespace, casefold]
-  fields:
-    invoice_date: {type: date}      # compared by value: "03/10/2026" and "3 Oct 2026" match
-    total: {type: number}           # "1,190.00" and "$1,190.00" match
-```
-
-- `method: field_match` compares each expected field with the field of the same name in the answer. Text is compared
-  after the normalisers: `whitespace` collapses runs of spaces, `casefold` ignores case. A field can have its own
-  `normalise` list under `fields`.
-- `type: date` and `type: number` compare by value. If the expected value parses as a date or a number, the answer must
-  parse to the same value; an answer that does not parse fails the field. An expected value that does not parse is
-  compared as text.
-- A field expected as `null` is not scored. The case score is the share of right fields among the scored ones, so here
-  three fields count. To require that a field stays empty, see [Cover the edges](#cover-the-edges).
-- Dates with slashes or dots are read day first unless that is impossible: `10/03/2026` is 10 March, `10/13/2026` is
-  13 October. If your documents use the US order, have your app return dates as `2026-10-03`.
-- Numbers may be plain, use thousands commas, or carry `$`, `US$`, `RM` or `MYR`. Other currency marks (`€`, `EUR`) and
-  a decimal comma (`1.190,00`) do not parse, so the field fails. Have your app return the bare amount, or compare it in
-  a [`function` check](#your-own-check).
-
-### A booking assistant: an agent with tools
-
-A customer cancels a booking that cost €80 and asks for the money back. Refunds above €50 need a person, so the
-assistant cancels the booking and hands the refund to staff instead of paying it itself.
+A made-up booking assistant: a customer cancels a booking that cost €80 and asks for the money back. Refunds above €50
+need a person, so the assistant looks the customer up, cancels and hands the refund to staff:
 
 ```yaml
 # golden/booking/refund-over-limit.yaml
@@ -138,120 +53,51 @@ scoring:
     - {id: steps, kind: max_steps, max: 12}
 ```
 
-- `method: checks` runs the list of checks. `aggregate: all` gives the case 1 only if every check passes.
-- `state` compares the `state_change` your adapter reports with `expected.state_change`. It compares the whole value,
-  so an extra change, such as a refund, fails it, as long as your adapter reports every change.
-- `order` passes when every call of `cancel_booking`, `move_booking` or `refund` comes after a call of
-  `find_customer`.
-- `actions` gives one result per expected action, named `did.0:cancel_booking` and `did.1:hand_to_staff`. An action
-  without `args` matches any call of that tool.
-- `not_called` fails if the agent tried `refund` with an amount above 50, even if the tool refused the call.
-- A run that cancels the booking and pays the €80 itself fails three of these: `state`, `did.1:hand_to_staff` and
-  `no-big-refund`.
+`state` compares the whole `state_change` your adapter reports, so an extra change, such as a refund, fails it. A run
+that cancels the booking and pays the €80 itself fails `state`, `did.1:hand_to_staff` and `no-big-refund`.
 
-### A support chat: a dialog with a simulated customer
-
-A customer of an online shop was charged twice for one order. A second model plays the customer from a description in
-the case's input. The agent must find the duplicate payment, refund it and nothing else, and give the customer the
-refund's reference.
-
-```yaml
-# golden/support/refund-double-charge.yaml
-id: refund-double-charge
-version: 1
-input:
-  customer: inputs/refund-double-charge.yaml   # who the simulated customer is and what they want
-  shop: inputs/shop.yaml                       # orders and payments before the chat
-expected:
-  actions:
-    - {tool: refund_payment, args: {payment_id: P-5531}}
-  articles: [kb-double-charge]
-scoring:
-  method: checks
-  aggregate: all
-  checks:
-    - {id: acted, kind: active}                    # the agent made a tool call that did not fail
-    - {id: did, kind: actions, expected: actions}
-    - {id: one-refund, kind: not_called, tool: refund_payment, args: {payment_id: {ne: P-5531}}}
-    - {id: read-policy, kind: doc_found, expected: articles}
-    - {id: steps, kind: max_steps, max: 20}        # the agent's model calls; the customer's do not count
-    - {id: ref, kind: regex, field: reply, pattern: "R-\\d{4}"}
-```
-
-- Your adapter runs the conversation. Wrap the simulated customer's model client with `actor="user"`, so its steps
-  stay apart from the agent's and the record shows its cost separately. The cost budget still counts both.
-- Trace checks look at the agent's steps unless a check names another `actor`. `max_steps` counts only the agent's
-  model calls: a dialog with 2 agent calls and 30 customer calls passes `max: 20`.
-- `one-refund` fails if the agent refunds, or tries to refund, any payment other than `P-5531`.
-- `doc_found` gives the share of the expected articles among the documents the agent retrieved. It needs retrieval
-  steps in the trace.
-- `regex` looks for the refund reference in the `reply` field of your app's answer.
+An invoice reader uses `method: field_match` ([Get started](/docs/start#5-write-a-first-case)): a field expected as
+`null` is not scored, and `type: date` or `type: number` compare by value. Dates with slashes or dots are read day first
+unless that is impossible. Amounts in `€` or with a decimal comma do not parse as numbers.
 
 ## Answer checks
 
-Every check has an `id`, unique within the case, and a `kind`. It gives true or false, a share between 0 and 1, or
-nothing when it does not apply. A check over many items, such as fields or expected actions, gives one result per item,
-named `id.item`. The record of each run keeps every result, so you can see which check failed.
+A check gives true, false, a share between 0 and 1, or nothing when it does not apply. Answer checks read the output, or
+the part at the path in `field`. `exact`, `contains`, `number` and `refusal` compare with their own `value`, or with the
+case's expected value at the path in `expected`.
 
-Answer checks read the app's output. `field` picks a part of it by path, such as `reply` or `invoice.total`; without
-`field`, the check reads the whole output. `exact`, `contains`, `number` and `refusal` compare with their own `value`,
-or with the case's expected value at the path given in `expected`.
-
-| Kind | Passes when | Example |
-|---|---|---|
-| `field_match` | each expected field matches, as in `method: field_match`; one result per field | `{id: fields, kind: field_match, fields: {total: {type: number}}}` |
-| `exact` | the text equals the value, ignoring spaces around it | `{id: status, kind: exact, field: status, value: confirmed}` |
-| `contains` | the text contains the value, ignoring case | `{id: fee, kind: contains, field: reply, value: cancellation fee}` |
-| `regex` | the pattern matches somewhere in the text | `{id: ref, kind: regex, field: reply, pattern: "B-\\d+"}` |
-| `number` | the number is within `tol` of the value (plain numbers and amounts such as `$7.80`) | `{id: total, kind: number, field: total, expected: total, tol: 0.01}` |
-| `json_schema` | the value is valid against a JSON Schema | `{id: shape, kind: json_schema, schema: {type: object, required: [vendor, total]}}` |
-| `refusal` | with `value: true`, the answer field (default `answer`) is present and `null`; with `false`, present and filled | `{id: declines, kind: refusal, value: true}` |
-
-`field_match` works two ways. As the case's `method`, it compares the fields of `expected` directly, as in the invoice
-example. As a check inside `method: checks`, it reads the fields from `expected.fields` (or the path in its own
-`expected`), and you can put other checks next to it. An answer with no output at all is not a refusal: `refusal`
-fails it.
+| Kind | Passes when |
+|---|---|
+| `field_match` | each field in `expected.fields` matches; one result per field |
+| `exact` | the text equals the value, ignoring spaces around it |
+| `contains` | the text contains the value, ignoring case |
+| `regex` | `pattern` matches somewhere in the text |
+| `number` | the number is within `tol` of the value |
+| `json_schema` | the value is valid against the JSON Schema in `schema` |
+| `refusal` | with `value: true`, the field (default `answer`) is present and `null`; with `false`, filled |
 
 ## Trace checks
 
-Trace checks read the steps of the run. They look at the runner's last attempt, so steps of an attempt that was
-retried do not count. They look at the agent's steps unless the check sets `actor` to `user`, `system` or `env`. A run
-without a trace fails every trace check.
+Trace checks fail on a run without a trace and read the agent's steps unless `actor` is `user`, `system` or `env`.
 
-| Kind | Passes when | Example |
-|---|---|---|
-| `called` | the actor called the tool, with matching arguments, and the call did not fail | `{id: escalated, kind: called, tool: hand_to_staff}` |
-| `not_called` | the actor never tried the tool with such arguments; a call the tool refused counts as tried | `{id: no-big-refund, kind: not_called, tool: refund, args: {amount_eur: {gt: 50}}}` |
-| `order` | every call of a `then` tool comes after a call of `first`; also when no `then` tool was called | `{id: looked-up, kind: order, first: find_customer, then: [cancel_booking, refund]}` |
-| `max_steps` | the actor's answered model calls are at most `max`; a run with none passes | `{id: steps, kind: max_steps, max: 12}` |
-| `active` | the actor made at least one tool call that did not fail | `{id: acted, kind: active}` |
-| `actions` | per expected action: the actor called that tool with matching arguments, and the call did not fail | `{id: did, kind: actions, actions: [{tool: cancel_booking, args: {booking_id: B-2207}}]}` |
-| `state` | the trace's `final_state` (default) or `state_change` equals the expected one | `{id: state, kind: state, key: state_change}` |
-| `doc_found` | gives the share of the expected document ids the actor retrieved | `{id: sources, kind: doc_found, ids: [kb-refunds]}` |
+| Kind | Passes when |
+|---|---|
+| `called` | `tool` was called with matching `args`, and the call did not fail |
+| `not_called` | `tool` was never tried with such `args`; a refused call counts as tried |
+| `order` | every call of a `then` tool comes after a call of `first` |
+| `max_steps` | at most `max` answered model calls |
+| `active` | at least one tool call did not fail |
+| `actions` | per expected action: a matching call that did not fail |
+| `state` | `final_state` (default) or `state_change`, per `key`, equals the expected one |
+| `doc_found` | a share: the expected document ids that were retrieved |
 
-`actions` takes its list in `actions` or from the case's expected values with `expected`; `doc_found` takes `ids` or
-`expected` the same way. `state` reads the expected value at the path named by `key` unless `expected` names another.
-
-Conditions on arguments, in `args` of `called` and `not_called` and in each expected action:
-
-- A plain value must match exactly: `{booking_id: B-2207}`.
-- A mapping is a set of operators: `eq`, `ne`, `gt`, `gte`, `lt`, `lte` and `in`. `gt`, `gte`, `lt` and `lte` take a
-  number, and a number sent as text, such as `"60"`, is compared as a number. `in` takes a list of allowed values:
-  `{room: {in: [small, medium]}}`. To match an argument that is itself a mapping, use `eq`: `{slot: {eq: {day: mon}}}`.
-- Arguments you do not name are not checked.
-
-`called`, `active`, `actions` and `order` count every call that did not fail: calls that went through, and calls whose
-outcome the trace does not know (status `unknown`, such as tool calls rebuilt from your agent's messages when your
-adapter does not wrap its tools). `not_called` also counts a call the tool refused, since the attempt is what the check
-is about. An unwrapped tool's refused call is `unknown`, so it passes `active`: wrap your tools so the trace knows which
-calls failed. [Connect your app](/docs/connect) shows how.
+In `args`, a plain value must match exactly and a mapping holds operators ([Reference](/docs/reference#checks)). Wrap
+your tools so the trace knows which calls failed ([Connect your app](/docs/connect)).
 
 ## Your own check
 
-When no built-in kind fits, a `function` check calls a Python function you write, named as `module:function`. The gate
-calls it with four arguments: the case's expected values, the output (or `None`), the trace (or `None`) and the
-check's own entry. It returns true, false, a share between 0 and 1, or `None` when it does not apply. A mapping of such
-values gives one result per key.
+A `function` check calls your Python function, named `module:function`, with the expected values, the output, the trace
+and the check's entry, and returns true, false, a share or `None`.
 
 ```python
 # booking_assistant/checks.py
@@ -270,90 +116,35 @@ def names_the_booking(expected, output, trace, check):
     - {id: names-booking, kind: function, function: "booking_assistant.checks:names_the_booking", booking: B-2207}
 ```
 
-`booking` is a key of your own: the gate passes it on in the check's entry. The module must be importable where the
-gate runs, so put it in your project's package. `golden validate` imports the function, without calling it, and fails
-if it cannot. The function is code in your repository: editing it makes a new version. Both versions' answers are
-scored with the checks from the request (see [Change cases with the behaviour](#change-cases-with-the-behaviour)).
-[What it catches](/docs/what-it-catches#add-your-own-check) has a longer example.
-
-The built-in checks are code, and none of them asks a model for an opinion. A quality you cannot write as a rule, such
-as politeness, has no built-in check.
+`booking` is a key of your own. Put the module in your project's package: `golden validate` imports it, and editing it
+makes a new version. No built-in check asks a model for an opinion. Checks shared by a whole set are planned
+([Method](/docs/method)).
 
 ## From checks to a case score
 
-`aggregate` turns a case's results into one score between 0 and 1:
+`aggregate: mean` (the default) averages the results, leaving out results that do not apply. `all` gives 1 only if every
+result that applies is a full pass: use it when the checks describe one correct outcome, such as an agent's task.
 
-- `mean` (the default): the mean of the results. True counts 1, false 0, a share as it is. Results that do not apply
-  are left out.
-- `all`: 1 if every result that applies is a full pass, otherwise 0. A share below 1 counts as a fail.
-
-`method: field_match` uses the same setting, so by default an invoice scores the share of right fields.
-
-Take the booking assistant's case above and a run where the agent replies "Sorry, I can't help with that" and calls no
-tool. Of its seven results, three pass: `looked-up`, `no-big-refund` and `steps`. Under `mean` the run scores 0.43;
-under `all` it scores 0.
-
-Use `all` when the checks together describe one correct outcome: an agent's task is done right or it is not. Use `mean`
-when the parts count on their own, such as the fields of an invoice, where three right fields out of four are worth
-more than none.
-
-The gate compares the mean of the case scores. With `all`, each case is worth 100 / N points of that mean: with 20
-cases, one case that goes from 1 to 0 lowers the mean by exactly 5 points. Today's rule blocks only a drop of more than
-`delta` points (5 by default), so that one case alone passes, and the comment still lists it among the cases that got
-worse. [How it decides](/docs/how-it-decides) explains the rule.
+With `all`, each case is worth 100 / N points: with 20 cases, one case that goes from 1 to 0 lowers the mean by exactly
+5 points, which today's rule (block above `delta`, 5 by default) passes.
 
 ## Cover the edges
 
-A change shows only where a case looks. A rule decides at its edges, so put cases there.
+A rule decides at its edges, so put cases there:
 
-- **Both sides of every limit.** If refunds above €50 need a person, write cases at €40, at exactly €50 and at €60. With
-  cases only at €40 and €80, raising the limit to €70 changes nothing they see.
-- **Missing and wrong data.** An email the system does not know, a name that does not match the booking, an invoice
-  without a VAT id.
-- **Ambiguous requests.** A customer with two bookings who says "cancel my booking". The right move is to ask which.
-- **Requests to refuse.** Something the policy forbids, or a booking that belongs to someone else.
-- **Formats.** Dates in different orders, amounts with and without thousands separators, a scan and its text.
-- **Paraphrases.** The same request in other words, as separate cases. Whether the app holds up when wording changes is
-  a question of what your set contains, not a separate kind of check.
+- **Both sides of every limit.** If refunds above €50 need a person, write cases at €40, at exactly €50 and at €60.
+  With cases only at €40 and €80, raising the limit to €70 changes nothing they see.
+- **Missing, wrong and ambiguous data**: an invoice without a VAT id, a customer with two bookings who says "cancel my
+  booking".
+- **Requests to refuse**, **formats** and **paraphrases**, as separate cases.
 
-An expected `null` means "not scored", not "must be empty". If an invented VAT id is a failure, say so with a check:
-
-```yaml
-# golden/invoices-strict/missing-vat-id.yaml
-id: missing-vat-id
-version: 1
-input:
-  text: inputs/missing-vat-id.txt
-expected:
-  fields: {vendor: Lindqvist Office Supplies, invoice_date: "2026-10-03", total: "1190.00"}
-scoring:
-  method: checks
-  checks:
-    - id: fields
-      kind: field_match
-      normalise: [whitespace, casefold]
-      fields: {invoice_date: {type: date}, total: {type: number}}
-    - {id: no-vat-id, kind: json_schema, field: vat_id, schema: {type: "null"}}   # empty or left out
-```
-
-`no-vat-id` passes when the answer has `vat_id: null` or no `vat_id` at all, and fails when the reader returns a value.
-It also passes on a run with no output; the `fields` check is what fails such a run, which scores 0.25.
+An expected `null` means "not scored". To require an empty field, add a check such as
+`{id: no-vat-id, kind: json_schema, field: vat_id, schema: {type: "null"}}`.
 
 ## Make sure doing nothing fails
 
-Several checks pass when the agent does nothing. If a change makes the agent stop acting, for example a prompt that
-confuses it or a tool it can no longer call, such checks keep passing, and the gate sees less of the drop than there is.
-
-| Check | On a run with no tool calls |
-|---|---|
-| `not_called` | passes: nothing was called |
-| `order` | passes: no `then` tool was called |
-| `max_steps` | passes: few or no model calls |
-| `state` expecting no change | passes: nothing changed |
-| `active`, `called`, `actions`, `state` expecting a change | fail |
-
-The trap is worst in a case where the right answer is to change nothing. Here a customer asks to cancel a booking that
-belongs to someone else:
+`not_called`, `order`, `max_steps` and `state` expecting no change all pass on a run with no tool calls, so an agent
+that stops acting looks better than it is. The trap is worst where the right answer is to change nothing:
 
 ```yaml
 # golden/booking/cancel-for-other-customer.yaml
@@ -373,198 +164,40 @@ scoring:
     - {id: acted, kind: active}   # without it, an agent that does nothing passes this case
 ```
 
-Without `acted`, an agent that answers "Sorry" and calls no tool scores 1 on this case. With it, the same run scores 0.
-A `called` check for the step a correct run cannot skip, such as `{id: checked-owner, kind: called, tool: find_customer}`,
-is stricter still.
-
-- **Pair `not_called` with `active`** (or with a `called` check) in every agent case.
-- **Use `aggregate: all` for agent cases.** Under `mean`, the do-nothing run above still scores 0.43 on the
-  refund case.
-- **Try a version of your app that does nothing.** Give it a prompt that tells the agent to apologise and stop, run it
-  on your set with `llm-release-gate run`, and look at the cases it passes. Each one needs a check that a correct run
-  passes and an idle run fails. Keep that config and prompt untracked, or in a path listed in `ignore`: a tracked file
-  counts as code unless it is documentation, CI, or a file `gate.yaml` names or ignores.
+Without `acted`, an agent that answers "Sorry" and calls no tool scores 1 here. Pair `not_called` with `active` or a
+`called` check in every agent case, use `aggregate: all`, and try a version whose prompt tells the agent to apologise
+and stop.
 
 <Fig id="write-tests-2" caption={"A run that does nothing passes `not_called` and \"no change\" (and, on the refund case, `order` and `max_steps`). `active` and `aggregate: all` make it fail. Example case."} alt={"A run that replies \"Sorry\" and calls no tool, scored on the case where a customer asks to cancel someone else's booking. Without the active check it passes both remaining checks and scores 1. With active it scores 0 under aggregate all and 0.67 under mean. On the refund case the same run passes three of seven results: 0.43 under mean, 0 under all. Without active there, it passes three of six: 0.5 under mean, 0 under all."} />
 
 ## Try new cases on the current version
 
-Before you rely on a new case, run the current version on it a few times and look at each run's score:
+Run the current version on a new case a few times:
 
 ```sh
 uv run --env-file .env llm-release-gate run --config configs/booking.yaml --golden golden/booking -k 3 --out runs/try.jsonl
 jq -r '[.case, .rep, .score] | @tsv' runs/try.jsonl
 ```
 
-- A case should pass on a version you consider correct. If it fails every time, the expectation or a check is wrong.
-- If it passes on some runs and fails on others, find out why. A check that demands exact wording of free text fails
-  at random: check what matters instead, with `regex` or `contains`. A case where the model itself is unreliable can
-  stay, but it adds noise to every verdict.
+A case should pass on a version you consider correct. If it passes on some runs and fails on others, find out why: a
+check that demands exact wording of free text fails at random. In the author's measurement on a support agent, one
+unchanged version scored a mean of 0.7, 0.6, 0.6, 0.7, 0.5, 0.6, 0.6, 0.4, 0.7, 0.7 and 0.6 over 11 runs of the same 10
+tasks, and today the gate decides on one run per version ([How it decides](/docs/how-it-decides)).
 
-Run-to-run noise can be large. In the author's measurement on a support agent, one unchanged version scored a mean of 0.7, 0.6, 0.6, 0.7, 0.5, 0.6, 0.6, 0.4, 0.7, 0.7 and 0.6 over 11 runs of the same 10 tasks. Today the gate
-decides on one run per version, so a case that flips by chance can move a verdict. [How it decides](/docs/how-it-decides)
-shows this noise and the statistical rule planned for stage C, which will run each version several times.
-
-## Keep part of the set held out
-
-If you change a prompt until the CI cases pass, the prompt can end up fitted to those cases. Keep some cases out of CI
-to see whether a gain holds on cases your tuning never saw.
-
-- Put them in their own directory and do not name it in `gate.yaml`, so CI never runs it.
-- List that directory in `ignore`. A test set that `gate.yaml` does not name counts as code: without `ignore`, editing
-  a held-out case makes a new version, so the request with that edit runs both versions. The request that adds the
-  pattern to `ignore` runs every pipeline once: a change to `ignore` changes which files are code, so the gate runs
-  everything.
-- Choose which cases to hold out before you see their results: by a fixed rule, or by a random draw with a recorded
-  seed.
-- Keep cases that test the two sides of one limit on the same side of the split. Otherwise CI sees only half of the
-  limit.
-- Do not look at held-out results while you tune. Run them rarely, for example before a release.
-
-```yaml
-# gate.yaml
-pipelines:
-  booking:
-    config: configs/booking.yaml
-    golden: golden/booking        # runs on every pull request
-ignore:
-  - golden/held-out/              # not named above, so CI never runs it; ignored, so editing it is not a code change
-```
-
-To compare two versions on the held-out set, run each from its own checkout, then compare the records:
-
-```sh
-# in a checkout of main
-uv run --env-file .env llm-release-gate run --config configs/booking.yaml --golden golden/held-out --out ../held-out-main.jsonl
-# in your branch
-uv run --env-file .env llm-release-gate run --config configs/booking.yaml --golden golden/held-out --out ../held-out-new.jsonl
-uv run llm-release-gate gate --base ../held-out-main.jsonl --candidate ../held-out-new.jsonl --markdown ../held-out.md
-```
-
-The held-out set must be the same in both checkouts: `gate` refuses records made on different sets. It also refuses
-records scored by different scorer versions, which can happen when the two checkouts pin different gate releases; add
-`--golden golden/held-out` to rescore both with the gate you run. If your config names a model without a date, run both
-within an hour, and both runs must report the same model: the gate refuses runs with a longer pause between them, runs
-that do not say which model answered, and runs where the provider reported different models for that name.
+A prompt tuned until the CI cases pass can end up fitted to them. Keep some cases in a directory that `gate.yaml` does
+not name, list it in `ignore`, and run them rarely.
 
 ## Change cases with the behaviour
 
-**A change on purpose.** When a request changes behaviour deliberately, such as a new refund limit, the cases that
-expect the old behaviour fail, and the gate may block. That block is right. Update those cases in the same request, as
-you would update a unit test when the specification changes. Both versions are scored against the request's cases, so the
-base now misses the new expectation and the candidate meets it. The comment notes that the request changes the test
-set.
-
-**A change that should not change behaviour**, such as a reworded prompt, a new model or a refactoring, leaves the cases
-as they are. The gate then asks one question: did it get worse? [What it catches](/docs/what-it-catches) lists such changes
-and which checks see them.
-
-**A request that changes only cases** runs nothing. Your app's version is the same, so the pipeline is `unchanged`, and
-the comment notes the changed test set. The new cases first run in the next request that changes the version. To see them
-work now, run them yourself as in [Try new cases on the current version](#try-new-cases-on-the-current-version).
+When a request changes behaviour on purpose, such as a new refund limit, update the old cases in the same request: both
+versions are scored against the request's cases. A request that changes only cases runs nothing, so [run new cases
+yourself](#try-new-cases-on-the-current-version).
 
 ## Validate the set
-
-Check the set before you commit it:
 
 ```sh
 uv run llm-release-gate golden validate golden/booking
 ```
 
-```text
-2 cases, sha256 20b56ab9b21ec75021a2897d3037002ff9792289ddd99baa416c8324a743fe1f
-```
-
-Your hash will differ. `golden validate` checks, without running anything:
-
-- every case against the schema, and that ids are unique;
-- that every input exists and lies inside the set;
-- every check's configuration against the case's expected values: required keys, keys a kind does not know, paths in
-  `expected` that lead nowhere, operators in `args`, patterns and schemas;
-- that each `function` check's module imports and the function can be called.
-
-Each problem names the file:
-
-```text
-cancel-for-other-customer.yaml: missing input golden/booking/inputs/cancel-for-other-customer.txt
-refund-over-limit.yaml: scoring: check 'did': expected values have no 'action'; check 'steps': unknown keys ['limit'] for max_steps, known: ['actor', 'max']; check 'steps': missing max
-```
-
-The last line of a clean run is the set's hash. It covers each case's parsed content and the bytes of each input.
-Reformatting a case or editing a comment keeps it; editing any field of a case (an expectation, a check, `version`, a
-note) or an input changes it. Every record
-of a run carries the set's hash, the comment shows its first characters (`set 52c8e0d7`), and the gate refuses to
-compare runs made on different sets.
-
-In CI the gate validates the request's set before any model call. An invalid set ends as `infra error` (exit 20), with
-the first problems in the comment.
-
-## Sets outside git
-
-Some sets cannot go into git: customer documents, scans with personal data, files too large for the repository. Keep
-the files elsewhere and commit a manifest: the set's ids and its hash.
-
-1. Build the set in a directory git does not track, and run `golden validate` on it to get the hash.
-2. Write the manifest:
-
-   ```yaml
-   # golden/invoices.yaml
-   ids: [missing-vat-id]
-   sha256: ae3c003b1f1a2fa0bd438afd9c818b96e41a07eb8a0073033548702f72547b1a
-   ```
-
-3. Name the set's directory and the manifest in `gate.yaml`:
-
-   ```yaml
-   # gate.yaml
-   pipelines:
-     invoices:
-       config: configs/invoices.yaml
-       golden: data/golden/invoices        # fetched by a workflow step before the gate
-       manifest: golden/invoices.yaml      # the ids and the hash the fetched set must have
-   ```
-
-4. In the workflow, fetch or build the set in a step after `setup` and before the gate. Here the set is a release
-   asset of the repository, and the steps are those of the job in
-   [Get started](/docs/start#6-add-the-gate-to-your-workflow) with the fetch step added:
-
-   ```yaml
-   # .github/workflows/release-gate.yml: the job's steps
-   steps:
-     - uses: actions/checkout@v7
-     - uses: Ilya-Grigoryev/llm-release-gate/setup@v0.1.0-dev.9
-       with:
-         gate-ssh-key: ${{ secrets.LLM_RELEASE_GATE_KEY }}  # while the gate's repository is private
-     - name: test set
-       env:
-         GH_TOKEN: ${{ github.token }}
-       run: |  # the invoices stay out of git: the set is a release asset of this repository
-         gh release download golden-invoices-ae3c003b -p invoices.tar.gz -D "$RUNNER_TEMP"
-         mkdir -p data/golden && tar -xzf "$RUNNER_TEMP/invoices.tar.gz" -C data/golden
-     - uses: Ilya-Grigoryev/llm-release-gate@v0.1.0-dev.9
-   ```
-
-`golden validate DIR --manifest FILE` fails unless the set has exactly the manifest's ids and hash, and the gate makes
-the same check in CI: a set that does not match ends as `infra error`. If the fetch step fails, the gate does not run
-and the request gets no comment.
-
-Where the set's files go:
-
-- The gate action keeps the set's case files and text inputs, never images, as a build artifact for 30 days, so the
-  dashboard can show what each case asked. `cases: false` on the action leaves that artifact out.
-- `inputs-url` on the pipeline in `gate.yaml` tells the dashboard where to find the set's other files, such as scans: a
-  URL with `{path}` or `{name}`.
-- The dashboard copies the run records out of CI into its database, and they hold the answers. Install its GitHub App
-  only on repositories whose runs may leave CI.
-
-## Planned: shared checks for a set
-
-Today each case lists all of its checks. If every case of an agent repeats the same policy checks, the same format check
-and the same step limit, you write them in every file. You can generate the case files with a script from a shorter
-source. If you do, keep the source out of the version: name it in `ignore`, since a tracked file counts as code unless it
-is documentation, CI, or a file `gate.yaml` names or ignores.
-
-Planned, not built yet: a set file next to the cases that holds checks and scoring shared by every case. A case can
-override a shared check or turn it off. A JSON Schema for the case and the set file will cover the fields of each kind
-of check, so that `golden validate` and your editor can check them. The shared checks will be part of the set's hash.
-Until this exists, this page shows the format as it is today.
+Without running anything, it checks each case, its inputs and its checks, and prints the set's hash. A set kept outside
+git, such as scans with personal data, is pinned by a [manifest](/docs/reference#manifest).

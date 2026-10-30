@@ -3,498 +3,139 @@ export const metadata = { title: "Read a verdict" };
 # Read a verdict
 
 When a pull request changes your LLM application, the gate posts one comment per pipeline and passes or fails the CI
-job. This page takes the comment apart line by line, says what to do for each outcome, and shows where to look when the
-comment is not enough.
-
-## Terms
-
-The comment uses a few words that [How it works](/docs/how-it-works) explains in full. In short:
-
-- **Pipeline**: one entry under `pipelines` in `gate.yaml`, with a name, a version's config and a test set. Each
-  pipeline gets its own comment. ([How it works](/docs/how-it-works#one-pull-request-start-to-end))
-- **Version**: a config, the bytes of the prompts it names and the repository's code as git sees it.
-  ([What a version is](/docs/how-it-works#what-a-version-is))
-- **Base and candidate**: the version on the target branch and the version in the pull request.
-- **Case**: one situation your application must handle, a YAML file with inputs, expected values and how to score an
-  answer. A directory of cases is a test set. ([Cases](/docs/how-it-works#cases))
-- **Check**: looks at one thing in a run's answer or steps and gives true, false or a share. A case's checks give each
-  run a score from 0 to 1. ([Checks](/docs/how-it-works#checks))
-- **Run**: the version handling one case once. `k` in `gate.yaml` sets the runs per case and version, 1 by default.
-  ([How it works](/docs/how-it-works#one-pull-request-start-to-end))
-- **`delta`**: the drop in mean score, in points, that the gate lets through; a larger drop blocks. 5 by default, and 5
-  points is 0.05 on a score from 0 to 1. ([The decision today](/docs/how-it-works#the-decision-today))
-- **Verdict**: the outcome for one pipeline, named in the comment's title. This page says "outcome"; it means the same.
-  ([Verdicts](/docs/how-it-works#verdicts))
+job. This page takes the comment apart and says what to do for each outcome. Terms:
+[Reference](/docs/reference#terms).
 
 ## The comment, piece by piece
 
-Take a booking assistant, a made-up agent that books, moves and cancels rooms through tools. A pull request rewrites
-the cancellation rule in its system prompt and, in the same request, raises `delta` in `gate.yaml` from 5 to 10. The
-gate answers with this comment. The runs behind it are made up; the gate's own code wrote the text.
+A made-up booking assistant books, moves and cancels rooms through tools. A pull request rewrites the cancellation rule in
+its system prompt and raises `delta` in `gate.yaml` from 5 to 10. The figure shows the gate's comment; its numbers
+match this list.
 
-```text
-`booking` · **Release gate: ❌ quality fail**
-
-Mean score 0.800 → 0.725 (-7.50 points, blocks below -5.00); naive rule: block if the mean drops by more than 5 points.
-20 cases, first run of each version · config 3f9a1c0e → 8b42d7aa · set 51c0e9d2
-Cost of this decision $0.142: base $0.071, candidate $0.071 (successful calls, list prices).
-Budget of the candidate not shown over its limits · cost $0.0036 per run (limit $0.005) · latency p95 7.10 s (interval 5.90–? s; limit 10 s), 1 of 20 runs needed retries.
-
-| Case | Base | Candidate |
-|---|---|---|
-| cancel-after-deadline | 1.00 | 0.00 |
-| cancel-on-arrival | 1.00 | 0.50 |
-
-⚙️ This request changes the gate's rules for `booking` (gate.yaml or its prices). They apply after merge; until then the gate keeps the target branch's.
-
-[Job log](https://github.com/OWNER/REPO/actions/runs/RUN_ID)
-```
-
-1. **Pipeline and outcome.** `booking` is the pipeline's name in `gate.yaml`. Each pipeline gets its own comment, and
-   the gate edits that comment on every later run instead of posting a new one, so it shows the latest result. The
-   words after "Release gate:" name the outcome: ✅ pass, ❌ quality fail, ❌ budget fail, ⚠️ infra error,
-   ⏭ unchanged or 🆕 no base version.
-2. **Mean scores.** Each case's checks give it a score from 0 to 1, and the gate averages the scores of each version.
-   `0.800 → 0.725` reads base (the target branch) → candidate (the request). The difference is in points, 100 ×
-   (candidate − base): −7.50 points is a drop of 0.075. "blocks below -5.00" marks −`delta`: a difference below that
-   line blocks, and a drop of exactly 5.00 passes. The line ends with the rule the gate applied. Today that is always
-   the naive rule.
-3. **What was compared.** 20 cases, one run of each: the naive rule reads the first run of every case, even when `k` in
-   `gate.yaml` asks for more. `config 3f9a1c0e → 8b42d7aa` gives the first 8 characters of the two versions' hashes,
-   base → candidate. Despite the label, each hash covers the whole version: the config, the bytes of its prompts and
-   the repository's code as git sees it. `set 51c0e9d2` is the hash of the test set. Both versions ran on the request's
-   test set, so there is one set hash.
-4. **Model without a date.** Not in this example. When a config names a model without a date, a warning line follows:
-   `⚠️ Model without a date (gpt-6-luna): the provider may change it; …`. It goes on to say that the runs of both
-   versions had no pause longer than an hour and, where both asked for the same model, got the same one from the
-   provider. Otherwise the gate would have refused to compare them.
-5. **Cost of the decision.** Shown when the target branch's `gate.yaml` names a price file; a price file that the
-   request adds counts only after merge. The line adds up every call that got an answer, on both sides, at the list
-   prices in the target branch's price file. For a pipeline that records a trace, that means every model step: retried
-   attempts and a simulated customer's calls included. If a model has no price, the line reads "Cost: a model in these
-   runs has no price."
-6. **Budget.** Shown when the target branch's `gate.yaml` sets a cost or latency budget (`cost_per_run_usd`,
-   `latency_s`). See [The budget line](#the-budget-line).
-7. **Cases that got worse.** Up to five cases where the candidate scored lower than the base, largest drop first. The
-   table lists losses only: a case that improved never appears in it. It appears on any outcome that has a loss, a
-   pass included. The [dashboard](#the-dashboard) lists every case.
-8. **Notes.** Lines after the table describe the request itself: changed rules, a new pipeline, a changed test set, a
-   removed pipeline. Here the request raised `delta` to 10, and the gate still blocked at 5, because the rules come
-   from the target branch. The request's rules apply only when the target branch has no valid `gate.yaml`. See
-   [Notes under the comment](#notes-under-the-comment).
-9. **Job log.** The CI run, with the logs of both versions' runs.
+1. **Pipeline and outcome.** Later runs edit this comment.
+2. **Mean scores**, base → candidate, and the difference in points. "blocks below -5.00" marks −`delta`; a drop of
+   exactly 5.00 passes. Today the rule is always the naive rule.
+3. **What was compared.** The first run of each case, even when `k` asks for more. Each `config` hash covers the whole
+   version; `set` is the test set's hash.
+4. **Model without a date.** Not in this example: a warning that both versions' runs had no pause longer than an hour
+   and got the same model, or the gate would have refused to compare them.
+5. **Cost of the decision.** Every call that got an answer, both sides, at the target branch's list prices.
+6. **Budget.** See [The budget line](#the-budget-line).
+7. **Cases that got worse.** Up to five, largest drop first, on any outcome. The [dashboard](#the-dashboard) lists
+   every case.
+8. **Notes.** Here the gate still blocked at 5: the rules come from the target branch
+   ([Notes under the comment](#notes-under-the-comment)).
+9. **Job log.** The CI run and both versions' logs.
 
 <Fig id="read-a-verdict-1" caption={"A quality fail on the made-up booking assistant. Each number points to one part of the comment. Example runs; the text is the gate's own output."} alt={"A comment titled 'booking \u00b7 Release gate: quality fail'. The mean score dropped from 0.800 to 0.725, 7.5 points, and the gate blocks drops of more than 5 points. 20 cases, first run of each version, with the short hashes of both versions and of the test set. The decision cost $0.142 at list prices. The candidate's budget was not shown over its limits. Two cases got worse: cancel-after-deadline from 1.00 to 0.00 and cancel-on-arrival from 1.00 to 0.50. A note says the request changes the gate's rules, which apply only after merge. A link to the job log ends the comment."} />
 
 ## The budget line
 
-The budget line checks the candidate alone. It starts with a verdict, then gives each measurement against its limit:
-
-```text
-Budget of the candidate not shown over its limits · cost $0.0036 per run (limit $0.005) · latency p95 7.10 s (interval 5.90–? s; limit 10 s), 1 of 20 runs needed retries.
-```
-
-- **"not shown over its limits"** means no limit was clearly exceeded. It is weaker than "within its limits": some runs
-  can be over a latency limit without blocking.
-- **"over: …"** names the limit the candidate broke and by how much, before the measurements. It turns a pass into
-  `budget fail`.
-- **"(not checked: …)"** names a limit the runs could not decide, with the reason, for example `latency: too few runs
-  for a lower end`.
-- **Cost** is the mean cost of the candidate's runs, all `k` runs of every case, at the target branch's list prices.
-- **Latency** is a quantile of the candidate's run latencies, the 95th percentile by default, with a 95 % interval.
-  Latency blocks only when the lower end of the interval lies above the limit. A `?` marks an end the runs cannot give:
-  the upper end of a 95th percentile needs at least 72 runs, so with 20 runs you see `5.90–?`. The lower end needs only
-  two runs, so the latency budget can still block. The runs here are all of the candidate's runs, cases × `k`; with
-  one run in total, latency is not checked.
-- **Retries** counts the runs the runner had to retry after a rate limit, a timeout or a server error. A run's latency
-  is the time of the attempt that answered, without backoff or failed attempts.
-
-Quality comes first. A quality fail stays a quality fail whatever the budget says, which is why the example above shows
-a budget line under a block. [How it decides](/docs/how-it-decides#budgets-cost-and-latency) explains the interval and its
-caveats.
+The budget line checks the candidate alone. "not shown over its limits" is weaker than "within its limits": no limit
+was clearly exceeded. "over: …" names the broken limit and turns a pass into `budget fail`; "(not checked:
+…)" names a limit the runs could not decide. A `?` in the latency interval marks an end the runs cannot give. A quality
+fail stays a quality fail whatever the budget says
+([How it decides](/docs/how-it-decides#budgets-cost-and-latency)).
 
 ## Notes under the comment
 
-The gate adds a note when the request does more than change the version. A comment can carry several, in the order of
-this table.
-
-| Note | What it means | What to do |
-|---|---|---|
-| gate.yaml in this request changes what the gate ignores or which files belong to which pipeline, so every pipeline runs. | The request edits `ignore`, moves a pipeline's config, test set, manifest, price file or prompts, or adds or removes a pipeline. The gate then runs every pipeline, so a request cannot hide code behind a new rule. | Expect every pipeline to run and cost money. Where the comment shows the same hash on both sides, both ran the same version, and any difference between them is run-to-run noise. |
-| ⚠️ The target branch's gate.yaml is not valid, so this run uses the request's rules: … | The target branch's `gate.yaml` does not load; the reason follows. | Fix `gate.yaml` on the target branch. Until then a request can loosen its own gate. |
-| `booking` is new in gate.yaml: the target branch's top-level rules apply until merge. | The target branch's `gate.yaml` has no pipeline by this name. The outcome is `no base version`. Adding a pipeline also changes which files belong to which pipeline, so the first note in this table comes with it, and every pipeline of the request runs. | Nothing for a new pipeline, but expect the other pipelines to run in this request and cost money. If you renamed a pipeline, see [Inconclusive](#inconclusive). |
-| ⚙️ This request changes the gate's rules for `booking` (gate.yaml or its prices). They apply after merge; until then the gate keeps the target branch's. | The request edits `delta`, `k`, `budgets` or `prices` for this pipeline, or the price file itself. The gate judged the request by the target branch's rules. | Nothing, if the new rules are meant for later requests. To have a request judged by new rules, merge the rule change first, in a request of its own. |
-| This request changes the test set of `booking`. | The request's cases or inputs differ from the target branch's. Both versions ran on the request's set, so the verdict is about the new set. | Review the case edits as you review code: a request that deletes or loosens the cases it fails passes without being better. With `unchanged`, the edited cases did not run; see [Unchanged](#unchanged). |
-| ❌ This request removes `faq` from gate.yaml: no version of it was compared, so the check fails. If that is intended, merge over the check. | The request removes or renames a pipeline. | See [Inconclusive](#inconclusive). |
+| Note | What to do |
+|---|---|
+| gate.yaml in this request changes … so every pipeline runs. | Expect every pipeline to run and cost money. |
+| ⚠️ The target branch's gate.yaml is not valid … | Fix it: until then a request can loosen its own gate. |
+| `booking` is new in gate.yaml … | See [No base version](#no-base-version). |
+| ⚙️ This request changes the gate's rules … | Nothing, unless the request should be judged by the new rules: then merge them first, in their own request. |
+| This request changes the test set … | Review case edits as code: a request that deletes or loosens its failing cases passes without being better. |
+| ❌ This request removes `faq` … | See [Inconclusive](#inconclusive). |
 
 ## What to do for each outcome
 
-| Outcome | Comment title | Exit code | Job | First step |
-|---|---|---|---|---|
-| pass | ✅ pass | 0 | passes | glance at the cases that got worse and at the notes |
-| quality fail | ❌ quality fail | 10 | fails | open the cases that got worse |
-| budget fail | ❌ budget fail | 12 | fails | read the budget line |
-| inconclusive | none of its own: a ❌ note under another title | 11 | fails | confirm that the removal is meant |
-| infra error | ⚠️ infra error | 20 | fails | read the message and the log lines under it |
-| unchanged | ⏭ unchanged | 0 | passes | check that the change should not have run |
-| no base version | 🆕 no base version | 0 | passes | check the candidate's score |
-| not checked | no comment; "Release gate: not checked" in the job's summary | the step exits 1 | fails | a maintainer pushes the branch to the repository |
+| Outcome | Exit code |
+|---|---|
+| ✅ pass, ⏭ unchanged, 🆕 no base version | 0 |
+| ❌ quality fail | 10 |
+| inconclusive: a ❌ note under another title | 11 |
+| ❌ budget fail | 12 |
+| ⚠️ infra error | 20 |
+| not checked: no comment | the step exits 1 |
 
-A failing job blocks the merge only after you make it a required check for the target branch. Until then it advises.
+Any code other than 0 fails the job, which blocks the merge only once it is a required check
+([Exit codes](/docs/reference#exit-codes)).
 
 ### Pass
 
-Today a pass means: on the cases in your test set, the mean score of the candidate's first runs was no more than
-`delta` points below the base's, under the target branch's rules, and the candidate was not shown over a budget.
+The mean of the candidate's first runs was no more than `delta` points below the base's, and the candidate was not
+shown over a budget. Read the cases that got worse anyway: a mean can hold while single cases drop
+([What a pass means](/docs/how-it-decides#what-a-pass-means)).
 
-1. Read the table of cases that got worse, even on a pass. A mean can hold while single cases drop, because other
-   cases improved or the total loss stayed under `delta`. If a listed case is one your users depend on, open it.
-2. Read the notes. With "This request changes the test set", the pass is about the new set. With "changes the gate's
-   rules", the old rules applied.
-3. Merge as usual. The gate is one reviewer of the change.
-
-Two cases drop on this pass while a third improves, and the table shows only the drops:
-
-```text
-`booking` · **Release gate: ✅ pass**
-
-Mean score 0.800 → 0.800 (+0.00 points, blocks below -5.00); naive rule: block if the mean drops by more than 5 points.
-20 cases, first run of each version · config 3f9a1c0e → 8b42d7aa · set 51c0e9d2
-Cost of this decision $0.142: base $0.071, candidate $0.071 (successful calls, list prices).
-Budget of the candidate not shown over its limits · cost $0.0036 per run (limit $0.005) · latency p95 7.10 s (interval 5.90–? s; limit 10 s), 1 of 20 runs needed retries.
-
-| Case | Base | Candidate |
-|---|---|---|
-| cancel-on-arrival | 1.00 | 0.50 |
-| move-to-full-day | 1.00 | 0.50 |
-
-[Job log](https://github.com/OWNER/REPO/actions/runs/RUN_ID)
-```
-
-With one run per version, a pass near the line can be noise, just as a block can. A change that no case touches goes
-unseen whatever the rule; today, with one run of each, it can still pass or, by noise, block.
-[What a pass means](/docs/how-it-decides#what-a-pass-means) lists what a pass does not tell you.
+<Fig id="read-a-verdict-2" caption={"An example pass, case by case, in a documentation view, not the dashboard's page. Two cases lost half their score and one gained, so the mean held. The comment lists only the two losses; the case table shows all three and the checks behind them."} alt={"An example pass of the booking assistant with 20 cases, shown in a documentation view. Three cases changed. cancel-on-arrival fell from 1.00 to 0.50 because its no-fee-waiver check failed. move-to-full-day fell from 1.00 to 0.50 because its looked-up check failed. refund-60 rose from 0.00 to 1.00 because both of its checks now pass. The other 17 cases scored the same on both sides. With three runs per case, the loss on cancel-on-arrival repeats in all three runs, while the loss on move-to-full-day appears only in the first run (rep 0), the one today's rule reads."} />
 
 ### Quality fail
 
-The candidate's mean dropped by more than `delta` points. The job fails with exit code 10.
-
-1. **Find what changed.** Start with the cases in the table. Open each one in the [dashboard](#the-dashboard), or read
-   its records in the [artifact](#the-artifacts), and look at the checks that differ between the two versions. A check
-   that flips names the behaviour that changed. In the example, `cancel-after-deadline` fails its `no-fee-waiver`
-   check on the candidate: the agent called `waive_fee`, which the old prompt did not let it do.
-2. **Decide whether the loss is real.** Today the gate compares one run of each version, and a model's scores move
-   between runs with no change at all. In the author's measurement on a support agent, one unchanged version scored
-   between 0.40 and 0.70 over 11 runs on the same 10 tasks: 30 points, six times the default `delta`. A block is more
-   likely real when the checks that fail match what your change touched, when several cases fail the same check, and
-   when the drop is far below the line. It is more likely noise when the drop sits near the line and the cases that
-   moved have nothing to do with the change. One run of each cannot settle it.
-3. **Act on it.**
-   - The loss is real: fix the change and push. The gate runs again and edits the same comment.
-   - The loss is a trade you accept, such as a cheaper model for a few points: raising `delta` in the same request
-     changes nothing for that request, because the rules come from the target branch. Merge the new `delta` first in a
-     request of its own, or have a maintainer merge over the check.
-   - The block looks like noise: re-running the job runs both versions again and replaces the comment. The new result
-     is one more sample, so re-running until the gate passes defeats it. Say in the request why you think it is noise
-     and let a reviewer decide.
-
-Raising `k` does not help with a quality fail today: the naive rule reads only the first run of each case, and the
-extra runs feed the budgets. A statistical rule is planned for [stage C](/docs/method#contribution). It will run each version
-several times, put an interval around the difference, and answer "not sure yet" when the runs cannot tell a loss from
-noise. Buying more runs automatically when the rule is not sure is planned for a later stage, D.
-[How it decides](/docs/how-it-decides) explains both rules.
+The candidate's mean dropped by more than `delta` points. Open the cases in the table in the
+[dashboard](#the-dashboard) or [artifact](#the-artifacts) and look for a check that flips: in the example,
+`cancel-after-deadline` fails `no-fee-waiver` because the agent called `waive_fee`. One run of each version decides
+today, and scores move with no change: in the author's measurement, one unchanged version of a support agent scored
+between 0.40 and 0.70 over 11 runs on the same 10 tasks, 30 points, six times the default `delta`. A block is more
+likely real when the failing checks match your change. Fix it and push, or merge a new `delta` first in its own
+request; re-running until it passes defeats the gate.
 
 ### Budget fail
 
-Quality passed, but the candidate broke a cost or latency limit. The job fails with exit code 12.
-
-```text
-`booking` · **Release gate: ❌ budget fail**
-
-Mean score 0.800 → 0.800 (+0.00 points, blocks below -5.00); naive rule: block if the mean drops by more than 5 points.
-20 cases, first run of each version · config 3f9a1c0e → 5d1e7b93 · set 51c0e9d2
-Cost of this decision $0.200: base $0.071, candidate $0.129 (successful calls, list prices).
-Budget of the candidate over: cost $0.0064 per run > $0.005 · cost $0.0064 per run (limit $0.005) · latency p95 7.10 s (interval 5.90–? s; limit 10 s), 1 of 20 runs needed retries.
-
-[Job log](https://github.com/OWNER/REPO/actions/runs/RUN_ID)
-```
-
-1. **Read which limit broke.** "over:" names it. Compare the two arms in the cost line: here the candidate's runs cost
-   $0.129 against $0.071 for the base, almost twice as much for the same score.
-2. **Find where the cost or the time goes.** More tokens per call (a longer prompt, more context), more calls (an
-   agent that takes more steps), or a pricier model. The [dashboard](#the-dashboard)'s case page shows the tokens,
-   latency and steps of every run on both sides.
-3. **Act on it.** Make the change cheaper or faster and push. If the new cost is accepted, raise the budget in a request
-   of its own first, since budgets and prices come from the target branch, or have a maintainer merge over the check.
-
-The cost counts every model step the runner paid for, retried attempts and a simulated customer's calls included.
-A run that produced no answer is not in the latency budget: in CI it makes the job an infra error instead.
+Quality passed, but the candidate broke a cost or latency limit; "over:" names it. Compare both sides in the cost line,
+and each run's tokens, latency and steps in the dashboard. Make the change cheaper or faster, or raise the budget first
+in a request of its own.
 
 ### Inconclusive
 
-Today the gate gives `inconclusive` (exit code 11) in one case only: the request removes a pipeline from `gate.yaml`.
-Renaming a pipeline looks the same to the gate, because the old name disappears. Nobody compared a version of the
-removed pipeline, so the gate does not let it pass silently.
-
-No comment carries "inconclusive" in its title. The other pipelines keep their own verdicts and titles, and each of
-their comments ends with the ❌ note. Their jobs fail with exit code 11 unless something worse happened. Removing a
-pipeline also changes which files belong to which pipeline, so every remaining pipeline runs, even one the request did
-not touch. In this example the request also deleted `faq`'s config, prompts and test set and changed nothing else, so
-`booking` shows the same hash on both sides: both ran the same version, and any difference between them would be
-run-to-run noise. If a removed pipeline's files stay in the repository, they now count as code of every other
-pipeline, and the hashes differ.
-
-```text
-`booking` · **Release gate: ✅ pass**
-
-Mean score 0.800 → 0.800 (+0.00 points, blocks below -5.00); naive rule: block if the mean drops by more than 5 points.
-20 cases, first run of each version · config 3f9a1c0e → 3f9a1c0e · set 51c0e9d2
-Cost of this decision $0.142: base $0.071, candidate $0.071 (successful calls, list prices).
-Budget of the candidate not shown over its limits · cost $0.0036 per run (limit $0.005) · latency p95 7.10 s (interval 5.90–? s; limit 10 s), 1 of 20 runs needed retries.
-
-gate.yaml in this request changes what the gate ignores or which files belong to which pipeline, so every pipeline runs.
-
-❌ This request removes `faq` from gate.yaml: no version of it was compared, so the check fails. If that is intended, merge over the check.
-
-[Job log](https://github.com/OWNER/REPO/actions/runs/RUN_ID)
-```
-
-- **You meant to remove the pipeline:** a maintainer merges over the check.
-- **You renamed it:** the new name gets `🆕 no base version`, so the request runs it alone. Put the old name back if you
-  want a comparison, or accept the rename and merge over the check once.
-
-The statistical rule planned for stage C will use the same exit code for its "not sure yet" answer.
+Today only a request that removes or renames a pipeline in `gate.yaml` gives `inconclusive` (exit 11). The other
+pipelines keep their titles, add the ❌ note and exit 11 unless something worse happened. If the removal is meant, a
+maintainer merges over the check; a renamed pipeline gets `no base version` under its new name.
 
 ### Infra error
 
-The gate could not reach a verdict. An infra error (exit code 20) says nothing about the quality of the change. The
-comment gives the reason and, when the failing step has a log, up to 15 lines from its end:
-
-````text
-`booking` · **Release gate: ⚠️ infra error**
-
-The candidate did not finish its runs.
-
-```
-not done: 1 of 20; last error: KeyError: 'booking_id'
-20 records written, 19 of 20 done, mean score 0.763; config 8b42d7aa91c4, set 51c0e9d27e10
-```
-
-[Job log](https://github.com/OWNER/REPO/actions/runs/RUN_ID)
-````
-
-| Message | Cause | What to do |
-|---|---|---|
-| There is no golden set at `PATH`. | The test set `gate.yaml` names is missing from the request, or a step that builds it did not run. | Fix the path, or the step that fetches the set. |
-| The golden set is not valid: … | A case breaks the schema, two cases share an id, an input file is missing, a check does not fit the case's expected values, or the set does not match its manifest. | Run `llm-release-gate golden validate` on the set, with `--manifest` when `gate.yaml` names one (below). |
-| There is no `CONFIG`. | The config file `gate.yaml` names is missing from the request. | Fix the path in `gate.yaml`. |
-| Cannot check out the target branch (`REV`). | The gate could not check out the revision given as `--base` beside the request. In GitHub Actions the action fetches the target branch first; if that fetch fails, you get the last message in this table instead. | Outside GitHub Actions, fetch the target branch before you run `llm-release-gate pr`. Otherwise re-run the job, and if it repeats, read the job log. |
-| The target branch's project could not be prepared. / The request's project could not be prepared. | `prepare` or the locked install (`uv sync --locked`) failed in that tree. On a first setup, the target branch is often not a uv project yet. | Read the log lines. Update the lock file with `uv lock`, or merge `pyproject.toml` and `uv.lock` in a request of their own first. |
-| The base version did not finish its runs. / The candidate did not finish its runs. | At least one run produced no answer: your code raised an error, a call timed out on every attempt, rate limits outlasted the retries, the account ran out of quota (`stopped: …`), or the config or a prompt file is broken. The line that starts with `not done:` or `stopped:` names the last error; a broken config or prompt file ends the log with its own error. One case that fails on every attempt is enough. | If only the candidate fails, the change itself is the likely cause: fix it like a failing test. For rate limits or an outage, re-run the job. For quota or a wrong key, fix the repository's secret. |
-| The gate could not compare the runs. | The log names the reason, for example: a model without a date whose runs have a pause of more than an hour, or that got different models from the provider on the two sides; or a model with no price while a cost budget is set. | Use a dated model snapshot, or re-run so both sides run close together. Add the missing model to the price file. |
-| The gate failed: … | A bug in the gate. | Report it with the job log. |
-| The job stopped before the gate wrote a verdict; see the job log. | The job ended before the gate's step finished, for example because the request's `gate.yaml` does not load. | Read the job log. Check `gate.yaml` locally with `llm-release-gate pr --list` (below). |
-
-To check the test set and `gate.yaml` before you push, run from the repository's root:
-
-```sh
-uv run llm-release-gate golden validate golden/booking   # add --manifest FILE if gate.yaml names a manifest
-uv run llm-release-gate pr --list
-```
-
-A crash of the tool exits with 1 or 2, codes left to Python and its argument parser, so CI never reads a crash as a
-verdict.
+The gate could not reach a verdict; it says nothing about quality. The comment gives the reason and the
+end of the failing step's log. If only the candidate did not finish its runs, your change is the likely cause; for
+rate limits or an outage, re-run the job; for quota or a wrong key, fix the repository's secret.
 
 ### Unchanged
 
-The request leaves this pipeline's version as it is, so nothing ran and no model was called. The job passes.
-
-```text
-`booking` · **Release gate: ⏭ unchanged**
-
-This request does not change `booking`: its config, prompts and code hash the same in both branches (`3f9a1c0e5b7d`), so nothing ran. Documentation, CI, gate.yaml and the paths it ignores do not count.
-
-[Job log](https://github.com/OWNER/REPO/actions/runs/RUN_ID)
-```
-
-A version is its config, the bytes of its prompts and the repository's code as git sees it. If you expected your
-change to run, it touched only files that do not count:
-
-- documentation: `README`, `CHANGELOG`, `CONTRIBUTING`, `LICENSE` (bare or as `.md`, `.rst`, `.txt`, `.adoc`) and
-  `docs/`;
-- CI: `.github/`;
-- `gate.yaml` and the price files it names;
-- the paths in its `ignore`;
-- the test sets it names and their manifests;
-- the files of the other pipelines in `gate.yaml`, such as their configs and prompts;
-- files git does not track.
-
-If your application reads documentation, a CI file or an ignored path inside the project at run time, for example a
-knowledge base under `docs/`, take it back with `!` in `ignore`, as in `"!docs/kb/"`. The request that changes
-`ignore` runs every pipeline. The other files in this list cannot be taken back: commit a data file your application
-reads, and keep it out of the test sets and the other pipelines' files.
-
-With the note "This request changes the test set", you edited cases but not the version, so the new cases did not run.
-They run on the next request that changes the version. To see the current version on them now, run it locally; this
-calls the model:
-
-```sh
-uv run llm-release-gate run --config configs/booking.yaml --golden golden/booking -k 1 --out runs/new-cases.jsonl
-```
+The request leaves this pipeline's version as it is, so nothing ran and the job passes. If you expected a run, your
+change touched only files that do not count, such as documentation, `.github/`, `gate.yaml`, ignored paths or test
+sets ([What a version is](/docs/how-it-works#what-a-version-is)). Edited cases run on the next request that changes
+the version.
 
 ### No base version
 
-The target branch has no version of this pipeline to compare with. The candidate ran alone; its score, cost and budget
-are reported, and the job passes. A budget is reported but does not block without a base. Here the request adds
-`booking` to a `gate.yaml` that already gates other pipelines:
-
-```text
-`booking` · **Release gate: 🆕 no base version**
-
-The target branch has no version of this pipeline yet, so there is nothing to compare with.
-The candidate scores 0.725 on 20 cases (first run of each) · config 8b42d7aa · set 51c0e9d2
-Cost of these runs $0.071 (successful calls, list prices).
-Budget of the candidate not shown over its limits · cost $0.0036 per run (limit $0.005) · latency p95 7.10 s (interval 5.90–? s; limit 10 s), 1 of 20 runs needed retries. Without a base version the gate does not block on it.
-
-gate.yaml in this request changes what the gate ignores or which files belong to which pipeline, so every pipeline runs.
-
-`booking` is new in gate.yaml: the target branch's top-level rules apply until merge.
-
-[Job log](https://github.com/OWNER/REPO/actions/runs/RUN_ID)
-```
-
-You get it when the target branch's `gate.yaml` has no pipeline by this name, when the config it names for the pipeline
-is not there, or when the target branch has no `gate.yaml` and no file at the request's config path. That is the case
-on the first pull request that adds the gate, and for a new pipeline. Adding a pipeline also changes which files belong
-to which pipeline, so every other pipeline in the request runs against its base and costs money, even one the request
-did not touch.
-
-Look at the score before you merge. After merge, this version is the base that the next requests run against. If you
-expected a comparison, check whether the pipeline was renamed (then the request also carries the ❌ note about a
-removed pipeline).
+The target branch has no version of this pipeline, as when a request adds the gate or a new pipeline. The candidate
+ran alone and nothing blocks. Check its score: after merge, this version is the base.
 
 ### Not checked
 
-The pull request comes from a fork. On `pull_request`, GitHub passes no secrets to workflows triggered from a fork, so
-the job has no key for the model and the gate runs nothing. No comment is posted. The job's summary and an error
-annotation read "Release gate: not checked" and say why. The job fails, so a required check never lets an unchecked
-request through.
-
-To gate the request, a maintainer fetches the fork's branch, pushes it to a branch of this repository and opens the
-request from there. The gate runs the request's code with your model key, so read the change before you push it.
-
-A way for a maintainer to run the gate on a fork's request directly is planned.
+The request comes from a fork, so GitHub passes no secrets: the gate runs nothing, posts no comment, and the job fails.
+To gate it, a maintainer reads the change and pushes the branch to this repository.
 
 ## No comment on the request
 
-If the request shows no comment from the gate at all:
-
-- **The request comes from a fork.** See [Not checked](#not-checked).
-- **The job cannot comment.** The gate checks this before it pays for any run, and the job log says
-  `cannot comment: …`. Give the job `permissions: {contents: read, pull-requests: write}`.
-- **A step before the gate failed.** A test set kept out of git is fetched or built in a step before the gate. If that
-  step fails, the gate does not run and posts nothing.
-- **A pipeline's step was skipped.** With one step per pipeline, every step but the first needs
-  `if: ${{ !cancelled() }}`. Without it, a block in one pipeline skips the steps after it, and their pipelines get no
-  comment.
-- **The workflow does not run on `pull_request`.** The gate action comments only on pull request events.
-
-## Exit codes
-
-The exit code is what CI sees. In GitHub Actions any code other than 0 fails the job.
-
-| Exit code | Meaning |
-|---|---|
-| 0 | pass, unchanged, or no base version |
-| 10 | quality fail |
-| 11 | inconclusive: today only a request that removes or renames a pipeline; the naive rule never gives it |
-| 12 | budget fail: quality passed, a cost or latency limit did not |
-| 20 | infra error: the runs cannot be compared, or a step or the tool failed |
-| 1, 2 | left to Python and its argument parser: a crash, never a verdict |
-
-A request from a fork is not checked: the action's step exits with 1 and the gate never starts. When
-`llm-release-gate pr` gates several pipelines in one call, it exits with the worst outcome among them, in this order:
-infra error, quality fail, budget fail, inconclusive, pass. With one step per pipeline, as on GitHub, each step fails or
-passes on its own.
-
-Outside GitHub Actions, read the exit code in your own CI script. `verdict.json` tells pass, unchanged and no base
-version apart (`"outcome": "pass"`, `"unchanged"` or `"no base"`). An infra error writes no `verdict.json`. CI shells
-often stop at the first failing command, so catch the code on the same line:
-
-```sh
-code=0
-uv run llm-release-gate pr --base origin/main --out gate-out || code=$?
-case $code in
-  0)  jq -r .outcome gate-out/booking/verdict.json ;;   # pass, unchanged or no base
-  10) echo "quality fail" ;;
-  11) echo "inconclusive" ;;
-  12) echo "budget fail" ;;
-  20) echo "infra error: see gate-out/booking/comment.md" ;;
-  *)  echo "the gate crashed" ;;
-esac
-exit $code
-```
+- A fork: see [Not checked](#not-checked).
+- The job cannot comment: give it `permissions: {contents: read, pull-requests: write}`.
+- A step before the gate failed.
+- A pipeline's step was skipped: every step but the first needs `if: ${{ !cancelled() }}`.
+- The workflow does not run on `pull_request`.
 
 ## The artifacts
 
-Each gate step keeps two artifacts on the workflow run:
-
-- **`release-gate-NAME-ATTEMPT`**, for example `release-gate-booking-1`: `comment.md`, `verdict.json`, the records of
-  both versions (`base.jsonl`, `candidate.jsonl`), the logs of both runs and of the decision (`base.log`,
-  `candidate.log`, `gate.log`) and, when a pipeline's trace keeps them, the raw provider responses
-  (`base.native.jsonl`, `candidate.native.jsonl`). GitHub keeps it for the repository's artifact retention period.
-- **`release-gate-NAME-ATTEMPT-cases`**: the test set's case files and text inputs, never images, for 30 days. Set
-  `cases: false` on the action to leave it out.
-
-A record is one JSON line per run: the version's hash and the test set's hash, the case and the run number (`rep`,
-counted from 0), the answer, the model the provider reported, tokens, latency, retries, the trace of steps with calls
-and tokens per actor (`usage`, when the run has a trace), every check's result (`hits`), the case score and the error
-if the run produced no answer. In CI the runner does not price the tokens: the gate prices them when it decides, if the
-rules name a price file, and the cost is in `verdict.json` (`cost_usd`) and the comment.
-
-Download the artifact with the GitHub CLI and read one case on both sides. `RUN_ID` is the number at the end of the
-"Job log" link:
+Each gate step keeps `release-gate-NAME-ATTEMPT`, with the comment, `verdict.json`, both versions' records and the
+logs, and `release-gate-NAME-ATTEMPT-cases`, with the test set's text files, for 30 days. A record is one JSON line per run ([fields](/docs/reference#the-record-of-a-run)). To read one case on both
+sides (`RUN_ID` ends the "Job log" link):
 
 ```sh
 gh run download RUN_ID --name release-gate-booking-1 --dir gate-out
 jq -c 'select(.case == "cancel-after-deadline") | {rep, score, hits, error}' gate-out/base.jsonl gate-out/candidate.jsonl
 ```
 
-To recompute the verdict from the records without calling the model, run the gate's decision on them from a checkout
-of the request. `--golden` scores both sides again from their saved answers with the current scorer; it refuses a set
-that differs from the one the runs used:
-
-```sh
-# --threshold: the target branch's delta (5 by default)
-uv run llm-release-gate gate --base gate-out/base.jsonl --candidate gate-out/candidate.jsonl \
-  --golden golden/booking --threshold 5 --markdown comment.md --json verdict.json
-```
-
-Use the target branch's rules to get the same verdict: its `delta` for `--threshold`, and its price file and budgets
-for `--prices`, `--max-cost-per-run`, `--max-latency` and `--latency-quantile`, which add the cost and budget lines.
-
 ## The dashboard
 
-The dashboard reads the gate's artifacts after each run and shows them per repository. Install its GitHub App on the
-repositories that run the gate and sign in with GitHub; your workflow needs no change. The records leave CI for the
-dashboard's database, so install the App only on repositories whose runs may leave CI. [Dashboard](/docs/dashboard) explains
-the setup.
-
-- **A project's runs.** Every gated request over time, with the base's and the candidate's mean score for each.
-  **Read runs from GitHub** fetches runs the App missed.
-- **A run.** The verdict with the rule, both means, the difference with the line that blocks, the number of cases and
-  runs, the cost of each side, both version hashes and the test set. When both sides ran the same version, the page
-  says that any difference between them is run-to-run noise. Below comes every case, the changed ones first and the
-  most worsened at the top, with the base's and the candidate's score and the checks that changed, each with its
-  result on both sides. With `k` above 1, a case's score there averages its runs, while the comment and the verdict
-  use the first run.
-- **A case.** The case's input and expected answer, then the base (target branch) and the candidate (pull request) side
-  by side. For each run: the score, the model, tokens, latency, retries and any error; the answer, with the expected
-  value next to a wrong field; every check, the ones that differ between the sides marked; the steps of the trace; the
-  state change and the final state.
-
-The gate always scores both sides again with the request's scorer, from their saved answers. If the two branches use
-different releases of the gate, those scores can differ from what each side recorded: the dashboard's table shows the
-recorded scores, and the run page says when they may differ from the verdict.
-
-<Fig id="read-a-verdict-2" caption={"An example pass, case by case, in a documentation view, not the dashboard's page. Two cases lost half their score and one gained, so the mean held. The comment lists only the two losses; the case table shows all three and the checks behind them."} alt={"An example pass of the booking assistant with 20 cases, shown in a documentation view. Three cases changed. cancel-on-arrival fell from 1.00 to 0.50 because its no-fee-waiver check failed. move-to-full-day fell from 1.00 to 0.50 because its looked-up check failed. refund-60 rose from 0.00 to 1.00 because both of its checks now pass. The other 17 cases scored the same on both sides. With three runs per case, the loss on cancel-on-arrival repeats in all three runs, while the loss on move-to-full-day appears only in the first run (rep 0), the one today's rule reads."} />
+The [dashboard](/docs/dashboard) reads the gate's artifacts after each run, once its GitHub App is installed on the
+repository; the records then leave CI for its database. It shows every case of a run, with both sides' answers,
+checks and trace steps.

@@ -2,363 +2,105 @@ export const metadata = { title: "Method" };
 
 # Method
 
-The gate is the tool of a Bachelor thesis. On every pull request it runs two
-[versions](/docs/how-it-works#what-a-version-is) of an application on the same test [cases](/docs/how-it-works#cases): the base,
-from the target branch, and the candidate, from the pull request. [Checks](/docs/how-it-works#checks) score each run (one
-execution of the application on one case), and the gate turns the difference between the two versions into a
-[verdict](/docs/how-it-works#verdicts). This page sets out what the thesis asks, what it contributes, the design decisions
-and their reasons, and the experiments planned to test the gate's rules. Anything marked planned is not in the gate
-yet: stage C of the roadmap adds the statistical rule, and stage D adds extra runs on demand and runs the experiments.
+The gate is the tool of a Bachelor thesis. Anything marked planned on this page is not in the gate yet.
 
 ## The problem
 
-An LLM application can give different outputs for the same input. A case's score is between 0 and 1, and a point is
-0.01 of it. A drop of a few points between two versions can be a regression or noise. A gate that cannot tell the two apart
-fails in one of two ways: it blocks harmless changes until the team switches it off, or it is loosened until it
-catches nothing.
+An LLM application can give different outputs for the same input, so a drop of a few points between two versions can
+be a regression or noise. A gate that cannot tell them apart blocks harmless changes or is loosened until it catches
+nothing.
 
-The author's measurement on a support agent shows the scale. The same agent, with its config, prompts and agent code
-unchanged, a dated model snapshot and temperature 0, ran its 10 cases 11 times over two days. Its mean score in the 11
-repetitions was 0.7, 0.6, 0.6, 0.7, 0.5, 0.6, 0.6, 0.4, 0.7, 0.7 and 0.6: a range of 30 points, six times the gate's
-default threshold of 5 points. A one-call extraction application on 30 documents, with its config and prompts
-unchanged, moved its mean by less than 2 points over 10 repetitions. Noise depends on the application, so a gate has to
-measure it rather than assume it.
-[How it decides](/docs/how-it-decides#the-same-version-answers-differently) shows the series as a figure.
+In the [author's measurement](/docs/how-it-decides#the-same-version-answers-differently), a support agent with its
+config, prompts and code unchanged ran its 10 cases 11 times; its mean score ranged from 0.4 to 0.7, 30 points, six
+times the gate's default threshold of 5 points. A one-call extraction application on 30 documents moved its mean by
+less than 2 points over 10 repetitions. Noise depends on the application, so a gate has to measure it rather than
+assume it.
 
 ## Research questions
 
-The thesis asks three questions. They are drafts and may be reworded in the final text.
+These are drafts.
 
 1. **Design.** How should a release gate for LLM applications be designed so that one tool fits any application, from
-   a single model call to a tool-using agent, and a team can adapt it to its own application with little effort?
-2. **Decision rule.** Under run-to-run noise, how do these rules compare in false blocks, missed regressions and cost
-   per decision: the naive rule (each case run once per version, a fixed threshold), a statistical rule, the same rule
-   with adaptive extra runs, and the rules of existing tools?
-3. **Noise.** How does run-to-run noise change from a single call to a multi-step agent and to a chat with a simulated
+   a single model call to a tool-using agent, and a team can adapt it with little effort?
+2. **Decision rule.** Under run-to-run noise, how do the naive rule, a statistical rule, the same rule with adaptive
+   extra runs, and the rules of existing tools compare in false blocks, missed regressions and cost per decision?
+3. **Noise.** How does run-to-run noise change from a single call to a multi-step agent and a chat with a simulated
    user, and does that change which rule a team should use?
 
 ## Contribution
 
-The thesis contributes two things.
+**1. The tool.** A release gate that a team sets up with a few files: how to run the application, its cases with
+checks, and one `gate.yaml` with the rules. Built today: the runner, traces, 16 kinds of checks, one JSON protocol for
+any program, the naive rule with budgets, and a GitHub Action that comments the verdict. Planned: the statistical
+rule, adaptive extra runs and an anchor comparison.
 
-**1. The tool.** A release gate that a team sets up for its own application with a few files: how to run the
-application, its own test cases with checks from a library or written as its own function, and one `gate.yaml` with the
-rules. It covers applications from a single model call to agents with tools and a simulated user.
+**2. Evidence for the decision rules (planned, stage D):** how often each rule blocks a harmless change, misses a
+regression or leaves the decision open, and what one decision costs, on recorded runs of real applications, not on
+synthetic noise. Until then, this site states no error rates.
 
-Built today:
-
-- a case format with validation and a hash of the test set;
-- a runner with repeated runs, resume after a crash, parallel runs and backoff, which stamps every record with the
-  version's hash;
-- a trace of each run whose application reports one: model calls, tool calls, messages, the final state, cost per step;
-- 16 kinds of checks over the answer and the trace, one of them your own function;
-- any program in any language as the application under test, through one JSON protocol;
-- the naive rule with the cost of each decision, plus cost and latency budgets;
-- `gate.yaml`, the `llm-release-gate pr` command and a GitHub Action that comments the verdict on the pull request;
-- a first version of the dashboard.
-
-Planned: the statistical rule (stage C), adaptive extra runs (stage D), an anchor comparison, shared checks for a
-whole test set, "record and approve" (the gate proposes checks from what stays the same across runs of the current
-version, a person approves them), an optional check graded by a model, and setup through the commands `init` and
-`doctor` (see [fitting any application](#decisions-fitting-any-application)).
-
-**2. Evidence for the decision rules (planned, stage D).** How often each rule blocks a harmless change, misses a
-regression or leaves the decision open, and what one decision costs. These are to be measured on recorded runs of real
-applications that call a model API, not on synthetic noise. The rules of existing tools join the comparison as their
-documentation describes them. Until these experiments are done, this site states no error rates for the gate.
-
-The design decisions are written down with their alternatives. Together they form the design chapter of the thesis.
-
-**Other gates.** A few small open-source gates also turn statistics into a CI decision. By their own documentation, as
-it stood in October 2026, they check their false alarms on synthetic or simulated data: statgate ("calibration checks that
-verify interval coverage and false positive rates against synthetic data"), assay-evals (its page on repeats: "Measured
-on simulated unchanged pull requests") and flipcheck (a table of precision, recall and false alarm rate over 50 seeds on
-synthetic questions). A third outcome is not new either: evalsig exits with "`2` for INCONCLUSIVE", and assay-evals
-holds a release when its interval straddles the limit. The thesis plans to measure such rules on real runs across the
-range of applications. [Limits and comparison](/docs/limits#how-it-differs-from-other-tools) compares the tools in more
-detail.
-
-## One gate, from a single call to an agent
-
-Every LLM application is a sequence of model calls and actions. A single call is the shortest sequence. An agent that
-calls tools over many steps is a long one. A chat adds a simulated user, which is one more model. The gate records each
-run as a trace of steps, so one gate and one set of checks cover the whole range.
-
-The examples on this site are three made-up applications, one for each shape: an invoice reader (one model call that
-extracts fields), a booking assistant (an agent with tools) and a support chat (a dialog with a simulated customer).
-
-<Fig id="method-1" caption={"A single call is a run with one step; an agent's run has many. The gate records every run as a trace and checks the answer, the steps and the final state."} alt={"Three example applications as rows of steps. The invoice reader makes one model call and returns three fields. The booking assistant alternates model calls and tool calls and ends with a reply and a changed booking. The support chat adds customer turns, written by a second model. Answer checks look at the final answer; trace checks look at the steps and the final state; a function check runs your own code."} />
-
-What a team writes is the same for all three: a small Python adapter (a `build(config)` function that returns an object
-with `run(case)`) or, in any other language, a program that reads the gate's JSON request and writes its JSON answer; a
-config for the version (which program or Python module, which model, which prompts); a test set of cases with their
-checks; and one `gate.yaml`. In `gate.yaml`, each application the gate checks is a pipeline: a name with the version's
-config and its test set.
-
-```yaml
-pipelines:
-  invoices:                          # the name labels the comment
-    config: configs/invoices.yaml    # the version's config: program, model, prompts, params
-    golden: golden/invoices          # its test set
-k: 1                                 # runs per case and version
-delta: 5                             # block when the mean score drops by more than 5 points
-```
+By their documentation, small open-source gates such as statgate and flipcheck check false alarms on synthetic or
+simulated data ([Limits and comparison](/docs/limits#how-it-differs-from-other-tools)).
 
 ## Decisions: fitting any application
 
-These decisions answer the first research question. The numbers refer to the thesis's design decision records.
+Every LLM application is a sequence of model calls and actions, from a single call to an agent with tools or a chat
+with a simulated user. The gate records each run as a trace of steps, so one gate and one set of checks cover the
+range.
 
-### A version is what git sees
+<Fig id="method-1" caption={"A single call is a run with one step; an agent's run has many. The gate records every run as a trace and checks the answer, the steps and the final state."} alt={"Three example applications as rows of steps. The invoice reader makes one model call and returns three fields. The booking assistant alternates model calls and tool calls and ends with a reply and a changed booking. The support chat adds customer turns, written by a second model. Answer checks look at the final answer; trace checks look at the steps and the final state; a function check runs your own code."} />
 
-Design decision D-025. Decided; built.
+The decisions below answer the first research question; D-numbers are the thesis's decision records.
 
-The gate must know when a pull request changes what the model gets, and when it changes nothing. Before this decision,
-a version was its config, its prompts and a version number in the adapter that the team raised by hand. That missed
-code edits and library upgrades whenever nobody raised the number, and the config and prompts alone would miss a change
-in the code around the call or in the lock file.
-
-The gate now uses git and has no such number. A version is its config, the bytes of its prompts and the repository's
-code as git sees it: tracked files by the ids git gives their content, with uncommitted edits counted and untracked
-files left out. Documentation, CI, `gate.yaml` and its price files, the paths in its `ignore`, the test sets and other
-pipelines' files do not count. When a pull request leaves the version as it is and does not change `ignore` or which
-files belong to which pipeline, the pipeline gets `unchanged` and nothing runs. The same definition serves resuming
-interrupted runs, the stamp on every run record, the dashboard and `unchanged`.
-
-### The rules come from the target branch
-
-Design decision D-024. Decided; built.
-
-If the rules came from the pull request, it could loosen its own gate, for example by raising `delta`. If they lived
-in the dashboard, one commit could get different verdicts, nobody would review a change of the rules, and the gate
-would not work without the dashboard. The gate takes the rules (`delta`, `k`, `budgets`, `prices`) from the target
-branch's `gate.yaml`, and what it checks (the version's config and the test set) from the pull request. A pull request
-that changes `ignore`, or which files belong to which pipeline, runs every pipeline, so it cannot use them to skip its
-own runs. A change of the rules applies after merge and is reviewed like any code.
-
-### Any program, one protocol
-
-Design decision D-023. Decided; partly built.
-
-The options were the gate as a dependency of a Python project (it works only for Python, and the gate's version is
-written in several places), an engine that talks to the application only through one JSON protocol, or an SDK in the
-application with a hosted service (it needs hosting and an account). The choice is the engine with one protocol.
-
-Built today: any program runs through the protocol (one JSON request on stdin, one JSON answer on stdout, checked
-against a schema), Python applications run through an adapter, `gate.yaml` and the `pr` command exist, and the
-outcomes `no base version` and `not checked` (a pull request from a fork) work; [Read a verdict](/docs/read-a-verdict) lists
-every outcome. The gate is still added to a project as a dependency, so a project without Python still needs a small
-`pyproject.toml` that lists it. Planned: Python adapters in a worker process that speaks the same protocol, the engine
-installed with `uvx` so that it is no longer a dependency of the project, the commands `init` and `doctor`, a recording
-proxy for traces, a GitLab component and a pytest plugin.
-
-### Checks that the team writes
-
-Design decisions D-019, D-020 and D-022. Decided; partly built.
-
-A case is a list of checks over the answer and the trace. Each check gives true or false, a share, or nothing when it
-does not apply, and the case's `aggregate` turns the results into a score from 0 to 1. The trace has its own format:
-each step has a kind (model call, tool call, message, retrieval) and an actor (the agent, the simulated user, the
-system, the environment), and model steps carry their cost. Built today: 16 kinds of checks, including `function` for
-your own code.
-
-Planned: checks written once for a whole test set, with an opt-out per case; "record and approve"; later, checks
-proposed from a prompt's text. Mutation scoring of a test set, which counts a deliberately broken version as caught
-only if the gate's decision blocks it, is planned as an experiment of the thesis, not as a feature.
-
-### No model grades the text by default
-
-Design decisions D-005 and D-022. Decided.
-
-Every check today is computed by code. A check graded by a model, for qualities that code cannot score such as
-politeness, is planned as an option a team turns on. It brings its own noise, which the gate would see per check like
-any other. The evaluation of the gate's rules is to use only checks computed by code. Today a `function` check can call any
-code of yours.
-
-### Models without a date
-
-Design decision D-018. Decided for models without a date; built.
-
-A dated model snapshot is preferred. A name without a date is accepted, but the provider may change the model behind
-it, so the gate takes three precautions: every record keeps the requested model, the model the provider reported and
-the time; the comment warns; and the gate refuses to compare runs with a pause longer than an hour, runs that asked for
-the same model and got different ones, or runs that do not say which model answered.
+- **A version is what git sees** (D-025, built): its config, the bytes of its prompts and the repository's code as git
+  sees it, not a version number raised by hand.
+- **The rules come from the target branch** (D-024, built), so a pull request cannot raise its own `delta`.
+- **Any program, one protocol** (D-023, partly built): an engine with one JSON protocol, not a Python dependency or an
+  SDK with a hosted service.
+- **Checks that the team writes** (D-019, D-020, D-022, partly built), over the answer and the trace.
+- **No model grades the text by default** (D-005, D-022); a model-graded check is planned as an option.
+- **Models without a date** (D-018, built) are accepted, with
+  [precautions](/docs/how-it-decides#why-both-versions-run-at-the-same-time).
 
 ## Decisions: deciding under noise
 
-These decisions answer the second research question. Today the gate decides with the naive rule: one run of each case
-per version, and it blocks when the candidate's mean score is lower than the base's by more than `delta` points, 5 by
-default. Below, δ stands for `delta`. The first decision below is built. The others describe the statistical rule,
-planned for stage C; of it, only a rule per check exists in the code, outside the verdict.
+These answer the second research question. Today the gate uses the naive rule with a fixed `delta` (δ), 5 points by
+default; only the first decision is built, the others are the statistical rule planned for stage C.
 
-### Both versions run on the same cases, at the same time
-
-Design decisions D-007 and D-018. Built today; part of it is open.
-
-On every pull request that changes the version, the gate runs the base and the candidate on the pull request's test
-set, fresh, in parallel, each in its own checkout with its own code. It pairs the two versions case by case, so the
-difficulty a case has for both cancels out.
-
-The reason for running both fresh is that the service behind one model name can change over time. OpenAI describes
-the `system_fingerprint` of a response as "an identifier for the current combination of model weights,
-infrastructure, and other configuration options" and states that "Determinism is not guaranteed". In the author's
-runs with a dated snapshot, this fingerprint changed even between repeats of the same API call, and none of the 16
-values seen on one day reappeared among the 45 seen six days later. The fingerprint does not explain the noise: answers
-also differed between repeats with the same fingerprint. The mean score did not move over those six days, but the
-level of noise differed. A gate that compared today's candidate with a base recorded days earlier would mix such
-differences between days into the comparison; running both versions in the same window keeps them out.
-
-Planned: the runner alternates between the two versions case by case, so both meet the provider in the same moments as
-closely as possible. Not settled: whether the base's runs may be reused for a limited time when the model is dated
-(D-007, still proposed), which would halve the cost of a decision, together with a regular measurement of drift. The
-accepted decision on the planned interval (D-011) already assumes such a cached base, so the planned rule depends on
-the answer to D-007. For a model without a date, reuse is ruled out.
-
-### A pass speaks for these cases
-
-Design decision D-004. Decided; planned for stage C.
-
-A gate's verdict can claim "on these cases, the candidate is not worse by more than δ" or "on inputs like these, it
-will not be worse". The literature is split. Wang (2025, preprint) argues that measuring only the noise of answers
-"is not appropriate unless the goal is to memorize a specific set of questions". The planned rule takes the first claim
-anyway: a merge gate states something about the test set versioned in the repository, as a test suite does. Under the
-second claim, most of the uncertainty about a local edit comes from which cases happen to be in the set, and repeated
-runs do not reduce it; only more cases do. The planned report is to show an interval for similar inputs too, without
-the power to block, and the thesis checks how well verdicts carry over on held-out cases.
-
-### δ is the loss you accept
-
-Design decision D-004. Decided; planned for stage C.
-
-Today `delta` is a threshold on the difference between the two versions' mean scores, from one run of each case. In
-the planned rule, δ becomes a statement the team makes before it sees any results: the loss on these cases it accepts
-for this kind of change, such as a cheaper model or a shorter prompt. Non-inferiority trials in medicine set their margin the same way: "specified in
-advance" and "a matter of judgment" (FDA guidance, 2016). δ is not tuned to the noise. If the interval is too wide to
-decide against δ, the remedy is more runs or more cases, not a larger δ.
-
-A loss that is real but smaller than δ passes, with a visible warning. The EMA's guideline (2005) puts the same case
-this way: "If this outcome does not seem acceptable, this demonstrates that ∆ has not been chosen appropriately."
-
-### Three outcomes
-
-Design decision D-004. Decided; the three outcomes are planned for stage C, the extra runs for stage D.
-
-The rule compares an interval around the difference (candidate − base) with −δ. There were three options:
-
-- **Prove harm:** block only if the whole interval lies below −δ. With few runs the interval is wide and harm is rarely
-  shown, so the rule passes almost everything, including real regressions.
-- **Prove harmlessness:** pass only if the whole interval lies above −δ. With few runs the rule blocks almost
-  everything, including harmless changes.
-- **Three outcomes:** pass if harmlessness is shown, block if harm is shown, and otherwise answer "not sure yet".
-
-The choice is three outcomes. On "not sure yet" the planned gate runs more (the adaptive runner, planned for stage D),
-by a rule fixed in advance, up to a maximum number of runs. If it is still not sure at the maximum, the check stays red
-until a person approves the merge, and the comment shows the interval. Exit code 11
-([`inconclusive`](/docs/read-a-verdict#inconclusive)) is reserved for this outcome; today the gate uses it only when a pull
-request removes or renames a pipeline.
-
-Each part has a precedent. The CONSORT extension for non-inferiority trials (Piaggio et al., 2012) classifies some
-results as inconclusive. Netflix's sequential tests for canary releases (Lindon et al., 2022) reject, approximately
-accept, or keep collecting data. Reports from industry describe what false blocks cost: Meta's ServiceLab (Chow et al.,
-2024) writes that a high false positive rate "leads to engineers distrusting and ignoring the warnings even when they are
-correct". The strongest argument against: studies of performance regression testing in software engineering use the
-"prove harm" frame with a cap on false alarms measured on runs of an unchanged version (Laaber et al., 2019; Chow et
-al., 2024), and "not sure yet, ask a person" can turn into alarm fatigue of its own. Whether three outcomes save
-runs, no verified data says either way. The experiments will show how often the rule stays unsure at the run limit.
+- **Both versions run on the same cases, at the same time** (D-007, D-018, built; part open), so a case's difficulty
+  and changes in the service behind a model name cancel out. Reusing the base's runs for a dated model is open (D-007,
+  proposed; the accepted D-011 assumes it).
+- **A pass speaks for these cases** (D-004), as a test suite does, not for inputs like these.
+- **δ is the loss you accept** (D-004), specified in advance and not tuned to the noise.
+- **Three outcomes** (D-004): pass, block, or "not sure yet" and run more, as the figure below shows.
 
 <Fig id="method-2" caption={"With few runs the interval is wide. A rule that must prove harm then passes, a rule that must prove harmlessness blocks, and neither says it is guessing. The planned rule says \"not sure yet\" and runs more."} alt={"Four example intervals against the margin \u2212\u03b4. A narrow interval around 0, above \u2212\u03b4: all three rules pass. A narrow interval below \u2212\u03b4: all three block. A wide interval across \u2212\u03b4: 'prove harm' passes, 'prove harmlessness' blocks, the planned rule answers 'not sure yet' and runs more. A narrow interval between \u2212\u03b4 and 0: all pass; the planned rule adds a warning."} />
 
-### Intervals that stay valid when runs are added
-
-Design decision D-011. Decided in principle; the method is not chosen yet.
-
-The planned interval comes from the spread of repeated runs within each case, because the claim is about these cases.
-The new version needs at least two runs per case: one run cannot separate noise from the effect of the change. Because
-the gate is to add runs after it has seen the first ones, the interval has to stay valid under that; an interval built
-for a fixed number of runs and checked again after each addition would be wrong more often than it claims. Two families
-meet this: confidence sequences built by betting (Waudby-Smith and Ramdas), which hold at every number of runs, and
-group sequential designs with looks fixed in advance. The percentile
-bootstrap is ruled out because it covers too little on small samples (Hesterberg, 2015). The method will be chosen by
-simulation, with the selection rule written down before the simulation runs.
-
-Some tools reduce a case's repeated runs to one score per case: statgate's README says "Repeated runs of the same case
-(`run_index`) are averaged per case", and evalsig's verification notes say "only epoch 0 is used for inference". The
-planned rule uses the spread within each case instead.
-
-### An anchor against slow creep
-
-Design decision D-012. Decided; planned for stage C.
-
-Each pull request is compared with the current target branch. Five merges in a row, each a little worse but by less
-than δ, all pass, and together they lose five times as much. Non-inferiority trials in medicine know this as bio-creep
-(Everson-Stewart and Emerson, 2010); one recommendation is that "the best available treatment should be used as the
-standard" (Odem-Davis and Fleming, 2015). The options were a fixed anchor version, a budget of summed losses, a
-stricter test on every pull request, and a smaller δ. The choice is the anchor: each pull request is to be compared
-with a fixed earlier version as well, and to pass only if it is not worse than the anchor by more than an agreed loss
-either. Only a person moves the anchor, on purpose, and the comment is planned to show how much of the anchor's
-allowance is used.
-
-### Checks that break on their own
-
-Design decision D-003. Partly built; planned for stage C.
-
-A mean that holds can hide one check that broke on every run. A rule per check is built as a library function: Fisher's
-exact test on how many of K runs passed in each version, with a correction for the number of checks. It is not part of
-the verdict yet; which correction to use is open.
+- **Intervals that stay valid when runs are added** (D-011): from the spread of runs within each case, by a method a
+  simulation will choose.
+- **An anchor against slow creep** (D-012): each pull request is also compared with a fixed earlier version, so losses
+  smaller than δ cannot add up.
+- **Checks that break on their own** (D-003, partly built): a rule per check exists, outside the verdict.
 
 ## Planned experiments
 
-All of this section is planned for stage D. No results exist yet, and the site states no error rates until they do.
+Planned for stage D; no results yet.
 
-**Where the truth comes from.** To score a gate's verdict, the experiment must know the right answer for the change
-beforehand. The changes come from three sources:
-
-1. **The same version against itself (A/A).** The truth is "no difference". Any block is a false block.
-2. **Mutants.** A small deliberate break: one sentence removed from the policy, one number in the prompt shifted, a
-   tool's description spoiled, a smaller model. The truth is "worse on the cases listed in advance". A mutant counts as
-   caught only if the gate's decision blocks it at its K (runs per case) and δ.
-3. **Real and harmless engineering edits:** a reworded prompt, reordered sections, fixed typos, another model or SDK.
-   How their right answer is fixed is not decided yet. Proposed, not yet approved: treat even an edit meant to be
-   harmless as unknown, measure each edit once with many runs as a reference, and compare the gate at its usual number
-   of runs with that reference.
-
-Each edit is listed before its first run, with the cases that should see it. The evaluation focuses on edits that
-should not change behaviour. A deliberate change of behaviour, such as a new business rule, comes with updated cases in
-the same pull request, as a unit test changes with its specification.
-
-**Rules compared.** The naive rule (the baseline), the statistical rule, the statistical rule with adaptive extra runs,
-and the rules of existing tools as their documentation describes them. For the anchor, a chain of small losses over
-several merges, with and without the anchor.
-
-**Data.** Pools of recorded runs at several points of the range, from a single call to an agent in a chat: K runs of
-each of N cases, with the budget fixed before each pool. A simulator resamples cases together with their runs, so an
-experiment needs no model calls. A/A comparisons come from disjoint runs in the pool and from real A/A pull requests in
-CI. A held-out pool, recorded in a different calendar week, confirms the main results.
-
-**Measures.** The share of harmless changes blocked, the share of regressions missed (and of mutants caught), the share
-left "not sure yet" at the run limit, and the cost and time of one decision. The headline chart shows sensitivity
-against cost along the range.
-
-**Pre-registration.** Every experiment is written down before its data exist: question, design, analysis rule and
-threshold. Runs made without that are reported as exploratory.
+- **Where the truth comes from.** The same version against itself (A/A), where any block is a false block; mutants,
+  small deliberate breaks caught only if the gate blocks them; and real, harmless edits, whose right answer is not
+  decided yet.
+- **Rules compared.** The naive rule, the statistical rule with and without adaptive extra runs, and the rules of
+  existing tools.
+- **Data.** Recorded runs (K runs of each of N cases) from a single call to an agent in a chat, resampled by a
+  simulator without model calls. A held-out pool from a different calendar week confirms the main results.
+- **Measures.** Harmless changes blocked, regressions missed, decisions left "not sure yet" at the run limit, and the
+  cost and time of one decision.
+- **Pre-registration.** Every experiment is written down before its data exist.
 
 <Fig id="method-3" caption={"Planned. The same version twice and a deliberate break supply the right answer before the experiment: no difference, or a known break. For real and harmless edits, how the right answer is fixed is still open; a reference measured with many runs is proposed. The rules are scored against the right answer on recorded runs."} alt={"The planned evaluation takes three kinds of change: the same version twice, where the right answer is no difference; deliberate small breaks, where it is worse on cases listed in advance; and real and harmless edits, where how to fix the right answer is still open, with a reference measured once with many runs as the proposal. Their recorded runs feed a simulator that needs no model calls. Four kinds of rules decide on the simulated comparisons, and each is scored on false blocks, missed regressions, how often it stays unsure at the run limit, and the cost and time of a decision."} />
 
-## Still open
-
-These questions are not decided. The thesis will report how each was settled.
-
-- **The interval method** (D-011): chosen by simulation, with the selection rule written down first.
-- **Extra runs:** how many to add at each step, on which cases, and the maximum.
-- **Reusing the base's runs** for a dated model, with a drift measurement (D-007, proposed; the accepted D-011 assumes
-  a cached base).
-- **The right answer for real and harmless edits:** proposed, a reference measured once with many runs; not approved
-  yet, and it needs its own budget.
-- **How an agent's checks make one score** for the rule on the mean, and the margin for agents (D-015, proposed).
-- **The correction for many checks** in the rule per check (D-003).
-- **δ for each experiment:** fixed in its pre-registration, before its data exist.
+Also open: how many extra runs to add and the maximum, and how an agent's checks make one score (D-015, proposed).
 
 ## The thesis
 
-Bachelor thesis at the University of Vienna, Software Architecture group. Supervisor: Dr. Theodoros Theodoropoulos.
-The text is in progress and will be linked here when it is published. The gate's repository is private for now and
-opens with the public release.
+Bachelor thesis at the University of Vienna, Software Architecture group, supervised by Dr. Theodoros Theodoropoulos.
+The text will be linked here when published; the repository opens with the public release.
