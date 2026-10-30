@@ -104,11 +104,12 @@
       "minimum": 0
     },
     "prices": {
-      "description": "YAML of model: [input, output] USD per 1M tokens, relative to the project.",
+      "description": "A price file, relative to the project: model: [input, output] or [input, output, cached input], USD per 1M tokens.",
       "type": "string",
       "minLength": 1
     },
     "budgets": {
+      "description": "Limits for the candidate. A pipeline's own budgets replaces the top-level mapping as a whole.",
       "type": "object",
       "additionalProperties": false,
       "properties": {
@@ -123,7 +124,7 @@
           "exclusiveMinimum": 0
         },
         "latency_quantile": {
-          "description": "Default 0.95.",
+          "description": "Which quantile of the candidate's latencies latency_s limits (default 0.95).",
           "type": "number",
           "exclusiveMinimum": 0,
           "exclusiveMaximum": 1
