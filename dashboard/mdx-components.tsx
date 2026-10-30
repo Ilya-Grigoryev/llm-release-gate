@@ -4,6 +4,7 @@ import { isValidElement, type ComponentProps, type ReactNode } from "react";
 import { Callout } from "@/components/docs/callout";
 import { Code } from "@/components/docs/code";
 import { Fig } from "@/components/docs/figures";
+import { LanguageTabs, Tab } from "@/components/docs/language-tabs";
 import { H2, H3, Lead, Prose, Table, textOf } from "@/components/docs/prose";
 import { SchemaTable } from "@/components/docs/schema-table";
 import { Verdict } from "@/components/docs/verdict";
@@ -21,6 +22,7 @@ const LANGUAGE: Record<string, string> = {
   js: "JavaScript",
   javascript: "JavaScript",
   ts: "TypeScript",
+  go: "Go",
   markdown: "Markdown",
   md: "Markdown",
   text: "Text",
@@ -52,8 +54,10 @@ const components: MDXComponents = {
   a: A,
   Callout,
   Fig,
+  LanguageTabs,
   Lead,
   SchemaTable,
+  Tab,
   Verdict,
 };
 

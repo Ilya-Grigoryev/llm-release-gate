@@ -53,7 +53,7 @@ scoring:
     - {id: steps, kind: max_steps, max: 12}
 ```
 
-`state` compares the whole `state_change` your adapter reports, so an extra change, such as a refund, fails it. A run
+`state` compares the whole `state_change` your program reports, so an extra change, such as a refund, fails it. A run
 that cancels the booking and pays the €80 itself fails `state`, `did.1:hand_to_staff` and `no-big-refund`.
 
 An invoice reader uses `method: field_match` ([Get started](/docs/start#5-write-a-first-case)): a field expected as
@@ -154,7 +154,7 @@ input:
   request: inputs/cancel-for-other-customer.txt
   world: inputs/world.yaml
 expected:
-  state_change: {}          # nothing may change; write "no change" the way your adapter reports it
+  state_change: {}          # nothing may change; write "no change" the way your program reports it
 scoring:
   method: checks
   aggregate: all

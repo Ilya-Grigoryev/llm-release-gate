@@ -2,103 +2,23 @@ export const metadata = { title: "Connect your app" };
 
 # Connect your app
 
-The gate needs one thing from your application: a way to answer one test case. You give it that as a small Python
-adapter or as a program in any language that reads a JSON request and writes a JSON answer. Either way, the run can
-also report its steps, so checks can look at what an agent did. Terms: [Reference](/docs/reference#terms).
+The gate needs one thing from your application: a program that answers one test case. For each run the gate starts it,
+writes one JSON request to its stdin and reads one JSON answer from its stdout, so the program can be in any language.
+The answer can also report the run's steps, so checks can look at what an agent did. Terms:
+[Reference](/docs/reference#terms).
 
-## Two ways in
+[Get started](/docs/start#4-describe-the-version-and-connect-your-app) has a program for one model call in Python,
+Node.js and Go. This page covers agents and dialogs, with two made-up examples: a **booking assistant** (an agent with
+tools) in Python and a **support chat** (a dialog with a simulated customer) in Node.js.
 
-| | Python adapter | Any program |
-|---|---|---|
-| You write | a module with `build(config)`; its object answers `run(case)` | a program that reads one JSON request on stdin and writes one JSON answer on stdout |
-| The config says | `pipeline: my_app.gate_adapter` | `pipeline: command` and `command: [program, argument, ...]` |
-| Runs | inside the gate's runner process | as a new process for every run |
+<Fig id="connect-1" caption={"The gate's runner starts your program once per run. The program returns an answer and, if you want, a trace; the checks score them."} alt={"The gate's runner holds the cases. For each run it starts your program, which can be in any language, for example python gate/booking.py or node chat/gate.js, as a new process. The program gets a JSON request on stdin and writes a JSON answer on stdout; its exit code tells the gate whether to retry. The answer can carry the run's steps: model calls, tool calls and the end state. The answer and the trace go to the checks."} />
 
-Both give the gate an answer, optionally a trace, tokens and the model the provider reported. Either is code in your
-repository, so the gate runs the request's code with your provider key
-([Limits](/docs/limits#it-is-not-a-security-control)). The examples are made up: a **booking assistant** (an agent with
-tools) behind a Python adapter, and a **support chat** (a dialog with a simulated customer) as a Node program.
+## The program
 
-<Fig id="connect-1" caption={"Two ways to connect an application. Both return an answer and, if you want, a trace; the checks do not care which way it came."} alt={"The gate's runner reaches your application in one of two ways. A Python adapter is built once and then answers each case inside the runner's process, with wrapped clients recording its steps. Any other program is started once per run, gets a JSON request on stdin and writes a JSON answer, with an optional trace, on stdout; its exit code tells the gate whether to retry. Both ways produce the same answer and trace, which the checks score. A third way is planned: the Python adapter in its own worker process, speaking the same JSON protocol."} />
-
-## A Python adapter
-
-The gate imports the module named in `pipeline`, calls its `build(config)` once per version, then calls the returned
-object's `run(case)` once for every case and repetition.
-
-```yaml
-# configs/booking.yaml: the version in production
-pipeline: booking_assistant.gate_adapter  # the module with build(config)
-model: gpt-4.1-mini-2025-04-14
-prompt: ../prompts/policy.md
-input: request                            # the case input this version reads as the user's message
-params: {temperature: 0}
-timeout_s: 120                            # passed to the SDK below; the gate does not stop a Python run
-```
-
-```python
-# src/booking_assistant/gate_adapter.py
-"""The gate's view of the booking assistant: one request to the agent per case."""
-
-import time
-
-import openai
-from openai import OpenAI
-
-from llm_release_gate.pipeline import Answer, Fatal, Retryable
-
-from booking_assistant import agent
-from booking_assistant.world import World
-
-
-class Adapter:
-    def __init__(self, config):
-        self.config = config
-        self.policy = config.prompt.read_text()
-        # The gate retries and counts retries, so the SDK must not. The gate does not stop a slow Python run,
-        # so the SDK's timeout is the limit.
-        self.client = OpenAI(max_retries=0, timeout=config.timeout_s)
-
-    def run(self, case):
-        world = World.load(case.inputs["world"])  # a fresh copy of the booking system for this run
-        request = case.inputs[self.config.input].read_text()
-        start = time.perf_counter()
-        try:
-            result = agent.run(
-                self.client, world, self.policy, request, model=self.config.model, **self.config.params
-            )
-        except openai.RateLimitError as e:
-            if getattr(e, "code", None) == "insufficient_quota":
-                raise Fatal(str(e)) from e  # out of quota: no call can succeed, stop all runs of this version
-            raise Retryable(str(e)) from e  # rate limit: the same call may succeed later
-        except (openai.APIConnectionError, openai.InternalServerError) as e:
-            raise Retryable(str(e)) from e  # timeout, network, server error
-        except (openai.AuthenticationError, openai.NotFoundError) as e:
-            raise Fatal(str(e)) from e  # wrong key or model
-        return Answer(
-            output={"reply": result.reply},
-            raw=result.reply,
-            input_tokens=result.tokens_in,
-            output_tokens=result.tokens_out,
-            latency_s=time.perf_counter() - start,  # the whole case: the latency budget reads it
-            model=result.model,  # the model the provider reported
-        )
-
-
-def build(config):
-    return Adapter(config)
-```
-
-`agent` and `World` stand for your application's code. Do not read the case's `expected` or `scoring`: an adapter
-that sees the expected answer makes the test meaningless. Return an `Answer` whenever the application produced one,
-even a wrong one (`output=None` scores as a miss), and raise only when the run itself broke
-([Exit codes and timeouts](#exit-codes-and-timeouts)).
-
-## Any program
+The version's config names the program:
 
 ```yaml
 # configs/support.yaml
-pipeline: command
 command: [node, chat/gate.js]   # relative to where the runner starts: the project's directory on a pull request
 model: gpt-4.1-mini-2025-04-14
 prompt: ../prompts/support.md
@@ -126,10 +46,89 @@ In the answer only `output` is required:
 {"protocol": 1, "output": {"reply": "I have refunded the second payment, P-5531. Your refund reference is R-0412."}}
 ```
 
+Return an answer whenever the application produced one, even a wrong one (`"output": null` scores as a miss), and exit
+with an error code only when the run itself broke ([Exit codes and timeouts](#exit-codes-and-timeouts)).
 [Protocol](/docs/reference#protocol) lists every field. Stdout that is not JSON, or an answer that breaks
 `protocol.schema.json`, fails the run.
 
-### A full program
+### An agent in Python
+
+The booking assistant calls tools that change a booking system. Its program reports each model call and each tool call
+as a step, and the system's state at the end:
+
+```yaml
+# configs/booking.yaml: the version in production
+command: [python, gate/booking.py]
+model: gpt-4.1-mini-2025-04-14
+prompt: ../prompts/policy.md
+input: request          # the case input this version reads as the user's message
+params: {temperature: 0}
+timeout_s: 120
+```
+
+```python
+# gate/booking.py: the booking assistant under the gate, one request to the agent per run
+import json
+import sys
+from pathlib import Path
+
+import openai
+
+from booking_assistant import agent  # your application
+from booking_assistant.world import World
+
+request = json.load(sys.stdin)
+config, inputs = request["config"], request["case"]["inputs"]
+steps = []  # filled as the agent goes, so paid calls are kept even if it fails
+
+
+def model_step(r):  # the agent calls it after each model call
+    message = r.choices[0].message
+    steps.append({
+        "kind": "llm", "actor": "agent", "status": "ok", "model": r.model,
+        "tokens_in": r.usage.prompt_tokens, "tokens_out": r.usage.completion_tokens,
+        "cost_usd": None,  # the gate prices the step from its price file
+        "tool_calls": [
+            {"id": c.id, "name": c.function.name, "args": json.loads(c.function.arguments)}
+            for c in message.tool_calls or []
+        ],
+        "text": message.content,
+    })
+
+
+def tool_step(call_id, name, args, result):  # ... and after each tool call
+    steps.append({"kind": "tool", "actor": "agent", "call_id": call_id, "name": name, "args": args,
+                  "status": "ok", "result": result})
+
+
+def fail(code, error):
+    json.dump({"protocol": 1, "output": None, "trace": {"steps": steps, "stop": "error"}}, sys.stdout)
+    print(error, file=sys.stderr)  # the end of it goes into the run's error
+    sys.exit(code)
+
+
+world = World.load(inputs["world"])  # a fresh copy of the booking system for this run
+client = openai.OpenAI(max_retries=0)  # the gate retries, not the SDK
+try:
+    result = agent.run(
+        client, world, Path(config["prompt"]).read_text(), Path(inputs[config["input"]]).read_text(),
+        model=config["model"], on_model=model_step, on_tool=tool_step, **config["params"],
+    )
+except openai.RateLimitError as e:
+    fail(78 if e.code == "insufficient_quota" else 75, e)  # no quota: stop; rate limit: retry
+except (openai.APIConnectionError, openai.InternalServerError) as e:
+    fail(75, e)  # timeout, network, server error: retry this run
+except (openai.AuthenticationError, openai.PermissionDeniedError, openai.NotFoundError) as e:
+    fail(78, e)  # wrong key or model: stop all runs of the version
+
+trace = {"steps": steps, "final_state": world.state(), "state_change": world.changes(), "stop": result.stop}
+json.dump({"protocol": 1, "output": {"reply": result.reply}, "model": result.model, "trace": trace}, sys.stdout)
+```
+
+`agent` and `World` stand for your application's code: let it call `model_step` and `tool_step`. A bug in your own code
+ends the program with a traceback and exit 1, so the run fails and is not retried.
+
+### A dialog in Node.js
 
 The support chat plays a dialog with a simulated customer, records each model call as a step and maps its errors to
 exit codes:
@@ -193,22 +192,22 @@ pipeline gets `infra error`. Merge the package files first, or use
 
 ## Exit codes and timeouts
 
-| Python adapter | Program exits | What the gate does |
-|---|---|---|
-| returns | 0 | reads the answer |
-| raises `Retryable` | 75 | rate limit, timeout: retries after 1, 2, 4… seconds (at most 60), up to `max_retries` times |
-| raises `Fatal` | 78; 126, 127 from a shell in `command` | no quota, wrong key: stops all runs of this version |
-| raises any other exception | any other code | records the error, goes on with the other cases |
+| Program exits | What the gate does |
+|---|---|
+| 0 | reads the answer |
+| 75 | rate limit, timeout: retries after 1, 2, 4… seconds (at most 60), up to `max_retries` times |
+| 78; 126, 127 from a shell in `command` | no quota, wrong key: stops all runs of this version |
+| any other code | records the error, goes on with the other cases |
 
 A program the gate cannot start also stops all runs. A run with no answer after its retries gives the pipeline
 [`infra error`](/docs/read-a-verdict#infra-error) (exit 20), not a lower score, so return a wrong answer as an answer.
 
 `timeout_s` bounds a whole program: on timeout the gate kills its process group (POSIX only), loses that attempt's trace and
-retries the run like an exit 75; a child that leaves the group (`setsid`, `docker run`) survives. The gate does not stop a Python `run`:
-pass `config.timeout_s` to your SDK and turn off its retries (`max_retries=0`), so the gate counts every retry.
+retries the run like an exit 75; a child that leaves the group (`setsid`, `docker run`) survives. Turn off your SDK's
+own retries (`max_retries=0`), so the gate counts every retry.
 
-On a pull request up to eight runs go at once, four per version, so size shared resources for that. An adapter's
-`build` runs once: keep per-case state in `run`.
+On a pull request up to eight runs go at once, four per version, so size shared resources for that. Each run is a new
+process: nothing carries over from one case to the next.
 
 ## Traces
 
@@ -217,67 +216,35 @@ A trace is the list of steps in one run, with the state of the world at the end.
 (`agent`, `user`, `system`, `env`); trace checks look at `agent` steps unless a check names
 another `actor`. Fields: [`trace`](/docs/reference#trace).
 
-The gate prices every model step by its `model` name from the price file, whatever `cost_usd` it carries, so send
-`cost_usd: null`. An unknown model leaves the run without a cost, and with a cost budget the pipeline gets
-`infra error`.
+A program returns the trace in its answer, as both programs above do. The gate numbers the steps and keeps a trace
+printed before a failed exit, so paid calls count. A retried run keeps every attempt's steps: trace checks read the last
+attempt, the cost counts all.
 
-### Record a trace in a Python adapter
+- **Prices.** The gate prices every model step by its `model` name from the price file, whatever `cost_usd` it
+  carries, so send `cost_usd: null`. An unknown model leaves the run without a cost, and with a cost budget the
+  pipeline gets `infra error`.
+- **A simulated customer.** Its model calls are steps with `"actor": "user"`: never the agent's, but in the cost budget.
+- **Retrieval.** Documents your application found, for the `doc_found` check:
 
-The gate keeps one trace per run, current while `run` executes. Three changes to the adapter above record into it:
-
-```python
-from llm_release_gate import trace
-
-# in __init__: a model step for every chat.completions.create
-self.client = trace.openai_client(OpenAI(max_retries=0, timeout=config.timeout_s))
-
-# in run, after loading the world: a tool step for every world.call(name, args)
-world.call = trace.wrap_tool(world.call)
-
-# in run, before returning the answer: the end state, for the state check
-if (t := trace.current()) is not None:  # None outside the gate's runner
-    t.final_state = world.state()
-    t.state_change = world.changes()
-    t.stop = result.stop  # why the run ended: "done", "max_steps", ...
+```json
+{"kind": "retrieval", "actor": "agent", "query": "charged twice", "docs": [{"id": "kb-double-charge"}]}
 ```
-
-Only `chat.completions.create` is recorded; streamed calls, the Responses API, `parse` and raw responses are not.
-Unwrapped tools are rebuilt from the agent's `tool` messages, with status `unknown`.
-
-- **Other calls.** `trace.current().step(kind, actor, **fields)` adds a step by hand, such as an `llm` step for
-  another provider or a `retrieval` step (below). A step that breaks the format raises `ValueError`.
-- **A simulated customer.** `trace.openai_client(client, actor="user")` records its calls as `user` steps: never the
-  agent's, but in the cost budget.
-- **Threads your application starts.** Pass `trace=trace.current()` to `trace.openai_client` and `trace.wrap_tool`;
-  the trace belongs to the thread that runs the case.
-
-```python
-# documents your application retrieved, for the doc_found check (question, found: your search's query and results)
-if (t := trace.current()) is not None:
-    t.step("retrieval", "agent", query=question, docs=[{"id": d.id} for d in found])
-```
-
-### A trace from a program
-
-A program returns the trace in its answer, in the same format, as the full program above does. The gate numbers the
-steps and keeps a trace printed before a failed exit, so paid calls count. A retried run keeps every attempt's steps:
-trace checks read the last attempt, the cost counts all.
 
 <Fig id="connect-2" caption={"One run of the example support chat. The customer's steps are kept apart from the assistant's: trace checks read the assistant's, and the cost is counted per actor. Example numbers and prices."} alt={"The run has eight steps. The simulated customer opens: \"I was charged twice for order 1182.\" The assistant retrieves the help article kb-double-charge, then calls a model, which asks for the tool find_payments for order 1182; the tool returns two payments of 12.00 EUR, P-5530 and P-5531. A second model call asks for the tool refund_payment for P-5531, and the tool returns the refund reference R-0412. A third model call writes the answer with that reference. The customer closes the dialog. The assistant used 3 model calls, 2,635 input and 60 output tokens, $0.00115 at the example prices; the customer used 2 calls, 470 and 19 tokens, $0.00022. In the final state P-5531 is refunded, and the run stopped with \"done\"."} />
 
 ## Several pipelines in one gate.yaml
 
-List each LLM application, or part of one, under `pipelines`; adapters and programs can sit side by side:
+List each LLM application, or part of one, under `pipelines`; programs in different languages can sit side by side:
 
 ```yaml
 # gate.yaml
 prepare: [npm, ci]                 # readies both trees before their runs: the support chat needs its Node packages
 pipelines:
   invoice:
-    config: configs/invoice.yaml   # a Python adapter, one model call
+    config: configs/invoice.yaml   # a Python program, one model call
     golden: golden/invoices
   booking:
-    config: configs/booking.yaml   # a Python adapter, an agent with tools
+    config: configs/booking.yaml   # a Python program, an agent with tools
     golden: golden/booking
     budgets: {cost_per_run_usd: 0.05}  # replaces the top-level budgets for this pipeline
   support:
@@ -325,10 +292,9 @@ The last line reports how many runs answered and their mean score:
 ```
 
 Each line of `runs/try.jsonl` is one run: answer, trace, tokens per actor and check results. A run with
-`"trace": null` recorded no steps: check the wrappers.
+`"trace": null` recorded no steps: check that the program puts `trace` in its answer.
 
 ## Planned
 
-The adapter will run in its own worker process, speaking the same JSON protocol; the action will install the gate, so
-a project without Python needs no `pyproject.toml`; a local proxy will record OpenAI API calls as `llm` steps in any
-language.
+The action will install the gate, so a project without Python needs no `pyproject.toml`. A local proxy will record
+OpenAI API calls as `llm` steps, so a program will not have to report them itself.

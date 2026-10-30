@@ -42,7 +42,7 @@ export function Tabs({ label, items, initial = 0 }: { label: string; items: TabI
             aria-controls={`${id}-panel-${i}`}
             tabIndex={i === active ? 0 : -1}
             onClick={() => setActive(i)}
-            className={`relative shrink-0 px-3 py-2.5 text-base whitespace-nowrap focus-visible:-outline-offset-2 ${
+            className={`relative shrink-0 cursor-pointer px-3 py-2.5 text-base whitespace-nowrap focus-visible:-outline-offset-2 ${
               i === active ? "text-ink after:absolute after:inset-x-3 after:bottom-0 after:h-0.5 after:bg-ink" : "text-ink-2 hover:text-ink"
             }`}
           >

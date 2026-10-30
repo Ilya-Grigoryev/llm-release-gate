@@ -157,5 +157,5 @@ scoring:
 ```
 
 `uv run llm-release-gate golden validate golden/invoices` imports the function and checks that it can be called. The
-module must belong to an installed package ([Get started](/docs/start#option-a-a-python-adapter)); a loose `checks/`
-folder at the repository root fails with `ModuleNotFoundError`.
+module must belong to your project's installed package: give `pyproject.toml` a `[build-system]` table, as
+`uv init --package` writes it. A loose `checks/` folder at the repository root fails with `ModuleNotFoundError`.

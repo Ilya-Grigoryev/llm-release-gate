@@ -20,9 +20,9 @@ sure yet" (exit 11) and adds its interval and seed to the verdict.
   in the request.
 - **Case, check, run**: a case is one test, its inputs and expected values; its checks score an answer from 0 to 1; a
   run is one version handling one case once, `k` times per case.
-- **Runner, adapter, the action**: the runner (`llm-release-gate run`) makes one version's runs through an adapter (a
-  Python module) or a program ([Connect your app](/docs/connect)). The action is the GitHub Action that runs `pr` and
-  `comment` for one pipeline.
+- **Runner, program, the action**: the runner (`llm-release-gate run`) makes one version's runs; for each it starts
+  the program the version's config names ([Connect your app](/docs/connect)). The action is the GitHub Action that runs
+  `pr` and `comment` for one pipeline.
 
 ## gate.yaml
 
@@ -91,8 +91,7 @@ What the schema does not say:
 A YAML file per version, checked when the gate loads it. `run` reads the nearest `gate.yaml` above it.
 
 ```yaml
-# configs/booking.yaml: the booking assistant (example), a program in another language
-pipeline: command
+# configs/booking.yaml: the booking assistant (example)
 command: [node, agent.js]
 model: gpt-5.4-mini-2026-03-17
 prompt: {system: ../prompts/system.md, summary: ../prompts/summary.md}
@@ -103,14 +102,13 @@ timeout_s: 120
 
 | Key | Required | Meaning |
 |---|---|---|
-| `pipeline` | yes | the import path of a Python module with `build(config)`, or `command` |
-| `command` | with `pipeline: command` | the program and its arguments, as a list, from the runner's working directory |
+| `command` | yes | the program that answers a case and its arguments, as a list, from the runner's working directory |
 | `model` | yes | prefer a dated snapshot ([why](/docs/how-it-decides#where-the-bases-runs-come-from)) |
 | `prompt` | yes | a file, or name → file, relative to the config |
 | `input` | yes | the case input this version reads |
 | `params` | no | API parameters, passed on; a whole float becomes an integer |
-| `max_retries` | no, default 5 | retries after `Retryable`, exit 75 or a timeout; backoff 1, 2, 4… s, at most 60 s |
-| `timeout_s` | no, default 60 | seconds before a program is killed and the run retried; a Python adapter only receives it |
+| `max_retries` | no, default 5 | retries after exit 75 or a timeout; backoff 1, 2, 4… s, at most 60 s |
+| `timeout_s` | no, default 60 | seconds before the program is killed and the run retried |
 
 The version's hash covers every key (key order, formatting and `0` versus `0.0` do not change that part), the prompts'
 bytes and the code git tracks. The config file is tracked by git, so it counts as code too: reordering its keys still
@@ -226,8 +224,8 @@ each (`id.FIELD`, `id.N:tool`). Ids are unique, and none may start with another 
 
 ## Protocol
 
-For `pipeline: command`. For each run the gate starts the program in the runner's working directory, writes one JSON
-request to its stdin and closes it, then reads one JSON answer from its stdout; logs go to stderr. Protocol version 1,
+For each run the gate starts the program in the runner's working directory, writes one JSON request to its stdin and
+closes it, then reads one JSON answer from its stdout; logs go to stderr. Protocol version 1,
 checked against `protocol.schema.json` ([Connect your app](/docs/connect)).
 
 The request for `late-cancel` under `configs/booking.yaml`:
@@ -283,6 +281,10 @@ Only `output` is required.
 | `raw` | any | the model's text; other values are kept as JSON. Default: `output` as JSON |
 | `input_tokens`, `output_tokens` | whole number ≥ 0 | default 0; model steps in the trace are priced instead |
 | `model` | string or `null` | the model the provider reported; with neither this nor model steps the run stays unpriced |
+| `fingerprint` | string or `null` | the provider's mark of the system that answered, such as OpenAI's `system_fingerprint`: a change between runs can explain drift |
+| `finish_reason` | string or `null` | why the model stopped, as the provider says it |
+| `request_id` | string or `null` | the provider's id of the call |
+| `reasoning_tokens` | whole number ≥ 0 | default 0 |
 | `trace` | object or `null` | the run's steps and end state, below |
 | `protocol` | `1` | any other value stops the whole run and loses that answer's trace |
 
@@ -472,7 +474,7 @@ On a pull request from a fork the action runs nothing and its step exits 1 as `n
 
 | Command | 0 | 1 | 2 |
 |---|---|---|---|
-| `run` | every run is done | some runs are not done, the account stopped the run (`Fatal`, exit 78, 126, 127), or the config, set or price file is broken | usage error |
+| `run` | every run is done | some runs are not done, the program stopped the run (exit 78, 126, 127), or the config, set or price file is broken | usage error |
 | `golden validate` | the set is valid (and matches the manifest) | it is not | usage error |
 | `comment` | posted, or with `--check`: can comment | cannot comment | usage error |
 

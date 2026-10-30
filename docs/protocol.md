@@ -9,7 +9,6 @@ Version 1. The gate talks to an application in any language through one JSON req
 Name the program in the version's config:
 
 ```yaml
-pipeline: command
 command: [node, agent.js]
 model: gpt-5.4-mini-2026-03-17
 prompt: prompts/system.md
@@ -73,6 +72,10 @@ Only `output` is required.
 | `raw` | the model's text; any other value is kept as JSON. Default: `output` as JSON |
 | `input_tokens`, `output_tokens` | whole numbers ≥ 0, default 0. When the trace has model steps, the gate prices those instead |
 | `model` | the model the provider reported. A run with neither `model` nor model steps stays unpriced |
+| `fingerprint` | the provider's mark of the system that answered, such as OpenAI's `system_fingerprint`: a change between runs can explain drift |
+| `finish_reason` | why the model stopped, as the provider says it |
+| `request_id` | the provider's id of the call |
+| `reasoning_tokens` | a whole number ≥ 0, default 0 |
 | `trace` | the run's steps and end state, below |
 | `protocol` | optional; another version stops the whole run, and the gate keeps none of that answer's trace |
 

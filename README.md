@@ -16,17 +16,26 @@ Work in progress. Built: the naive gate (one run per version against a fixed thr
 
 ## Your pipeline
 
-The gate runs any Python module with a `build(config)` function. `build` returns an object whose `run(case)` gives back an `Answer` (`src/llm_release_gate/pipeline.py`): the parsed output, the raw text, tokens, latency and the model the provider reported. Raise `Retryable` when the same call may succeed later (rate limit, timeout) and `Fatal` when no call can (out of quota, wrong key).
-
-Name the module by its import path in the config of each version:
+Your application answers the gate's cases as a program, in any language. Name it in the config of each version:
 
 ```yaml
-pipeline: my_app.gate_adapter   # installed, or importable from where you run the gate
-model: gpt-4.1-mini-2025-04-14  # a dated snapshot if there is one
-prompt: prompts/extract.md      # relative to this file, or named files: {extract: a.md, check: b.md}
+command: [python, gate/extract.py]  # from where the gate runs: the project's root on a pull request
+model: gpt-4.1-mini-2025-04-14      # a dated snapshot if there is one
+prompt: prompts/extract.md          # relative to this file, or named files: {extract: a.md, check: b.md}
 input: text
 params: {temperature: 0}
 ```
+
+For each run the gate writes one JSON request to the program's stdin: the case's id and input paths and the version's
+model, prompt and params, never the expected values. It reads one JSON answer from stdout: `output`, optionally tokens,
+the model, the provider's fingerprint and request id, and a trace. Exit 75 retries the run; 78, 126 and 127 stop the
+whole run; any other non-zero code fails it. [docs/protocol.md](docs/protocol.md) has every field, the trace steps and
+the exit codes; [`protocol.schema.json`](src/llm_release_gate/protocol.schema.json) is the schema the gate checks each
+answer against. The site's Get started page shows one program in Python, Node.js and Go
+(`dashboard/app/docs/start/page.mdx`); `tests/test_examples.py` runs all three against a fake provider.
+
+`command` is part of the version and its hash, and the program's code is part of the version as any code of the
+project is ([Running a version](#running-a-version)).
 
 Prefer a dated snapshot. A name without a date (`gpt-6-luna`) works, but the provider may change the model behind it,
 so the gate takes three precautions: every record keeps the requested model next to the one the provider reports and the
@@ -34,70 +43,40 @@ time, the gate's comment warns about it, and the gate refuses to compare two ver
 pause longer than an hour, or that asked for the same model and got different ones from the provider (or runs that do
 not say which one they got: report `model`).
 
-The gate's code imports no pipeline. [receipt-intake](https://github.com/Ilya-Grigoryev/receipt-intake) is a whole project set up this way.
-
-### Any program
-
-An application in another language needs no Python adapter. Name the program in the config:
-
-```yaml
-pipeline: command
-command: [node, agent.js]
-model: gpt-5.4-mini-2026-03-17
-prompt: prompts/system.md
-input: text
-```
-
-For each run the gate writes one JSON request to the program's stdin: the case's id and input paths and the version's
-model, prompt and params, never the expected values. It reads one JSON answer from stdout: `output`, optionally tokens,
-the model and a trace. Exit 75 retries the run; 78, 126 and 127 stop the whole run; any other non-zero code fails it.
-[docs/protocol.md](docs/protocol.md) has every field, the trace steps, the exit codes and an example in Node;
-[`protocol.schema.json`](src/llm_release_gate/protocol.schema.json) is the schema the gate checks each answer against.
-
-`command` is part of the version and its hash, and the program's code is part of the version as any code of the
-project is ([Running a version](#running-a-version)).
+The gate's code imports no application. [receipt-intake](https://github.com/Ilya-Grigoryev/receipt-intake) is a whole project set up this way.
 
 ## Traces
 
-A tool-using agent makes many calls per case. The runner keeps a trace for each run, and your adapter records into it
-without touching your application:
+A tool-using agent makes many calls per case. Its program reports them in the answer's `trace`, a step per model call,
+tool call, message or retrieval, with the world's state at the end:
 
-```python
-from llm_release_gate import trace
-
-
-class Adapter:
-    def __init__(self, config):
-        self.client = trace.openai_client(OpenAI())  # a step per model call
-
-    def run(self, case):
-        world = load_world(case)
-        world.call = trace.wrap_tool(world.call)  # a step per tool call
-        reply = my_agent(self.client, world, case)
-        if (t := trace.current()) is not None:  # None outside the runner
-            t.final_state, t.state_change, t.stop = world.state(), world.diff(), "done"
-        return Answer(...)
+```json
+{"output": {"balance": 5},
+ "trace": {"steps": [
+   {"kind": "llm", "actor": "agent", "status": "ok", "model": "gpt-4.1-mini-2025-04-14",
+    "tokens_in": 100, "tokens_out": 10, "cost_usd": null, "tool_calls": [{"id": "c1", "name": "add", "args": {"amount": 5}}]},
+   {"kind": "tool", "actor": "agent", "call_id": "c1", "name": "add", "args": {"amount": 5}, "status": "ok",
+    "result": {"balance": 5}}],
+  "final_state": {"balance": 5}, "state_change": {"balance": 5}, "stop": "done"}}
 ```
 
 Each step has a kind (`llm`, `tool`, `message`, `retrieval`) and an actor (`agent`, `user`, `system`, `env`);
-[docs/protocol.md](docs/protocol.md#trace) lists the fields of each. A model step holds the model the API reported, tokens, cost, the finish reason and the new output; a tool step holds the name, the
-arguments, a status and the result or error. Wrap a user simulator's client with `actor="user"` to keep its cost apart from
-the agent's. Record what the wrappers cannot see with `trace.current().step(kind, actor, ...)`. Tool calls you do not wrap
-are rebuilt from the `tool` messages your agent sends back, with status `unknown`. Only `chat.completions.create` is
-recorded: a streamed call leaves a note in the trace, and other methods (Responses API, `parse`, raw responses) pass
-through unrecorded. The current trace
-belongs to the thread that runs the case; give `trace=` to the wrappers for calls from threads your application starts.
+[docs/protocol.md](docs/protocol.md#trace) lists the fields of each. A model step holds the model the API reported,
+tokens, the finish reason and the new output; a tool step holds the name, the arguments, a status and the result or
+error. A user simulator's model calls carry `"actor": "user"`, which keeps their cost apart from the agent's. The gate
+prices model steps from its price table, so send `cost_usd: null`.
 
-The record gets the trace, tokens and cost per actor (`usage`) and the wall-clock time (`wall_s`). A run that fails halfway
-keeps the steps it paid for. A run the runner retries keeps every attempt's steps under `run_attempt`; checks look at the
-last attempt, the cost counts all of them. A run stopped by a `Fatal` error is written too when it paid for steps. `wall_s` includes the
-runner's backoff between attempts. A pipeline that records nothing writes `trace: null`, as before.
+The record gets the trace, tokens and cost per actor (`usage`) and the wall-clock time (`wall_s`). A program that prints
+its trace before a failed exit keeps the steps it paid for. A run the runner retries keeps every attempt's steps under
+`run_attempt`; checks look at the last attempt, the cost counts all of them. A run stopped by exit 78 is written too when
+it paid for steps. `wall_s` includes the runner's backoff between attempts. A program that reports no trace writes
+`trace: null`.
 
 ## Running a version
 
-Each pipeline version is a YAML file: pipeline module, model (a dated snapshot if there is one), prompt file (or named prompt files for a pipeline with several steps), input, API parameters and, optionally, `max_retries` (default 5) and `timeout_s` (default 60). Its hash covers every field and the bytes of each prompt; key order, YAML formatting and `0` versus `0.0` do not change it. A version is its config, the bytes of its prompts and the repository's code: every file git tracks, by the id git gives its content (uncommitted edits count; Git LFS, line endings and links read alike in every checkout), but documentation (`README`, `CHANGELOG`, `CONTRIBUTING`, `LICENSE`, bare or as `.md`, `.rst`, `.txt`, `.adoc`, in any case; `docs/`), CI (`.github/`), `gate.yaml` and the price files it names, the paths in its `ignore`, its test sets and the files of its other pipelines (so code that reads another pipeline's prompt does not see it change). A code change gives a new version by itself, in a monorepo a change to shared code or the root lock file too; a change to the README does not. Untracked files (run records, data) do not count, so writing results never changes the version; a run record you commit does. Each record carries the commit too, with `+dirty` for uncommitted edits. A test set that `gate.yaml` does not name is code: name it, or put it in `ignore`.
+Each pipeline version is a YAML file: the program (`command`), model (a dated snapshot if there is one), prompt file (or named prompt files for a pipeline with several steps), input, API parameters and, optionally, `max_retries` (default 5) and `timeout_s` (default 60). Its hash covers every field and the bytes of each prompt; key order, YAML formatting and `0` versus `0.0` do not change it. A version is its config, the bytes of its prompts and the repository's code: every file git tracks, by the id git gives its content (uncommitted edits count; Git LFS, line endings and links read alike in every checkout), but documentation (`README`, `CHANGELOG`, `CONTRIBUTING`, `LICENSE`, bare or as `.md`, `.rst`, `.txt`, `.adoc`, in any case; `docs/`), CI (`.github/`), `gate.yaml` and the price files it names, the paths in its `ignore`, its test sets and the files of its other pipelines (so code that reads another pipeline's prompt does not see it change). A code change gives a new version by itself, in a monorepo a change to shared code or the root lock file too; a change to the README does not. Untracked files (run records, data) do not count, so writing results never changes the version; a run record you commit does. Each record carries the commit too, with `+dirty` for uncommitted edits. A test set that `gate.yaml` does not name is code: name it, or put it in `ignore`.
 
-The runner calls the pipeline K times per case of a golden set and appends one JSON record per call, stamped with the version's hash (`config_hash`), the set hash and the scorer version. A rerun pays only for what is missing. The runner retries rate limits, timeouts and server errors with backoff 1, 2, 4... s and stops when the account is out of quota. `--prices` puts a list price on each model step of a trace; the raw provider responses go to `<stem>.native.jsonl`.
+The runner runs the program K times per case of a golden set and appends one JSON record per call, stamped with the version's hash (`config_hash`), the set hash and the scorer version. A rerun pays only for what is missing. The runner retries rate limits, timeouts and server errors with backoff 1, 2, 4... s and stops when the account is out of quota. `--prices` prices the model steps in each record's `usage`. `<stem>.native.jsonl` is kept for raw provider responses, which nothing records yet.
 
 ```sh
 # in receipt-intake: the scan version on its golden set, 3 runs per receipt
@@ -176,8 +155,8 @@ A check compares against its own `value` or against the case's expected value at
    [tool.uv.sources]
    llm-release-gate = { git = "https://github.com/Ilya-Grigoryev/llm-release-gate", tag = "v0.1.0-dev.11" }
    ```
-2. Write an adapter (`build(config)` and `run(case)`, [Your pipeline](#your-pipeline)) or a program
-   ([Any program](#any-program)), a config for the version in production and a golden set.
+2. Write a program that answers one case ([Your pipeline](#your-pipeline)), a config for the version in production and
+   a golden set.
 3. Say what to gate in `gate.yaml` at the project's root:
    ```yaml
    pipelines:

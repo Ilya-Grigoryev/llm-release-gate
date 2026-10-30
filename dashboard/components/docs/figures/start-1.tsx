@@ -11,22 +11,21 @@ const STEP: Record<number, string> = {
   6: "6-add-the-gate-to-your-workflow",
 };
 
-type Row = { name: string; depth?: number; step?: number; edited?: boolean; note?: ReactNode; kept?: boolean };
+type Row = { name: string; depth?: number; step?: number; edited?: boolean; note?: ReactNode };
 
 const TREE: Row[] = [
   { name: ".github/workflows/" },
   { name: "release-gate.yml", depth: 1, step: 6 },
   { name: "configs/" },
   { name: "invoice.yaml", depth: 1, step: 4 },
+  { name: "gate/" },
+  { name: "extract.py", depth: 1, step: 4, note: <>or <code className="font-mono">extract.mjs</code>, <code className="font-mono">extract.go</code></> },
   { name: "golden/invoices/" },
   { name: "inputs/", depth: 1 },
   { name: "inv-001.txt", depth: 2, step: 5 },
   { name: "inv-001.yaml", depth: 1, step: 5 },
   { name: "prompts/" },
   { name: "extract.md", depth: 1, step: 4 },
-  { name: "src/invoice_reader/" },
-  { name: "__init__.py", depth: 1, kept: true, note: "already there" },
-  { name: "gate_adapter.py", depth: 1, step: 4 },
   { name: ".gitignore", step: 5, edited: true, note: <>adds <code className="font-mono">.env</code> and <code className="font-mono">runs/</code></> },
   { name: "gate.yaml", step: 3 },
   { name: "pyproject.toml", step: 2, edited: true },
@@ -48,12 +47,12 @@ function StepNo({ step }: { step: number }) {
 }
 
 function Line({ row }: { row: Row }) {
-  const name = <span className={`font-mono text-sm break-all ${row.kept ? "text-ink-3" : row.step ? "text-ink" : "text-ink-2"}`}>{row.name}</span>;
+  const name = <span className={`font-mono text-sm break-all ${row.step ? "text-ink" : "text-ink-2"}`}>{row.name}</span>;
   const body = (
     <>
       <span className="min-w-0">
         {name}
-        {row.note && <span className={`block text-sm leading-snug ${row.kept ? "text-ink-3" : "text-ink-2"}`}>{row.note}</span>}
+        {row.note && <span className="block text-sm leading-snug text-ink-2">{row.note}</span>}
       </span>
       {row.step && (
         <span className="flex shrink-0 items-center gap-2 text-sm text-ink-2">

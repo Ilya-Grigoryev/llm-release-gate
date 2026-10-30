@@ -17,7 +17,7 @@ end with a check on your machine, so mistakes show up before CI.
 The examples use a made-up **invoice reader**: one model call reads the vendor, the date and the total from an invoice.
 [Reference](/docs/reference#terms) defines the terms.
 
-<Fig id="start-1" caption={"Seven new files, three edited ones and two secrets. The numbers are the steps below."} alt={"The setup does this, by step: 1, adds the secret `LLM_RELEASE_GATE_KEY`; 2, edits `pyproject.toml` and `uv.lock` to add the gate as a dependency; 3, adds `gate.yaml`; 4, adds the version's config `configs/invoice.yaml`, its prompt `prompts/extract.md` and an adapter `src/invoice_reader/gate_adapter.py`; 5, adds a first case `golden/invoices/inv-001.yaml` with its input file `golden/invoices/inputs/inv-001.txt`, and adds the lines `.env` and `runs/` to `.gitignore`; 6, adds the workflow `.github/workflows/release-gate.yml` and the secret `OPENAI_API_KEY`."} />
+<Fig id="start-1" caption={"Seven new files, three edited ones and two secrets. The numbers are the steps below."} alt={"The setup does this, by step: 1, adds the secret `LLM_RELEASE_GATE_KEY`; 2, edits `pyproject.toml` and `uv.lock` to add the gate as a dependency; 3, adds `gate.yaml`; 4, adds the version's config `configs/invoice.yaml`, its prompt `prompts/extract.md` and the program that answers a case, `gate/extract.py` (or `.mjs`, `.go`); 5, adds a first case `golden/invoices/inv-001.yaml` with its input file `golden/invoices/inputs/inv-001.txt`, and adds the lines `.env` and `runs/` to `.gitignore`; 6, adds the workflow `.github/workflows/release-gate.yml` and the secret `OPENAI_API_KEY`."} />
 
 ## 1. Get access while the gate is private
 
@@ -96,127 +96,312 @@ config or your code; [step 5](#5-write-a-first-case) does.
 
 ## 4. Describe the version and connect your app
 
-The version's config says which code runs, with which model, prompt and parameters:
+Your app answers the gate's test cases as a program. For each run the gate starts it, writes one JSON request to its
+stdin and reads one JSON answer from its stdout. The request names the case's input file and the version's model, prompt
+and parameters; the answer's `output` is what the case's checks score.
 
-```yaml
-# configs/invoice.yaml: the version in production
-pipeline: invoice_reader.gate_adapter  # the module with build(config)
-model: gpt-4.1-mini-2025-04-14         # a dated snapshot
-prompt: ../prompts/extract.md          # relative to this file
-input: text                            # which input of a case this version reads
-params: {temperature: 0}
-```
-
-The prompt, `prompts/extract.md`:
+The version's config names the program and says which model, prompt and parameters it runs with. The prompt,
+`prompts/extract.md`:
 
 ```text
 Read the invoice below. Answer in JSON with the keys vendor, date and total, copied as they appear on the invoice.
 Use null for a value the invoice does not show.
 ```
 
-Prefer a model name with a date: for a name without one, the gate warns and in some cases refuses to compare. The
-version is this config, the bytes of its prompts and the repository's code as git sees it ([What a version
-is](/docs/how-it-works#what-a-version-is)).
+The config and the program, in your language:
 
-### Option A: a Python adapter
-
-The gate imports the module named in `pipeline` and calls its `build(config)`; the object it returns answers one case
-with `run(case)`. Put the module inside your package, and make the project installable with a `[build-system]` table in
-`pyproject.toml`, as `uv init --package` writes it; without one, step 5 stops with `ModuleNotFoundError`.
-
-```python
-# src/invoice_reader/gate_adapter.py
-"""The gate's view of the invoice reader: one model call per case."""
-
-import json
-import time
-
-import openai
-from openai import OpenAI
-
-from llm_release_gate.pipeline import Answer, Fatal, Retryable
-
-
-class InvoiceReader:
-    def __init__(self, config):
-        self.config = config
-        self.prompt = config.prompt.read_text()
-        self.client = OpenAI(max_retries=0, timeout=config.timeout_s)  # the gate retries, not the SDK
-
-    def run(self, case):
-        text = case.inputs[self.config.input].read_text()
-        start = time.perf_counter()
-        try:
-            r = self.client.chat.completions.create(
-                model=self.config.model,
-                messages=[
-                    {"role": "system", "content": self.prompt},
-                    {"role": "user", "content": text},
-                ],
-                response_format={"type": "json_object"},
-                **self.config.params,
-            )
-        except openai.RateLimitError as e:
-            if getattr(e, "code", None) == "insufficient_quota":
-                raise Fatal(str(e)) from e  # no call can succeed: stop all runs of the version
-            raise Retryable(str(e)) from e
-        except (openai.APIConnectionError, openai.InternalServerError) as e:
-            raise Retryable(str(e)) from e  # the same call may succeed later
-        except (openai.AuthenticationError, openai.NotFoundError) as e:
-            raise Fatal(str(e)) from e  # wrong key or model
-        raw = r.choices[0].message.content or ""
-        try:
-            output = json.loads(raw)
-        except json.JSONDecodeError:
-            output = None  # no answer: every field scores as wrong
-        return Answer(
-            output=output,
-            raw=raw,
-            input_tokens=r.usage.prompt_tokens,
-            output_tokens=r.usage.completion_tokens,
-            latency_s=time.perf_counter() - start,
-            model=r.model,  # the model the provider reports
-        )
-
-
-def build(config):
-    return InvoiceReader(config)
-```
-
-If your application already has this code, call it from `run` with the config's model, prompt and `params`. `Retryable`
-makes the gate retry with backoff; `Fatal` stops all runs of the version. [Connect your app](/docs/connect) covers
-agents and traces.
-
-### Option B: any program
-
-An application in another language names its program in the config:
+<LanguageTabs>
+<Tab label="Python">
 
 ```yaml
-# configs/invoice.yaml
-pipeline: command
-command: [node, extract.js]   # relative to where the gate runs: the project's directory in CI
-model: gpt-4.1-mini-2025-04-14
-prompt: ../prompts/extract.md
-input: text
+# configs/invoice.yaml: the version in production
+command: [python, gate/extract.py]  # run from the project's root
+model: gpt-4.1-mini-2025-04-14      # a dated snapshot
+prompt: ../prompts/extract.md       # relative to this file
+input: text                         # which input of a case this version reads
 params: {temperature: 0}
 ```
 
-For each run the gate writes one JSON request to the program's stdin and reads one JSON answer from its stdout:
+```python
+# gate/extract.py: one request in, one model call, one answer out
+import json
+import sys
+from pathlib import Path
 
-```js
-// extract.js: one request in, one answer out
-let input = "";
-process.stdin.on("data", (chunk) => (input += chunk));
-process.stdin.on("end", async () => {
-  const request = JSON.parse(input);
-  const text = require("fs").readFileSync(request.case.inputs.text, "utf8");
-  const answer = await readInvoice(text, request.config); // your application's code
-  process.stdout.write(JSON.stringify({ protocol: 1, output: answer }));
-});
+import openai
+
+request = json.load(sys.stdin)
+config = request["config"]
+invoice = Path(request["case"]["inputs"][config["input"]]).read_text()
+prompt = Path(config["prompt"]).read_text()
+
+
+def fail(code, error):
+    print(error, file=sys.stderr)  # the gate keeps it with the run
+    sys.exit(code)
+
+
+client = openai.OpenAI(max_retries=0)  # the gate retries, not the SDK
+try:
+    r = client.chat.completions.create(
+        model=config["model"],
+        messages=[
+            {"role": "system", "content": prompt},
+            {"role": "user", "content": invoice},
+        ],
+        response_format={"type": "json_object"},
+        **config["params"],
+    )
+except openai.RateLimitError as e:
+    fail(78 if e.code == "insufficient_quota" else 75, e)  # no quota: stop; rate limit: retry
+except (openai.APIConnectionError, openai.InternalServerError) as e:
+    fail(75, e)  # timeout, network, server error: retry this run
+except (openai.AuthenticationError, openai.PermissionDeniedError, openai.NotFoundError) as e:
+    fail(78, e)  # wrong key or model: stop all runs of the version
+
+raw = r.choices[0].message.content or ""
+try:
+    output = json.loads(raw)
+except json.JSONDecodeError:
+    output = None  # no answer: every field scores as wrong
+json.dump(
+    {
+        "protocol": 1,
+        "output": output,
+        "raw": raw,
+        "input_tokens": r.usage.prompt_tokens,
+        "output_tokens": r.usage.completion_tokens,
+        "model": r.model,  # the model the provider reports
+        "fingerprint": r.system_fingerprint,
+        "finish_reason": r.choices[0].finish_reason,
+        "request_id": r.id,
+    },
+    sys.stdout,
+)
 ```
 
-Only `output` is required in the answer. Exit with 75 to retry the run and with 78 to stop all runs of the version.
-[Reference](/docs/reference#protocol) has every field.
+The gate runs inside `uv run`, so `python` is your project's interpreter: add `openai` to its dependencies.
+
+</Tab>
+<Tab label="Node.js">
+
+```yaml
+# configs/invoice.yaml: the version in production
+command: [node, gate/extract.mjs]  # run from the project's root
+model: gpt-4.1-mini-2025-04-14     # a dated snapshot
+prompt: ../prompts/extract.md      # relative to this file
+input: text                        # which input of a case this version reads
+params: {temperature: 0}
+```
+
+```js
+// gate/extract.mjs: one request in, one model call, one answer out
+import { readFileSync } from "node:fs";
+
+const request = JSON.parse(readFileSync(0, "utf8")); // stdin
+const { config } = request;
+const invoice = readFileSync(request.case.inputs[config.input], "utf8");
+const prompt = readFileSync(config.prompt, "utf8");
+
+function fail(code, error) {
+  console.error(error); // the gate keeps it with the run
+  process.exit(code);
+}
+
+const base = process.env.OPENAI_BASE_URL ?? "https://api.openai.com/v1";
+const res = await fetch(`${base}/chat/completions`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json", Authorization: `Bearer ${process.env.OPENAI_API_KEY}` },
+  body: JSON.stringify({
+    model: config.model,
+    messages: [
+      { role: "system", content: prompt },
+      { role: "user", content: invoice },
+    ],
+    response_format: { type: "json_object" },
+    ...config.params,
+  }),
+}).catch((e) => fail(75, e)); // network: retry this run
+const r = await res.json().catch(() => ({}));
+if (!res.ok) {
+  const stop = r.error?.code === "insufficient_quota" || [401, 403, 404].includes(res.status);
+  // no quota, wrong key or model: stop all runs; rate limit, server error: retry this run
+  fail(stop ? 78 : res.status === 429 || res.status >= 500 ? 75 : 1, `${res.status} ${r.error?.message}`);
+}
+
+const raw = r.choices[0].message.content ?? "";
+let output = null; // no answer: every field scores as wrong
+try {
+  output = JSON.parse(raw);
+} catch {}
+process.stdout.write(
+  JSON.stringify({
+    protocol: 1,
+    output,
+    raw,
+    input_tokens: r.usage.prompt_tokens,
+    output_tokens: r.usage.completion_tokens,
+    model: r.model, // the model the provider reports
+    fingerprint: r.system_fingerprint ?? null,
+    finish_reason: r.choices[0].finish_reason,
+    request_id: r.id,
+  }),
+);
+```
+
+It needs Node 18 or newer and no packages.
+
+</Tab>
+<Tab label="Go">
+
+```yaml
+# gate.yaml: build the program before the runs, in both versions' trees
+prepare: [go, build, -o, bin/gate-extract, ./gate/extract.go]
+```
+
+```yaml
+# configs/invoice.yaml: the version in production
+command: [bin/gate-extract]     # the program prepare builds, from the project's root
+model: gpt-4.1-mini-2025-04-14  # a dated snapshot
+prompt: ../prompts/extract.md   # relative to this file
+input: text                     # which input of a case this version reads
+params: {temperature: 0}
+```
+
+```go
+// gate/extract.go: one request in, one model call, one answer out
+package main
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"os"
+)
+
+type Request struct {
+	Case struct {
+		Inputs map[string]string `json:"inputs"`
+	} `json:"case"`
+	Config struct {
+		Model  string         `json:"model"`
+		Prompt string         `json:"prompt"`
+		Input  string         `json:"input"`
+		Params map[string]any `json:"params"`
+	} `json:"config"`
+}
+
+type Completion struct {
+	ID                string  `json:"id"`
+	Model             string  `json:"model"`
+	SystemFingerprint *string `json:"system_fingerprint"`
+	Choices           []struct {
+		Message      struct{ Content string } `json:"message"`
+		FinishReason string                   `json:"finish_reason"`
+	} `json:"choices"`
+	Usage struct {
+		PromptTokens     int `json:"prompt_tokens"`
+		CompletionTokens int `json:"completion_tokens"`
+	} `json:"usage"`
+	Error *struct {
+		Code    string `json:"code"`
+		Message string `json:"message"`
+	} `json:"error"`
+}
+
+func fail(code int, err any) {
+	fmt.Fprintln(os.Stderr, err) // the gate keeps it with the run
+	os.Exit(code)
+}
+
+func main() {
+	var req Request
+	if err := json.NewDecoder(os.Stdin).Decode(&req); err != nil {
+		fail(1, err)
+	}
+	invoice, err := os.ReadFile(req.Case.Inputs[req.Config.Input])
+	if err != nil {
+		fail(1, err)
+	}
+	prompt, err := os.ReadFile(req.Config.Prompt)
+	if err != nil {
+		fail(1, err)
+	}
+
+	body := map[string]any{
+		"model": req.Config.Model,
+		"messages": []map[string]string{
+			{"role": "system", "content": string(prompt)},
+			{"role": "user", "content": string(invoice)},
+		},
+		"response_format": map[string]string{"type": "json_object"},
+	}
+	for k, v := range req.Config.Params {
+		body[k] = v
+	}
+	payload, _ := json.Marshal(body)
+	base := os.Getenv("OPENAI_BASE_URL")
+	if base == "" {
+		base = "https://api.openai.com/v1"
+	}
+	call, _ := http.NewRequest("POST", base+"/chat/completions", bytes.NewReader(payload))
+	call.Header.Set("Content-Type", "application/json")
+	call.Header.Set("Authorization", "Bearer "+os.Getenv("OPENAI_API_KEY"))
+	res, err := http.DefaultClient.Do(call)
+	if err != nil {
+		fail(75, err) // network: retry this run
+	}
+	defer res.Body.Close()
+	var r Completion
+	json.NewDecoder(res.Body).Decode(&r)
+	if res.StatusCode != http.StatusOK {
+		said := res.Status
+		if r.Error != nil {
+			said += ": " + r.Error.Message
+		}
+		switch {
+		case r.Error != nil && r.Error.Code == "insufficient_quota", res.StatusCode == 401, res.StatusCode == 403, res.StatusCode == 404:
+			fail(78, said) // no quota, wrong key or model: stop all runs of the version
+		case res.StatusCode == 429, res.StatusCode >= 500:
+			fail(75, said) // rate limit, server error: retry this run
+		default:
+			fail(1, said)
+		}
+	}
+
+	raw := r.Choices[0].Message.Content
+	var output map[string]any // nil: no answer, every field scores as wrong
+	json.Unmarshal([]byte(raw), &output)
+	json.NewEncoder(os.Stdout).Encode(map[string]any{
+		"protocol":      1,
+		"output":        output,
+		"raw":           raw,
+		"input_tokens":  r.Usage.PromptTokens,
+		"output_tokens": r.Usage.CompletionTokens,
+		"model":         r.Model, // the model the provider reports
+		"fingerprint":   r.SystemFingerprint,
+		"finish_reason": r.Choices[0].FinishReason,
+		"request_id":    r.ID,
+	})
+}
+```
+
+Add `bin/` to `.gitignore`. Do not use `go run` in `command`: it turns every exit code of the program into 1, so the
+gate cannot tell a rate limit from a wrong key.
+
+</Tab>
+</LanguageTabs>
+
+Only `output` is required in the answer; the tokens and the model let the gate count the cost, and `fingerprint` shows
+when the provider changes the system behind a model name. The exit code says what went wrong: 75 retries the run with
+backoff, 78 stops all runs of the version, any other code fails this run. If your application already has this code,
+call it from the program with the request's model, prompt and `params`. [Connect your app](/docs/connect) covers agents
+and their traces, [Reference](/docs/reference#protocol) every field.
+
+Prefer a model name with a date: for a name without one, the gate warns and in some cases refuses to compare. The
+version is this config, the bytes of its prompts and the repository's code as git sees it ([What a version
+is](/docs/how-it-works#what-a-version-is)).
 
 ## 5. Write a first case
 
@@ -275,7 +460,7 @@ printf '.env\nruns/\n' >> .gitignore
 uv run --env-file .env llm-release-gate run --config configs/invoice.yaml --golden golden/invoices --out runs/first.jsonl
 ```
 
-It prints the mean score and the hashes. If the module cannot be imported, the prompt is missing or the key is wrong, it
+It prints the mean score and the hashes. If the program cannot start, the prompt is missing or the key is wrong, it
 stops and says which.
 
 ## 6. Add the gate to your workflow
@@ -365,6 +550,6 @@ On GitLab, `comment` needs `GITLAB_TOKEN`, a project access token with the `api`
 
 ## What is planned for setup
 
-Planned: `init` and `doctor` commands, a gate that installs itself (no `setup` step, no deploy key), an adapter that
-returns a plain dictionary, a GitLab CI/CD component, the statistical rule and a public release
+Planned: `init` and `doctor` commands, a gate that installs itself (no `setup` step, no deploy key, no `pyproject.toml`
+in a project in another language), a GitLab CI/CD component, the statistical rule and a public release
 ([Method](/docs/method)).

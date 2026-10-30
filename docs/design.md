@@ -34,17 +34,18 @@ agent over a booking system, alone on a ticket or in a chat with a simulated use
 - **Case** (`Case`): `id`, `inputs` (name → file path), `expected` values, `scoring` block.
 - **Answer** (`Answer`): `output` (parsed), `raw`, `input_tokens`, `output_tokens`, `latency_s`, `model` (as the provider
   reported it), `fingerprint`, `reasoning_tokens`, `finish_reason`, `request_id`.
-- **Pipeline**: a module with `build(config) -> obj`, where `obj.run(case) -> Answer`. It raises `Retryable` when the same
-  call may succeed later and `Fatal` when no call can. The gate's code imports no pipeline; the config names it by
-  import path.
-- **Version** (`PipelineConfig`, `load_config(path)`): `pipeline`, `model`, `prompt` (a file or named files), `input`,
-  `params`, `max_retries`, `timeout_s`, and `command` for `pipeline: command`. `config_hash(config)` covers every field
+- **Pipeline**: the program the version's config names (`command.Command`; its `run(case) -> Answer` raises `Retryable`
+  when the same run may succeed later and `Fatal` when no run can). The gate's code imports no application; it starts the
+  program, in any language, once per run.
+- **Version** (`PipelineConfig`, `load_config(path)`): `command`, `model`, `prompt` (a file or named files), `input`,
+  `params`, `max_retries`, `timeout_s`. `config_hash(config)` covers every field
   and the bytes of each prompt file; `version.version_hash(path)` adds the repository's code (D-025): every tracked file
   by the id git gives its content (the index's id, or the id of a modified file on disk), but documentation, CI,
   `gate.yaml` and its price files, its `ignore`, its test sets and its other pipelines' files.
   Records carry it as `config_hash`, so resuming, pairing, the dashboard and `unchanged` share one notion of a version.
-- **Any program** (`pipeline: command`, `command: [program, args]`; [protocol.md](protocol.md), `protocol.schema.json`): one JSON request on stdin (case id, input paths, the
-  version; never the expected values), one JSON answer on stdout (`output`, optionally tokens, model and a trace). Exit 75
+- **Protocol** (`command: [program, args]`; [protocol.md](protocol.md), `protocol.schema.json`): one JSON request on stdin (case id, input paths, the
+  version; never the expected values), one JSON answer on stdout (`output`, optionally tokens, model, the provider's
+  fingerprint, finish reason and request id, and a trace). Exit 75
   and a timeout retry; 78, 126, 127 and a program that cannot start stop the run; any other non-zero code fails the run.
   A trace printed before a failed exit is kept. On timeout the gate kills the program's process group (POSIX) and that
   attempt's trace is lost.
@@ -71,7 +72,7 @@ prices=None, model=None) -> records written`; CLI: `python -m llm_release_gate.r
 - It runs the missing (case, repetition) pairs on a thread pool.
 - It retries `Retryable` with backoff 1, 2, 4… s (at most 60 s) up to `max_retries`, stops the run on `Fatal`, and records
   any other exception as an error of that run.
-- It keeps one `Trace` per pair, current while the pipeline runs (a context variable, one per worker thread). A retried
+- It keeps one `Trace` per pair, current while the program runs (a context variable, one per worker thread). A retried
   run adds its steps under the next `run_attempt`; a failed run keeps the steps it paid for (a `Fatal` one too, when it
   paid for any).
 - It scores each answer with the case's scoring block and the run's trace (as JSON brings it back, so rescoring later
@@ -79,23 +80,20 @@ prices=None, model=None) -> records written`; CLI: `python -m llm_release_gate.r
 
 ### Store (built)
 
-Records are JSON lines appended to `out`; raw provider responses go to `<stem>.native.jsonl` next to it (`runs.jsonl` →
-`runs.native.jsonl`), written before the record that points to them. `read_records(path)` skips a line cut off by a
+Records are JSON lines appended to `out`; raw provider responses would go to `<stem>.native.jsonl` next to it
+(`runs.jsonl` → `runs.native.jsonl`), written before the record that points to them; nothing records them since programs
+report their own steps, until the planned proxy. `read_records(path)` skips a line cut off by a
 crash; `results(path, config_hash, set_hash)` gives the last error-free record per (case, repetition), which is what
 makes a rerun pay only for the rest.
 
 ### Trace (built)
 
-An adapter records into the current trace without touching the application:
+The program reports its steps and end state in the answer's `trace`; `command.record` copies them into the current
+trace, also from an answer printed before a failed exit:
 
-- `current() -> Trace | None` is the trace of the run in progress on this thread (None outside the runner); the adapter
-  sets `final_state`, `state_change` and `stop` on it.
-- `openai_client(client, actor="agent", trace=None)` wraps `chat.completions.create`: one model step per call; tool steps
-  are rebuilt from the `tool` messages the application sends back (status `unknown`); a failed call is a step with
-  `status: error`; a streamed call leaves a note. Other methods (Responses API, `parse`) pass through unrecorded.
-- `wrap_tool(call, actor="agent", trace=None)` wraps a tool function `call(name, args)`: one tool step per call with
-  status, result or error and timing.
-- `Trace.step(kind, actor, **fields)` records anything else and refuses a step that breaks the format.
+- `current() -> Trace | None` is the trace of the run in progress on this thread (None outside the runner).
+- `Trace.step(kind, actor, **fields)` adds a step, numbers it (`seq`, `run_attempt`) and refuses one that breaks the
+  format.
 - `usage(trace, prices, reprice=False)` sums calls, tokens and cost per actor over every answered call, abandoned attempts
   included; `last_attempt(trace)` gives the steps of the final attempt, which checks look at.
 
@@ -210,7 +208,7 @@ request's workflow is not part of the version.
 flowchart LR
     subgraph app[Application project]
         config[version config<br/>model, prompts, params]
-        adapter[adapter: build / run<br/>or any program]
+        program[program<br/>any language]
         cases[golden set]
     end
     subgraph gate[llm-release-gate]
@@ -231,9 +229,9 @@ flowchart LR
     provider[(model provider)]
     cases --> validate --> runner
     config --> runner
-    runner -->|run case| adapter
-    adapter -->|wrapped client| provider
-    adapter -->|steps| trace --> runner
+    runner -->|request, stdin| program
+    program -->|calls| provider
+    program -->|answer + steps, stdout| trace --> runner
     runner --> scoring --> store
     store --> compare --> criterion --> report
     prices --> runner
@@ -263,7 +261,7 @@ sequenceDiagram
     participant SH as pr (gate.yaml)
     participant RB as runner (base, target branch)
     participant RC as runner (candidate, this request)
-    participant AD as adapter + model
+    participant AD as program + model
     participant G as gate
     CI->>C: --check: can comment
     CI->>CI: download or build the golden set
@@ -276,12 +274,12 @@ sequenceDiagram
     else the request changes the version
         par base, with the target branch's code
             SH->>RB: k runs per case
-            RB->>AD: run(case), trace current
-            AD-->>RB: Answer + steps
+            RB->>AD: request (stdin), one process per run
+            AD-->>RB: answer + steps (stdout), exit code
         and candidate, with this request's code
             SH->>RC: k runs per case
-            RC->>AD: run(case), trace current
-            AD-->>RC: Answer + steps
+            RC->>AD: request (stdin), one process per run
+            AD-->>RC: answer + steps (stdout), exit code
         end
         SH->>G: base.jsonl, candidate.jsonl, --golden, delta, prices, budgets
         G->>G: load arms, rescore, pair, verdict, cost
@@ -318,11 +316,11 @@ The trace:
 |---|---|
 | `v` | format of the trace |
 | `steps` | ordered steps, each with `seq`, `kind` (`llm`, `tool`, `message`, `retrieval`), `actor` (`agent`, `user`, `system`, `env`), `ts` (`null` for a tool step restored from a model's call), `run_attempt` |
-| — model step | `status`; when `ok`: `model`, `tokens_in`, `tokens_out`, `tokens_cached`, `tokens_reasoning`, `cost_usd`, `finish_reason`, `fingerprint`, `request_id`, `text`, `tool_calls` (`id`, `name`, `args`), `latency_ms`, `purpose` (set by the adapter, e.g. `compaction`, not counted by `max_steps`); when `error`: `error`, `attempt`, `latency_ms` |
+| — model step | `status`; when `ok`: `model`, `tokens_in`, `tokens_out`, `tokens_cached`, `tokens_reasoning`, `cost_usd`, `finish_reason`, `fingerprint`, `request_id`, `text`, `tool_calls` (`id`, `name`, `args`), `latency_ms`, `purpose` (set by the program, e.g. `compaction`, not counted by `max_steps`); when `error`: `error`, `attempt`, `latency_ms` |
 | — tool step | `name`, `args`, `status` (`ok`, `error`, `unknown`), `result` or `error`, `call_id`, `latency_ms` |
 | — retrieval step | `docs` with `id` (what `doc_found` reads) |
-| `final_state`, `state_change` | the world after the run and what changed, as the adapter reports them |
-| `stop` | why the run ended, as the adapter says: `done`, `user_stop`, `max_steps`, `max_turns`, `error`, `aborted`; the runner sets `error` on a failed run with steps and no `stop`. The gate does not check the value |
+| `final_state`, `state_change` | the world after the run and what changed, as the program reports them |
+| `stop` | why the run ended, as the program says: `done`, `user_stop`, `max_steps`, `max_turns`, `error`, `aborted`; the runner sets `error` on a failed run with steps and no `stop`. The gate does not check the value |
 | `last_attempt` | the number of the runner's final attempt; checks look at its steps |
 | `notes` | calls that went unrecorded, and why |
 | `native` | the file with the raw provider responses |
@@ -345,9 +343,9 @@ about 25-fold for a long dialog.
 - **Statistical gate** (see Criterion), interleaved arms in the runner, latency budgets, the anchor comparison; more
   base runs than candidate runs, paid once and shared through the reused runs.
 - **Adoption** (D-023): the protocol's schema for any program (built), `gate.yaml` and `llm-release-gate pr` (built), a
-  verdict without a base version and forks (built), a maintainer's run of a fork's request, Python adapters in a worker process, the engine through `uvx`, `init` and
+  verdict without a base version and forks (built), a maintainer's run of a fork's request, one way to connect for every language (built: no Python adapters), the engine through `uvx`, `init` and
   `doctor`, a recording proxy for traces, a GitLab component and a pytest plugin; a JUnit report.
-- **Adapters**: a benchmark adapter (τ²-bench telecom), a harness agent in a container through `pipeline: command`,
+- **Programs**: a benchmark program (τ²-bench telecom), a harness agent in a container through `command`,
   retrieval-augmented generation (to be decided), import of OpenTelemetry traces.
 - **Dashboard**: the main branch's mean with the anchor line, why a verdict passed or blocked (with its interval), noise
   per case and check, cost and time against the budget, a diff of config and prompt, a demo without signing in.
