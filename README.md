@@ -174,7 +174,7 @@ A check compares against its own `value` or against the case's expected value at
    dependencies = ["llm-release-gate"]
 
    [tool.uv.sources]
-   llm-release-gate = { git = "https://github.com/Ilya-Grigoryev/llm-release-gate", tag = "v0.1.0-dev.10" }
+   llm-release-gate = { git = "https://github.com/Ilya-Grigoryev/llm-release-gate", tag = "v0.1.0-dev.11" }
    ```
 2. Write an adapter (`build(config)` and `run(case)`, [Your pipeline](#your-pipeline)) or a program
    ([Any program](#any-program)), a config for the version in production and a golden set.
@@ -197,10 +197,10 @@ A check compares against its own `value` or against the case's expected value at
          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
        steps:
          - uses: actions/checkout@v7
-         - uses: Ilya-Grigoryev/llm-release-gate/setup@v0.1.0-dev.10
+         - uses: Ilya-Grigoryev/llm-release-gate/setup@v0.1.0-dev.11
            with:
              gate-ssh-key: ${{ secrets.LLM_RELEASE_GATE_KEY }}  # while this repository is private
-         - uses: Ilya-Grigoryev/llm-release-gate@v0.1.0-dev.10
+         - uses: Ilya-Grigoryev/llm-release-gate@v0.1.0-dev.11
    ```
 
 `gate.yaml` ([`project.schema.json`](src/llm_release_gate/project.schema.json)) takes these fields; settings at the top
