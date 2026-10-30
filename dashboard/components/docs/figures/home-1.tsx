@@ -1,10 +1,16 @@
 "use client";
 
+import { useGSAP } from "@gsap/react";
+import gsap from "gsap";
+import { ScrollTrigger } from "gsap/ScrollTrigger";
 import Link from "next/link";
-import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { CommentCard, LampDot, Tag, type Lamp } from "./kit";
 
+gsap.registerPlugin(useGSAP, ScrollTrigger);
+
 type Outcome = "pass" | "block" | "unchanged";
+type Arm = "base" | "cand";
 type Example = {
   app: string;
   title: string;
@@ -121,136 +127,253 @@ Cost of this decision $0.191: base $0.094, candidate $0.097 (successful calls, l
 ];
 
 const LAMP: Record<Outcome, Lamp> = { pass: "go", block: "stop", unchanged: "neutral" };
-const START = 250, STEP = 120, SETTLE = 500;
 
-/** A case lamp, filled from the bottom to the case's score. Dark until its run is in; `worse` rings a drop. */
-function CaseLamp({ score, arm, lit, worse = false }: { score: number; arm: "base" | "cand"; lit: boolean; worse?: boolean }) {
+/*
+ * The scene is drawn on a 720 × 220 grid. Main's rail runs at y = 70 and the request's at y = 160. Ten stations, one per
+ * case, stand every 46 units from x = 36, each with a lamp 36 above its rail. The barrier stands on the request's rail and
+ * turns about its foot at (540, 196); it lies open along the ground and closes upright across the rail. The signal head
+ * sits left of the foot. A train's front is its x; it passes a station when its front reaches the station's x.
+ */
+const W = 720;
+const H = 220;
+const RAIL: Record<Arm, number> = { base: 70, cand: 160 };
+const R = 11;
+const LIFT = 36;
+const stationX = (k: number) => 36 + 46 * k;
+const PIVOT = { x: 540, y: 196 };
+const FROM = -6; // off the left edge
+const PAST = 480; // past the last station
+const OUT = W + 70; // off the right edge
+const STOP = 526; // in front of the closed barrier
+const PARKED = 96; // where the trains wait when nothing runs
+const RUN = 3.4; // seconds to pass the ten stations
+const SPEED = (PAST - FROM) / RUN;
+const DWELL = 7; // seconds a decided example stays before the next one plays
+
+const mean = (xs: number[]) => (xs.length ? (xs.reduce((a, b) => a + b, 0) / xs.length).toFixed(3) : "–");
+const pct = (x: number) => `${(x / W) * 100}%`;
+
+/** A two-car train in its version's colour, front at x = 0, wheels on y = 0. */
+function Train({ arm }: { arm: Arm }) {
   const color = `var(--${arm})`;
-  const level = lit ? Math.round(score * 100) : 0;
-  const ring = `inset 0 0 0 2px ${lit ? color : "var(--line)"}`;
   return (
-    <span
-      aria-hidden
-      className="relative z-10 block size-[clamp(0.8rem,2.4vw,1.5rem)] rounded-full transition-[box-shadow] duration-300"
-      style={{
-        background: `linear-gradient(to top, ${color} ${level}%, var(--panel) ${level}%)`,
-        boxShadow: worse ? `${ring}, 0 0 0 2.5px var(--panel), 0 0 0 4.5px var(--stop)` : ring,
-      }}
-    />
+    <>
+      <rect x="-54" y="-16" width="25" height="11" rx="2" fill={color} />
+      <rect x="-50" y="-13.5" width="6.5" height="4" rx="1" fill="var(--panel)" />
+      <rect x="-40" y="-13.5" width="6.5" height="4" rx="1" fill="var(--panel)" />
+      <path d="M-29.5 -8h4" stroke={color} strokeWidth="2" />
+      <path d="M-26 -5V-15q0-3 3-3h14l9 8v5z" fill={color} />
+      <rect x="-14" y="-15" width="5" height="4" rx="1" fill="var(--panel)" />
+      {[-49, -35, -21, -9].map((x) => (
+        <circle key={x} cx={x} cy="-3" r="3" fill="var(--ink)" />
+      ))}
+    </>
   );
 }
 
-/*
- * The barrier, drawn on a 128-unit square that lines up with the tracks: they run at y = 24 and 72 (the centres of
- * the two 48-unit rows), the arm stands across both at x = 25 and turns about its foot at y = 96; the signal head
- * hangs under the foot.
- */
-const ARM = "transition-transform duration-[900ms] ease-[cubic-bezier(.6,.02,.2,1)]";
-
-function Barrier({ outcome, decided }: { outcome: Outcome; decided: boolean }) {
-  const id = useId();
-  const open = decided && outcome !== "block";
-  const lit = (lamp: Lamp) => decided && LAMP[outcome] === lamp;
+/** One version's rail with its sleepers and its ten case lamps, empty until a train passes them. */
+function Track({ arm, uid }: { arm: Arm; uid: string }) {
+  const y = RAIL[arm];
+  const cy = y - LIFT;
   return (
-    <svg aria-hidden viewBox="0 0 128 128" className="block size-[5.333rem] overflow-visible sm:size-32">
-      <defs>
-        <pattern id={`${id}-stripes`} patternUnits="userSpaceOnUse" width="10" height="18">
-          <rect width="10" height="11" fill="var(--stop)" />
-          <rect y="11" width="10" height="7" fill="var(--panel)" />
-        </pattern>
-      </defs>
-      {[24, 72].map((y, row) => (
-        <rect
-          key={y}
-          x="0"
-          y={y - 1}
-          width="128"
-          height="2"
-          fill={row ? "var(--cand)" : "var(--base)"}
-          opacity="0.35"
-          className={ARM}
-          style={{ transformOrigin: "0 0", transform: open ? "scaleX(1)" : "scaleX(0.16)" }}
-        />
-      ))}
-      <g className={ARM} style={{ transformOrigin: "25px 96px", transform: open ? "rotate(90deg)" : "rotate(0deg)" }}>
-        <rect x="20" y="2" width="10" height="94" rx="3" fill={`url(#${id}-stripes)`} stroke="var(--stop)" strokeWidth="1.5" />
-      </g>
-      <circle cx="25" cy="96" r="7.5" fill="var(--housing)" stroke="var(--neutral)" strokeOpacity="0.4" />
-      <rect x="4" y="106" width="58" height="20" rx="10" fill="var(--housing)" stroke="var(--neutral)" strokeOpacity="0.4" />
-      {(["stop", "wait", "go"] as const).map((lamp, i) => {
-        const cx = 16 + i * 17;
-        if (lamp === "wait")
-          return <circle key={lamp} cx={cx} cy="116" r="5.5" fill="none" stroke="var(--neutral)" strokeWidth="1.5" strokeDasharray="2.5 2" />;
+    <g>
+      <line x1="0" x2={W} y1={y + 2} y2={y + 2} stroke="var(--ink-3)" strokeOpacity="0.3" strokeWidth="7" strokeDasharray="2 10" />
+      <line x1="0" x2={W} y1={y} y2={y} stroke={`var(--${arm})`} strokeOpacity="0.5" strokeWidth="2" />
+      {Array.from({ length: 10 }, (_, k) => {
+        const cx = stationX(k);
         return (
-          <g key={lamp}>
-            <circle cx={cx} cy="116" r="11" fill={`var(--${lamp})`} className="transition-opacity duration-500" opacity={lit(lamp) ? 0.3 : 0} />
-            <circle
-              cx={cx}
-              cy="116"
-              r="6"
-              className="transition-[fill] duration-300"
-              style={{ fill: lit(lamp) ? `var(--${lamp})` : "color-mix(in srgb, var(--neutral) 40%, var(--housing))" }}
-            />
+          <g key={k}>
+            <clipPath id={`${uid}-${arm}-${k}`}>
+              <circle cx={cx} cy={cy} r={R} />
+            </clipPath>
+            <line x1={cx} x2={cx} y1={cy + R} y2={y - 1} stroke="var(--line)" strokeWidth="2" />
+            <circle cx={cx} cy={cy} r={R} fill="var(--panel)" />
+            <rect data-fill={arm} data-k={k} clipPath={`url(#${uid}-${arm}-${k})`} x={cx - R} y={cy + R} width={2 * R} height="0" fill={`var(--${arm})`} />
+            <circle data-ring={arm} data-k={k} cx={cx} cy={cy} r={R} fill="none" stroke="var(--line)" strokeWidth="2" />
+            {arm === "cand" && <circle data-worse={k} cx={cx} cy={cy} r={R + 4.5} fill="none" stroke="var(--stop)" strokeWidth="2.5" opacity="0" />}
           </g>
         );
       })}
-    </svg>
+    </g>
   );
 }
 
-const mean = (xs: number[]) => (xs.length ? (xs.reduce((a, b) => a + b, 0) / xs.length).toFixed(3) : "–");
+/** The barrier on the request's rail, open, and the signal head: stop, not sure yet (planned, so never lit), go. */
+function Barrier({ uid }: { uid: string }) {
+  return (
+    <g>
+      <defs>
+        <pattern id={`${uid}-stripes`} patternUnits="userSpaceOnUse" width="18" height="10">
+          <rect width="11" height="10" fill="var(--stop)" />
+          <rect x="11" width="7" height="10" fill="var(--panel)" />
+        </pattern>
+      </defs>
+      <rect data-arm x={PIVOT.x} y={PIVOT.y - 4.5} width="80" height="9" rx="3" fill={`url(#${uid}-stripes)`} stroke="var(--stop)" strokeWidth="1.5" />
+      <circle cx={PIVOT.x} cy={PIVOT.y} r="7" fill="var(--housing)" stroke="var(--neutral)" strokeOpacity="0.4" />
+      <rect x="472" y="186" width="58" height="20" rx="10" fill="var(--housing)" stroke="var(--neutral)" strokeOpacity="0.4" />
+      {(["stop", "wait", "go"] as const).map((lamp, i) => {
+        const cx = 484 + i * 17;
+        if (lamp === "wait") return <circle key={lamp} cx={cx} cy="196" r="5.5" fill="none" stroke="var(--neutral)" strokeWidth="1.5" strokeDasharray="2.5 2" />;
+        return (
+          <g key={lamp}>
+            <circle data-glow={lamp} cx={cx} cy="196" r="11" fill={`var(--${lamp})`} opacity="0" />
+            <circle data-signal={lamp} cx={cx} cy="196" r="6" fill="color-mix(in srgb, var(--neutral) 40%, var(--housing))" />
+          </g>
+        );
+      })}
+    </g>
+  );
+}
 
-/** Four example pull requests through the gate: the home page's one orchestrated moment. */
+/**
+ * Four example pull requests through the gate, as two trains: main's and the request's run the same ten cases side by
+ * side, lighting each case's lamp to its score. A request that passes rolls on; for one that is blocked, the barrier
+ * closes in front of its train. The examples play in turn until the reader picks one or pauses them.
+ */
 export default function Home1() {
   const [index, setIndex] = useState(0);
-  const [lit, setLit] = useState(0);
+  const [run, setRun] = useState(0);
+  const [started, setStarted] = useState(false);
   const [decided, setDecided] = useState(false);
   const [focus, setFocus] = useState<number | null>(null);
-  const timers = useRef<number[]>([]);
-  const tabs = useRef<(HTMLButtonElement | null)[]>([]);
+  const [auto, setAuto] = useState(true);
+  const [still, setStill] = useState(false);
+  const autoplay = useRef(true);
+  const first = useRef(true);
+  const dwell = useRef<gsap.core.Tween | null>(null);
+  const startDwell = useRef<() => void>(() => {});
   const root = useRef<HTMLDivElement>(null);
+  const tabs = useRef<(HTMLButtonElement | null)[]>([]);
+  const uid = useId().replace(/[^\w-]/g, "");
   const ex = EXAMPLES[index];
   const ran = ex.cases.length > 0;
-  const cases = ran ? ex.cases : Array.from({ length: 10 }, (_, k): [string, number, number] => [`case-${k + 1}`, 0, 0]);
+  const key = `${index}-${run}`;
 
-  const play = useCallback((i: number) => {
-    timers.current.forEach(clearTimeout);
+  // The first example plays when the scene comes into view.
+  useGSAP(
+    () => {
+      const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+      if (reduce) {
+        autoplay.current = false;
+        setAuto(false);
+        setStill(true);
+      }
+      ScrollTrigger.create({ trigger: root.current, start: "top 85%", once: true, onEnter: () => setStarted(true) });
+    },
+    { scope: root },
+  );
+
+  useGSAP(
+    (_, contextSafe) => {
+      if (!started) return;
+      const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+      const q = gsap.utils.selector(root);
+      const tl = gsap.timeline({ delay: first.current && !reduce ? 0.9 : 0.15 });
+      first.current = false;
+
+      startDwell.current = contextSafe!(() => {
+        if (!autoplay.current || reduce) return;
+        dwell.current = gsap.fromTo(
+          q("[data-progress]"),
+          { scaleX: 0 },
+          {
+            scaleX: 1,
+            duration: DWELL,
+            ease: "none",
+            onComplete: () => {
+              setIndex((i) => (i + 1) % EXAMPLES.length);
+              setDecided(false);
+              setFocus(null);
+            },
+          },
+        );
+      });
+
+      const [base, cand] = [q("[data-train=base]"), q("[data-train=cand]")];
+      if (!ran) {
+        tl.to([...base, ...cand], { opacity: 0.45, duration: 0.4 });
+      } else {
+        tl.fromTo([...base, ...cand], { x: FROM }, { x: PAST, duration: RUN, ease: "none" }, 0);
+        ex.cases.forEach(([, b, c], k) => {
+          const at = (stationX(k) - FROM) / SPEED;
+          (["base", "cand"] as const).forEach((arm) => {
+            const score = arm === "base" ? b : c;
+            const cy = RAIL[arm] - LIFT;
+            tl.set(q(`[data-ring=${arm}][data-k="${k}"]`), { attr: { stroke: `var(--${arm})` } }, at);
+            tl.to(q(`[data-fill=${arm}][data-k="${k}"]`), { attr: { y: cy + R - 2 * R * score, height: 2 * R * score }, duration: 0.35, ease: "power2.out" }, at);
+          });
+          tl.call(
+            () => {
+              q("[data-mean=base]").forEach((el) => (el.textContent = mean(ex.cases.slice(0, k + 1).map((x) => x[1]))));
+              q("[data-mean=cand]").forEach((el) => (el.textContent = mean(ex.cases.slice(0, k + 1).map((x) => x[2]))));
+            },
+            undefined,
+            at,
+          );
+        });
+        tl.to(base, { x: OUT, duration: (OUT - PAST) / SPEED, ease: "none" }, RUN);
+        if (ex.outcome === "block") {
+          tl.to(q("[data-arm]"), { rotation: -90, svgOrigin: `${PIVOT.x} ${PIVOT.y}`, duration: 0.6, ease: "back.out(1.6)" }, RUN - 0.35);
+          tl.to(cand, { x: STOP, duration: (3 * (STOP - PAST)) / SPEED, ease: "power3.out" }, RUN);
+          tl.to(cand, { x: STOP - 2.5, duration: 0.08, yoyo: true, repeat: 1 }, ">");
+        } else {
+          tl.to(cand, { x: OUT, duration: (OUT - PAST) / SPEED, ease: "none" }, RUN);
+        }
+        const lamp = LAMP[ex.outcome];
+        tl.set(q(`[data-signal=${lamp}]`), { attr: { fill: `var(--${lamp})` } }, RUN + 0.1);
+        tl.fromTo(q(`[data-glow=${lamp}]`), { opacity: 0 }, { opacity: 0.35, duration: 0.25, yoyo: true, repeat: lamp === "stop" ? 4 : 0 }, RUN + 0.1);
+        const worse = ex.cases.flatMap(([, b, c], k) => (c < b ? q(`[data-worse="${k}"]`) : []));
+        if (worse.length)
+          tl.fromTo(worse, { opacity: 0, scale: 0.4, transformOrigin: "50% 50%" }, { opacity: 1, scale: 1, duration: 0.4, ease: "back.out(3)", stagger: 0.08 }, RUN + 0.3);
+      }
+      tl.call(() => setDecided(true), undefined, ran ? RUN + 0.5 : 0.4);
+      tl.call(() => startDwell.current(), undefined, ran ? RUN + 1.6 : 0.6);
+
+      if (reduce) {
+        tl.progress(1);
+        return;
+      }
+      ScrollTrigger.create({
+        trigger: root.current,
+        start: "top bottom",
+        end: "bottom top",
+        onToggle: (self) => {
+          if (self.isActive) {
+            tl.resume();
+            dwell.current?.resume();
+          } else {
+            tl.pause();
+            dwell.current?.pause();
+          }
+        },
+      });
+    },
+    { dependencies: [index, run, started], scope: root, revertOnUpdate: true },
+  );
+
+  const stopDwell = () => {
+    dwell.current?.kill();
+    dwell.current = null;
+    root.current?.querySelectorAll<HTMLElement>("[data-progress]").forEach((el) => (el.style.transform = "scaleX(0)"));
+  };
+
+  const play = (i: number) => {
+    autoplay.current = false;
+    setAuto(false);
+    stopDwell();
     setIndex(i);
-    setFocus(null);
-    if (matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      setLit(10);
-      setDecided(true);
-      return;
-    }
-    setLit(0);
+    setRun((r) => r + 1);
     setDecided(false);
-    timers.current = EXAMPLES[i].cases.length
-      ? [
-          ...Array.from({ length: 10 }, (_, k) => window.setTimeout(() => setLit(k + 1), START + k * STEP)),
-          window.setTimeout(() => setDecided(true), START + 10 * STEP + SETTLE),
-        ]
-      : [window.setTimeout(() => setDecided(true), START)];
-  }, []);
+    setFocus(null);
+    setStarted(true);
+  };
 
-  // Example 1 plays once, when the scene first comes into view.
-  useEffect(() => {
-    const el = root.current;
-    const pending = timers;
-    if (!el) return;
-    const seen = new IntersectionObserver(
-      ([entry]) => {
-        if (!entry.isIntersecting) return;
-        seen.disconnect();
-        play(0);
-      },
-      { threshold: 0.35 },
-    );
-    seen.observe(el);
-    return () => {
-      seen.disconnect();
-      pending.current.forEach(clearTimeout);
-    };
-  }, [play]);
+  const toggleAuto = () => {
+    autoplay.current = !autoplay.current;
+    setAuto(autoplay.current);
+    if (!autoplay.current) stopDwell();
+    else if (decided) startDwell.current();
+  };
 
   const onKey = (e: KeyboardEvent, i: number) => {
     const last = EXAMPLES.length - 1;
@@ -262,10 +385,25 @@ export default function Home1() {
     play(next);
   };
 
-  const shown = focus === null || !ran ? null : cases[focus];
-  const scored = cases.slice(0, ran ? lit : 0);
+  const shown = focus === null || !ran ? null : ex.cases[focus];
+  const label = (arm: Arm) => (
+    <span className="leading-tight">
+      <span className="block font-bold" style={{ color: `var(--${arm}-ink)` }}>
+        {arm === "base" ? "main" : "request"}
+      </span>
+      <span data-mean={arm} key={key} className="block font-mono text-2xl font-bold tracking-tight tabular-nums">
+        –
+      </span>
+    </span>
+  );
+
   return (
-    <div ref={root} className="overflow-hidden rounded-lg border border-line bg-panel">
+    <div
+      ref={root}
+      className="overflow-hidden rounded-lg border border-line bg-panel"
+      onMouseEnter={() => dwell.current?.pause()}
+      onMouseLeave={() => dwell.current?.resume()}
+    >
       <div className="grid min-[900px]:grid-cols-[17rem_minmax(0,1fr)]">
         <div
           role="tablist"
@@ -291,7 +429,12 @@ export default function Home1() {
                 i === index ? "bg-panel" : "hover:bg-panel"
               }`}
             >
-              {i === index && <span aria-hidden className="absolute inset-x-0 bottom-0 h-0.5 bg-ink min-[900px]:inset-y-0 min-[900px]:right-auto min-[900px]:left-0 min-[900px]:h-auto min-[900px]:w-0.5" />}
+              {i === index && (
+                <>
+                  <span aria-hidden className="absolute inset-x-0 bottom-0 h-0.5 bg-ink min-[900px]:inset-y-0 min-[900px]:right-auto min-[900px]:left-0 min-[900px]:h-auto min-[900px]:w-0.5" />
+                  <span aria-hidden data-progress className="absolute inset-x-0 bottom-0 h-0.5 origin-left scale-x-0 bg-ink/35 max-[899px]:hidden" />
+                </>
+              )}
               <span className="block text-sm text-ink-2">{e.app}</span>
               <span className="mt-0.5 block leading-snug font-bold text-balance">{e.title}</span>
               <span className="mt-1.5 flex items-center gap-1.5 text-sm text-ink-2">
@@ -304,93 +447,88 @@ export default function Home1() {
 
         <div id="gate-panel" role="tabpanel" aria-labelledby={`gate-tab-${index}`} className="min-w-0 p-4 sm:p-6">
           <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-            <Tag>Example</Tag>
+            <div className="flex items-center gap-3">
+              <Tag>Example</Tag>
+              {!still && (
+                <button type="button" onClick={toggleAuto} className="text-sm text-ink-2 underline underline-offset-4 hover:text-ink">
+                  {auto ? "Pause the examples" : "Play the examples"}
+                </button>
+              )}
+            </div>
             <p className="min-w-0 text-sm text-ink-2 [overflow-wrap:anywhere]">
               changes <code className="font-mono text-ink">{ex.changes}</code>
             </p>
           </div>
 
-          <p className="mt-5 flex gap-5 text-sm sm:hidden">
-            {(["base", "cand"] as const).map((arm, row) => (
-              <span key={arm}>
-                <span className="font-bold" style={{ color: `var(--${arm}-ink)` }}>
-                  {row ? "request" : "main"}
-                </span>{" "}
-                <span className="font-mono font-bold tabular-nums">{mean(scored.map((c) => (row ? c[2] : c[1])))}</span>
-              </span>
-            ))}
-          </p>
-          <div className="mt-3 grid grid-cols-[minmax(0,1fr)_auto] grid-rows-[2rem_2rem_auto] items-center gap-x-2.5 sm:mt-6 sm:grid-cols-[auto_auto_minmax(0,1fr)_auto] sm:grid-rows-[3rem_3rem_auto] sm:gap-x-5">
-            {(["base", "cand"] as const).map((arm, row) => {
-              const value = mean(scored.map((c) => (row ? c[2] : c[1])));
-              return (
-                <div key={arm} className="contents">
-                  <span className={`col-start-1 hidden leading-tight sm:block ${row ? "row-start-2" : "row-start-1"}`}>
-                    <span className="block font-bold" style={{ color: `var(--${arm}-ink)` }}>
-                      {row ? "request" : "main"}
-                    </span>
-                    <span className="block text-sm text-ink-3">{row ? "candidate" : "base"}</span>
-                  </span>
-                  <span className={`col-start-2 hidden text-right font-mono text-2xl font-bold tracking-tight tabular-nums sm:block ${row ? "row-start-2" : "row-start-1"}`}>
-                    {value}
-                  </span>
+          <p className="mt-5 flex gap-6 sm:hidden">{(["base", "cand"] as const).map((arm) => <span key={arm}>{label(arm)}</span>)}</p>
+          <div className="mt-3 grid gap-x-5 sm:mt-6 sm:grid-cols-[6.5rem_minmax(0,1fr)]">
+            <div aria-hidden className="relative hidden sm:block">
+              {(["base", "cand"] as const).map((arm) => (
+                <div key={arm} className="absolute left-0 -translate-y-1/2" style={{ top: `${((RAIL[arm] - LIFT / 2) / H) * 100}%` }}>
+                  {label(arm)}
                 </div>
-              );
-            })}
-            <div className="relative col-start-1 row-span-2 row-start-1 flex h-full sm:col-start-3">
-              {[25, 75].map((top) => (
-                <span key={top} aria-hidden className="absolute left-0 -right-2.5 h-0.5 -translate-y-1/2 sm:-right-5" style={{ top: `${top}%`, background: top < 50 ? "var(--base)" : "var(--cand)", opacity: 0.35 }} />
-              ))}
-              {cases.map(([id, base, cand], k) => (
-                <button
-                  key={`${index}-${id}`}
-                  type="button"
-                  disabled={!ran}
-                  aria-label={ran ? `${id}: main ${base.toFixed(2)}, request ${cand.toFixed(2)}` : undefined}
-                  onMouseEnter={() => setFocus(k)}
-                  onMouseLeave={() => setFocus(null)}
-                  onFocus={() => setFocus(k)}
-                  onBlur={() => setFocus(null)}
-                  onClick={() => setFocus((f) => (f === k ? null : k))}
-                  className={`grid flex-1 grid-rows-2 place-items-center rounded-full transition-colors ${focus === k ? "bg-ink/[0.07]" : ""}`}
-                >
-                  <CaseLamp score={base} arm="base" lit={ran && k < lit} />
-                  <CaseLamp score={cand} arm="cand" lit={ran && k < lit} worse={decided && cand < base} />
-                </button>
               ))}
             </div>
-            <div className="col-start-2 row-span-3 row-start-1 self-start sm:col-start-4">
-              <Barrier outcome={ex.outcome} decided={decided} />
+            <div className="relative">
+              <svg key={key} aria-hidden viewBox={`0 0 ${W} ${H}`} className="block h-auto w-full">
+                <Track arm="base" uid={uid} />
+                <Track arm="cand" uid={uid} />
+                <Barrier uid={uid} />
+                {(["base", "cand"] as const).map((arm) => (
+                  <g key={arm} transform={`translate(0 ${RAIL[arm]})`}>
+                    <g data-train={arm} transform={`translate(${ran ? FROM : PARKED} 0)`}>
+                      <Train arm={arm} />
+                    </g>
+                  </g>
+                ))}
+              </svg>
+              {ran &&
+                ex.cases.map(([id, base, cand], k) => (
+                  <button
+                    key={`${key}-${id}`}
+                    type="button"
+                    aria-label={`${id}: main ${base.toFixed(2)}, request ${cand.toFixed(2)}`}
+                    onMouseEnter={() => setFocus(k)}
+                    onMouseLeave={() => setFocus(null)}
+                    onFocus={() => setFocus(k)}
+                    onBlur={() => setFocus(null)}
+                    onClick={() => setFocus((f) => (f === k ? null : k))}
+                    className={`absolute inset-y-0 rounded-md transition-colors ${focus === k ? "bg-ink/[0.07]" : ""}`}
+                    style={{ left: pct(stationX(k) - 23), width: pct(46) }}
+                  />
+                ))}
             </div>
-            <p className="col-start-1 row-start-3 pt-2 text-sm text-ink-2 sm:col-span-3">
-              {shown ? (
-                <span className="font-mono tabular-nums">
-                  <span className="text-ink">{shown[0]}</span>
-                  <span className="mx-2 text-base-ink">main {shown[1].toFixed(2)}</span>
-                  <span className="text-cand-ink">request {shown[2].toFixed(2)}</span>
-                </span>
-              ) : ran ? (
-                "Each lamp is one case, filled to its score. Point at a column to read it. The barrier's middle lamp, not sure yet, is planned."
-              ) : (
-                "Nothing ran: both branches hold the same version of the app."
-              )}
-            </p>
           </div>
+          <p className="mt-2 min-h-[3em] text-sm text-ink-2">
+            {shown ? (
+              <span className="font-mono tabular-nums">
+                <span className="text-ink">{shown[0]}</span>
+                <span className="mx-2 text-base-ink">main {shown[1].toFixed(2)}</span>
+                <span className="text-cand-ink">request {shown[2].toFixed(2)}</span>
+              </span>
+            ) : ran ? (
+              "Each lamp is one case, filled to its score as the train passes. Point at a column to read it. The signal's middle lamp, not sure yet, is planned."
+            ) : (
+              "Nothing ran: both branches hold the same version of the app."
+            )}
+          </p>
           <p aria-live="polite" className="sr-only">
             {decided ? `${ex.title}: ${ex.outcome}` : ""}
           </p>
 
-          <div className={`mt-5 grid gap-x-6 gap-y-4 transition-[opacity,translate] duration-500 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)] ${decided ? "opacity-100" : "translate-y-1 opacity-0"}`}>
-            <CommentCard markdown={ex.comment} compact />
-            <div className="space-y-3 text-ink-2">
-              <p>{ex.note}</p>
-              {ran && (
-                <p className="text-sm">
-                  <code className="font-mono">config … → … · set …</code> in the comment are the ids of the two versions (config,
-                  prompts and code) and of the test set.
-                </p>
-              )}
-            </div>
+          <div className="mt-4 grid">
+            {EXAMPLES.map((e, i) => (
+              <div
+                key={i}
+                aria-hidden={i !== index}
+                className={`col-start-1 row-start-1 grid items-start gap-x-6 gap-y-4 transition-[opacity,translate] duration-500 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)] ${
+                  i !== index ? "invisible opacity-0" : decided ? "opacity-100" : "translate-y-1 opacity-0"
+                }`}
+              >
+                <CommentCard markdown={e.comment} compact />
+                <p className="text-ink-2">{e.note}</p>
+              </div>
+            ))}
           </div>
         </div>
       </div>

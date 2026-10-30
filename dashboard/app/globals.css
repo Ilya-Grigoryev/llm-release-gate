@@ -305,3 +305,17 @@ body {
     background: var(--line);
   }
 }
+
+/* The home page's opening hides these parts until GSAP plays it (components/home/motion.tsx); without it, they show after 2 s. */
+@media (prefers-reduced-motion: no-preference) {
+  [data-intro] {
+    opacity: 0;
+    animation: intro-fallback 0s 2s forwards;
+  }
+}
+
+@keyframes intro-fallback {
+  to {
+    opacity: 1;
+  }
+}

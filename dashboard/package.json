@@ -13,11 +13,13 @@
     "sync-schemas": "node scripts/sync-schemas.mjs"
   },
   "dependencies": {
+    "@gsap/react": "^2.1.2",
     "@mdx-js/loader": "^3.1.1",
     "@mdx-js/react": "^3.1.1",
     "@neondatabase/serverless": "^1.2.0",
     "@next/mdx": "^16.4.3",
     "fflate": "^0.8.3",
+    "gsap": "^3.15.0",
     "next": "16.4.3",
     "react": "19.3.0",
     "react-dom": "19.3.0",
