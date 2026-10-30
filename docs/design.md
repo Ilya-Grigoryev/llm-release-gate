@@ -197,11 +197,11 @@ downloads it (the redirect to storage gets no token) and adds its runs to the di
 job paid for in `OUT/NAME/shared.txt`, and the action uploads them under that name. A merged request's candidate is the
 target branch's new version when the merge keeps the tree, so the next request usually finds its base run. Reuse never
 fails a check: any error there runs the base. The gate skips it when either version's model has no date (D-018), when
-the base ran under a request's own `prepare` and when the target branch has no valid `gate.yaml`; it needs `actions:
+the request changes `prepare` and when the target branch has no valid `gate.yaml`; it needs `actions:
 read`, and without it the comment says so. The verdict counts the cost
 of the runs this job paid for and reports `base_reused` (how many, how much older than the candidate). `pr --refresh`
 runs the default branch's version on a push, a manual run or a schedule, for later requests; it reuses recent runs too,
-so it gives no drift series more often than the age limit. The price of reuse:
+so a drift series needs a separate job. The price of reuse:
 drift at the provider within the age limit counts as an effect, and all requests in the window share one base sample,
 so their verdicts are not independent (`base_max_age_days: 0` for experiments that count errors). The environment of a
 request's workflow is not part of the version.
@@ -310,6 +310,7 @@ One JSON line per (case, repetition), record version 6:
 | `usage` | calls, tokens and cost per actor (`agent`, `user`) from the trace; `usage_error` if a step could not be summed |
 | `scorer_version`, `hits`, `score`, `score_error` | per-check results, the case score, a scoring failure |
 | `retries`, `error` | backoffs used; why the run produced no answer (`null` when it did) |
+| `reused` | `true` on a base run copied from an earlier job (`pr --cache`); missing otherwise |
 
 The trace:
 

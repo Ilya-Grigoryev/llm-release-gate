@@ -71,7 +71,7 @@ What the schema does not say:
 
 - **Names**: letters, digits, `_`, `-` and `.`, not starting with `.`; the name also labels `OUT/NAME`.
 - **`golden`**: both versions run on the request's test set.
-- **`base_max_age_days`**: comes from the target branch, like `delta`. The gate never reuses runs when either version's model has no date, when the base ran under a request's own `prepare`,
+- **`base_max_age_days`**: comes from the target branch, like `delta`. The gate never reuses runs when either version's model has no date, when the request changes `prepare`,
   or when the target branch has no valid `gate.yaml`.
   ([Why](/docs/how-it-decides#where-the-bases-runs-come-from))
 - **`delta`**: points out of 100; a drop of exactly `delta` passes. Only `gate --relative` makes it relative.
@@ -428,7 +428,7 @@ Two actions, pinned to the same release, in a workflow in `.github/workflows/`. 
 `permissions: {contents: read, pull-requests: write, actions: read}` and gets the provider's key from the repository's
 secrets as an environment variable. On a push, a manual run or a schedule on the default branch, the action runs that
 branch's version for later requests instead (optional; its artifact is `llm-release-gate-base-NAME-ATTEMPT`). On
-`pull_request_target` it shares no runs. GitLab and other CI run `pr` and `comment` themselves, with `--cache` on
+`pull_request_target` it uploads no runs. GitLab and other CI run `pr` and `comment` themselves, with `--cache` on
 a cached directory.
 
 `Ilya-Grigoryev/llm-release-gate/setup@v0.1.0-dev.11` installs Python, uv and the project's locked environment:

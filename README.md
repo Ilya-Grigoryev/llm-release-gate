@@ -233,7 +233,7 @@ the base, a later job reuses such runs if they are at most `base_max_age_days` o
 target branch's new version, so the next request usually finds its base already run, and the comment's cost counts
 only what this job paid for. The price: within the age limit, a shift at the provider counts as an effect of the change, and every
 request compares with the same base runs, so one noisy base run moves all their verdicts; `base_max_age_days: 0` runs
-both versions together, as an experiment that counts the gate's errors should. The gate never reuses runs when either version's model has no date, when the base ran under a request's own `prepare`, or when the target branch has no valid `gate.yaml`. The job needs `actions: read` to find earlier runs;
+both versions together, as an experiment that counts the gate's errors should. The gate never reuses runs when either version's model has no date, when the request changes `prepare`, or when the target branch has no valid `gate.yaml`. The job needs `actions: read` to find earlier runs;
 without it the base runs again and the comment says so.
 
 The rules (`delta`, `k`, `budgets`, `prices`, `base_max_age_days`) come from the target branch's `gate.yaml`, so editing the rules in a

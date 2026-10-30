@@ -93,7 +93,7 @@ Reuse has two prices:
 - **Shared luck.** Every request within the age limit compares with the same base runs. With one run per case, a lucky
   or unlucky base run moves all their verdicts the same way. Use `0` when you count the gate's errors across requests.
 
-The gate never reuses runs when either version's model has no date, when the base ran under a request's own `prepare`, or when the target branch has no valid `gate.yaml`. Prefer a dated
+The gate never reuses runs when either version's model has no date, when the request changes `prepare`, or when the target branch has no valid `gate.yaml`. Prefer a dated
 snapshot. For a model without a date, the comment warns, and the gate refuses to compare (`infra error`) runs
 with a pause longer than one hour, and, when both versions asked for it, runs the provider reported as different models.
 Reuse needs `actions: read` in the job's `permissions`; without it the base runs again and the comment says why.
