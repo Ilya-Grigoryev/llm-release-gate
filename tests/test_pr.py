@@ -647,6 +647,7 @@ def test_the_cache_gives_only_good_recent_runs_of_a_dated_model(tmp_path):
             record("a", 1, now),  # beyond k
             record("b", 0, now + timedelta(hours=2)),  # a wrong clock
             record("c", 0, now, trace=[1]),  # malformed
+            record("e", -1, now),
             {"case": "d"},
         )
     )
@@ -778,3 +779,52 @@ def test_a_job_that_cannot_read_other_runs_says_so(repo, monkeypatch):
     _, out = cached_gate(repo)
     assert "Give it `actions: read`." in (out / "comment.md").read_text()
     assert "earlier runs: 403" in (out / "base.log").read_text()
+
+
+def test_refresh_fails_when_it_cannot_run_or_hash(repo, monkeypatch):
+    args = [
+        "--refresh",
+        "--cache",
+        str(repo.parent / "cache"),
+        "--out",
+        str(repo.parent / "refresh"),
+    ]
+    version(repo, "fail")
+    assert pr.main(args) == pr.INFRA_ERROR
+    version(repo, "answer")
+    monkeypatch.setattr(pr, "version", lambda *a: None)
+    assert pr.main(args) == pr.INFRA_ERROR
+    monkeypatch.setattr(pr, "checked_set", lambda *a: 1 / 0)
+    assert pr.main(args) == pr.INFRA_ERROR
+
+
+def test_a_broken_cache_never_fails_the_check(repo):
+    version(repo, "bare")
+    _, out = cached_gate(repo)
+    verdict = json.loads((out / "verdict.json").read_text())
+    path = (
+        repo.parent
+        / "cache"
+        / "demo"
+        / f"{verdict['base_config']}-{verdict['set_hash']}.jsonl"
+    )
+    [r] = records(path)
+    path.write_text(
+        json.dumps({**r, "run_id": ["unhashable"], "requested_model": 5}) + "\n"
+    )
+    code, out = cached_gate(repo)
+    assert code == pr.QUALITY_FAIL
+    assert not any(r.get("reused") for r in records(out / "base.jsonl"))
+    assert "earlier runs: TypeError" in (out / "base.log").read_text()
+
+
+def test_a_run_from_a_wrong_clock_gives_way_to_a_new_one(tmp_path):
+    now = datetime.now(UTC)
+    (tmp_path / "v-s.jsonl").write_text(
+        lines(record("a", 0, now + timedelta(days=3), "FUTURE"))
+    )
+    runs = tmp_path / "job" / "base.jsonl"
+    runs.parent.mkdir()
+    runs.write_text(lines(record("a", 0, now)))
+    pr.keep(tmp_path, runs, 7)
+    assert [r["run_id"] for r in records(tmp_path / "v-s.jsonl")] == ["R1"]

@@ -22,6 +22,8 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import yaml
+
 from llm_release_gate import project, shared
 from llm_release_gate.gate import (
     BUDGET_FAIL,
@@ -174,6 +176,7 @@ def cached(path: Path, version_hash: str, set_hash: str) -> dict[tuple[str, int]
         and r.get("error") is None
         and isinstance(r.get("case"), str)
         and type(r.get("rep")) is int
+        and r["rep"] >= 0
         and isinstance(r.get("trace") or {}, dict)
     }
 
@@ -182,7 +185,7 @@ def dated(config: Path) -> bool:
     """The config names a dated model; a model without a date never runs from the cache (D-018)."""
     try:
         return not is_alias(load_config(config).model)
-    except (ValueError, OSError):
+    except (ValueError, OSError, yaml.YAMLError):
         return False
 
 
@@ -239,8 +242,10 @@ def keep(cache: Path, runs: Path, days: float) -> None:
         path = cache / f"{version_hash}-{set_hash}.jsonl"
         merged, raw_old = cached(path, version_hash, set_hash), raw_lines(path)
         for at, r in cached(runs, version_hash, set_hash).items():
-            before = when(merged[at]) if at in merged else None
-            if when(r) and (before is None or when(r) > before):
+            old = merged.get(at)
+            if when(r) and (
+                old is None or not recent(old, days) or when(r) > when(old)
+            ):
                 merged[at] = {k: v for k, v in r.items() if k != "reused"}
         lines = "".join(json.dumps(r) + "\n" for r in merged.values())
         kept = "".join(
@@ -262,16 +267,35 @@ def earlier(
 ) -> tuple[int, str | None]:
     """Put the version's recent runs, from CACHE and from other jobs, into OUT. Returns how many, and a note for the
     comment when the job cannot read other jobs' runs."""
-    line, note = shared.fetch(
-        shared.name(p.name, version_hash, set_hash),
-        lambda runs: keep(cache, runs, p.base_max_age_days),
-        p.base_max_age_days,
-        os.environ,
-    )
-    reused = reuse(cache, version_hash, set_hash, p.base_max_age_days, p.k, out)
+    try:
+        line, note = shared.fetch(
+            shared.name(p.name, version_hash, set_hash),
+            lambda runs: keep(cache, runs, p.base_max_age_days),
+            p.base_max_age_days,
+            os.environ,
+        )
+        reused = reuse(cache, version_hash, set_hash, p.base_max_age_days, p.k, out)
+    except Exception as e:  # noqa: BLE001 - reuse saves money and must never fail a check: the base runs
+        line, note, reused = f"earlier runs: {type(e).__name__}: {e}", None, 0
+        out.unlink(missing_ok=True)
+        native(out).unlink(missing_ok=True)
     with log.open("a") as f:
         f.write(f"{line}\n{reused} runs of {version_hash[:12]} reused\n")
     return reused, note
+
+
+def store(
+    cache: Path, dest: Path, arms: tuple[str, ...], pipeline: str, days: float
+) -> None:
+    """Name this job's paid runs for upload and keep them in CACHE; a failure here costs a later reuse, never the
+    verdict."""
+    try:
+        share(dest, pipeline)
+        for arm in arms:
+            keep(cache, dest / arm, days)
+    except Exception as e:  # noqa: BLE001 - see `earlier`
+        with (dest / "base.log").open("a") as f:
+            f.write(f"runs not kept for later jobs: {type(e).__name__}: {e}\n")
 
 
 def share(dest: Path, pipeline: str) -> None:
@@ -388,9 +412,9 @@ def one(
         lambda: call([*runs, "--config", p.config, "--out", str(dest / "candidate.jsonl")], candidate, logs[1]),
     )  # fmt: skip
     if cache:  # what was paid for is kept, a failed arm's finished runs too
-        for arm in ("base.jsonl", "candidate.jsonl"):
-            keep(cache, dest / arm, p.base_max_age_days)
-        share(dest, p.name)
+        store(
+            cache, dest, ("base.jsonl", "candidate.jsonl"), p.name, p.base_max_age_days
+        )
     for arm, code, log in zip(("base version", "candidate"), codes, logs, strict=True):
         if code != 0:
             raise Infra(f"The {arm} did not finish its runs.", log)
@@ -528,10 +552,11 @@ def refresh(
                 raise Infra("The project could not be prepared.", log)
             golden, set_hash = checked_set(p, tree, dest)
             here = version(tree, p.config, dest / "base.log")
+            if not here:
+                raise Infra("The version's hash cannot be computed.", dest / "base.log")
             why = (
                 "base_max_age_days is 0" if not p.base_max_age_days
                 else "its model has no date" if not dated(tree / p.config)
-                else "its version has no hash" if not here
                 else None
             )  # fmt: skip
             if why:
@@ -548,8 +573,7 @@ def refresh(
                 tree,
                 dest / "base.log",
             )  # fmt: skip
-            keep(cache / name, dest / "base.jsonl", p.base_max_age_days)
-            share(dest, name)
+            store(cache / name, dest, ("base.jsonl",), name, p.base_max_age_days)
             if done:
                 raise Infra("The runs did not finish.", dest / "base.log")
             print(

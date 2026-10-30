@@ -67,6 +67,10 @@ def test_defaults(tmp_path):
             "base_max_age_days: -1 is less than the minimum of 0",
         ),
         (
+            "pipelines: {a: {config: c, golden: g}}\nbase_max_age_days: .inf\n",
+            "base_max_age_days: inf is greater than the maximum of 365",
+        ),
+        (
             "pipelines: {a: {config: c, golden: g}}\nprepare: npm ci\n",
             "prepare: 'npm ci' is not of type 'array'",
         ),
