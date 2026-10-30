@@ -126,10 +126,16 @@ def test_a_fork_fails_the_job_and_says_why(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "base_ref, command",
-    [("main", "pr --base FETCH_HEAD"), ("", "pr --refresh")],
+    "base_ref, refresh, command",
+    [
+        ("main", "", "pr --base FETCH_HEAD"),
+        ("", "true", "pr --refresh"),
+        ("", "", None),  # a push to another branch, a merge queue
+    ],
 )
-def test_a_request_is_gated_and_a_push_refreshes_the_cache(tmp_path, base_ref, command):
+def test_a_request_is_gated_and_a_push_refreshes_the_cache(
+    tmp_path, base_ref, refresh, command
+):
     bin_dir, log = tmp_path / "bin", tmp_path / "log"
     bin_dir.mkdir()
     for tool in ("uv", "git"):
@@ -141,13 +147,30 @@ def test_a_request_is_gated_and_a_push_refreshes_the_cache(tmp_path, base_ref, c
         "NAME": "demo",
         "CACHE": str(tmp_path / "cache"),
         "GITHUB_BASE_REF": base_ref,
+        "REFRESH": refresh,
         "RUNNER_TEMP": str(tmp_path),
     }
-    subprocess.run(["bash", "-c", _step("gate")["run"]], env=env, check=True)
+    done = subprocess.run(
+        ["bash", "-c", _step("gate")["run"]],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if command is None:
+        assert done.returncode == 1 and "default branch" in done.stdout
+        assert not log.exists()
+        return
     calls = log.read_text()
     assert f"llm-release-gate {command}" in calls
     assert f"--cache {tmp_path / 'cache'}" in calls
     assert ("git fetch" in calls) is bool(base_ref)
+
+
+def test_refresh_runs_only_on_the_default_branch():
+    when = _step("gate")["env"]["REFRESH"]
+    assert "github.ref_name == github.event.repository.default_branch" in when
+    assert "'schedule'" in when
 
 
 @pytest.mark.parametrize("files, saved", [([], ""), (["v-s.jsonl"], "any=true\n")])
@@ -176,3 +199,5 @@ def test_a_requests_cache_never_hides_its_target_branchs():
         "branch",
     ]  # the branch's last, on top
     assert "github.base_ref != '' && 'request' || 'branch'" in save
+    saves = [s["if"] for s in cache if "save" in s["uses"]]
+    assert "github.event_name != 'pull_request_target'" in saves[0]

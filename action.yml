@@ -75,14 +75,19 @@ runs:
         PROJECT: ${{ inputs.project-dir }}
         NAME: ${{ steps.pipeline.outputs.name }}
         CACHE: ${{ steps.pipeline.outputs.cache }}
+        # a schedule runs on the default branch; requests see the default branch's caches
+        REFRESH: ${{ (github.event_name == 'schedule' || ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref_name == github.event.repository.default_branch)) && 'true' || '' }}
       run: |
         if [ -n "$GITHUB_BASE_REF" ]; then
           git fetch --depth=1 origin "$GITHUB_BASE_REF"
           uv run --project "$PROJECT" llm-release-gate pr --base FETCH_HEAD --project "$PROJECT" --pipeline "$NAME" \
             --out "$RUNNER_TEMP/llm-release-gate" --cache "$CACHE"
-        else  # not a request: run this branch's version where the cache has no recent runs
+        elif [ "$REFRESH" = true ]; then  # run the default branch's version where the cache has no recent runs
           uv run --project "$PROJECT" llm-release-gate pr --refresh --project "$PROJECT" --pipeline "$NAME" \
             --out "$RUNNER_TEMP/llm-release-gate" --cache "$CACHE"
+        else
+          echo "::error::the gate runs on a pull request, or on a push or schedule on the default branch"
+          exit 1
         fi
     - name: cached runs
       id: cached
@@ -93,7 +98,8 @@ runs:
       run: |  # an empty directory cannot be saved
         if ls "$DIR"/*.jsonl > /dev/null 2>&1; then echo "any=true" >> "$GITHUB_OUTPUT"; fi
     - uses: actions/cache/save@v6
-      if: ${{ !cancelled() && steps.cached.outputs.any == 'true' }}
+      # pull_request_target saves to the target branch's cache, which the request's code must not fill
+      if: ${{ !cancelled() && steps.cached.outputs.any == 'true' && github.event_name != 'pull_request_target' }}
       with:
         path: ${{ steps.pipeline.outputs.cache }}/${{ steps.pipeline.outputs.name }}
         key: "llm-release-gate:${{ steps.pipeline.outputs.name }}:${{ github.base_ref != '' && 'request' || 'branch' }}:${{ github.run_id }}-${{ github.run_attempt }}"

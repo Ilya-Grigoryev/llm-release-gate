@@ -30,7 +30,7 @@ from llm_release_gate.gate import (
 )
 from llm_release_gate.golden import check
 from llm_release_gate.pipeline import is_alias, load_config
-from llm_release_gate.runner import read_records, results
+from llm_release_gate.runner import read_records
 from llm_release_gate.version import own_files
 
 SYNC = [
@@ -134,13 +134,17 @@ def native(runs: Path) -> Path:
     return runs.with_name(runs.stem + ".native.jsonl")
 
 
-def raw_lines(runs: Path) -> dict[str, str]:
-    """Run id -> its line of raw responses."""
-    return {
-        r["run_id"]: json.dumps(r) + "\n"
-        for r in read_records(native(runs))
-        if "run_id" in r
-    }
+# run id, case, repetition: one run id covers a whole runner call
+Key = tuple[str, str, int]
+
+
+def key(r: dict) -> Key:
+    return r.get("run_id"), r.get("case"), r.get("rep")
+
+
+def raw_lines(runs: Path) -> dict[Key, str]:
+    """Each run's line of raw responses."""
+    return {key(r): json.dumps(r) + "\n" for r in read_records(native(runs))}
 
 
 def when(record: dict) -> datetime | None:
@@ -151,6 +155,27 @@ def when(record: dict) -> datetime | None:
     return t if t.tzinfo else t.replace(tzinfo=UTC)
 
 
+def recent(record: dict, days: float) -> bool:
+    """Run at most DAYS ago; a time ahead of this clock by more than a minute is a wrong clock, never recent."""
+    now, t = datetime.now(UTC), when(record)
+    return t is not None and now - timedelta(days=days) <= t <= now + timedelta(
+        minutes=1
+    )
+
+
+def cached(path: Path, version_hash: str, set_hash: str) -> dict[tuple[str, int], dict]:
+    """The error-free runs in PATH of this version on this set, by case and repetition; a malformed line is skipped."""
+    return {
+        (r["case"], r["rep"]): r
+        for r in read_records(path)
+        if (r.get("config_hash"), r.get("set_hash")) == (version_hash, set_hash)
+        and r.get("error") is None
+        and isinstance(r.get("case"), str)
+        and type(r.get("rep")) is int
+        and isinstance(r.get("trace") or {}, dict)
+    }
+
+
 def dated(config: Path) -> bool:
     """The config names a dated model; a model without a date never runs from the cache (D-018)."""
     try:
@@ -159,65 +184,67 @@ def dated(config: Path) -> bool:
         return False
 
 
-def reuse(cache: Path, version_hash: str, set_hash: str, days: float, out: Path) -> int:
-    """Copy the cache's error-free runs of this version on this set, at most DAYS old, to OUT with their raw responses,
-    each marked `reused`; the runner then runs only the rest. Returns how many it copied."""
+def reuse(
+    cache: Path, version_hash: str, set_hash: str, days: float, k: int, out: Path
+) -> int:
+    """Copy the cache's error-free runs of this version on this set, the first K per case, at most DAYS old, to OUT with
+    their raw responses, each marked `reused`; the runner then runs only the rest. Returns how many it copied."""
     path = cache / f"{version_hash}-{set_hash}.jsonl"
-    since = datetime.now(UTC) - timedelta(days=days)
     runs = [
         r
-        for r in results(path, version_hash, set_hash).values()
-        if (t := when(r)) and t >= since
+        for (_, rep), r in cached(path, version_hash, set_hash).items()
+        if rep < k and recent(r, days)
     ]
-    if not runs or any(is_alias(r.get("requested_model")) for r in runs):
+    if any(is_alias(r.get("requested_model")) for r in runs):
         return 0
-    raw = raw_lines(path)
-    with out.open("a") as f, native(out).open("a") as g:
-        for r in runs:
-            if (r.get("trace") or {}).get("native"):
-                if r["run_id"] in raw:
-                    g.write(raw[r["run_id"]])
-                    r["trace"]["native"] = native(out).name
-                else:
-                    del r["trace"]["native"]
-            f.write(json.dumps({**r, "reused": True}) + "\n")
+    raw, lines, raws = raw_lines(path), [], []
+    for r in runs:
+        trace = r.get("trace")
+        if trace and trace.get("native"):
+            if key(r) in raw:
+                raws.append(raw[key(r)])
+                trace["native"] = native(out).name
+            else:
+                del trace["native"]
+        lines.append(json.dumps({**r, "reused": True}) + "\n")
+    # the raw responses first: a record never points to a missing line
+    with native(out).open("a") as f:
+        f.writelines(raws)
+    with out.open("a") as f:
+        f.writelines(lines)
     return len(runs)
 
 
 def keep(cache: Path, runs: Path, days: float) -> None:
-    """Add RUNS' error-free runs to the cache, the newest per case and repetition, and delete files whose runs are all
-    older than DAYS."""
+    """Add RUNS' error-free runs to the cache, the newest per case and repetition, and delete files without a run from
+    the last DAYS."""
     cache.mkdir(parents=True, exist_ok=True)
-    since = datetime.now(UTC) - timedelta(days=days)
     for old in cache.glob("*.jsonl"):
         if not old.name.endswith(".native.jsonl") and not any(
-            (t := when(r)) and t >= since for r in read_records(old)
+            recent(r, days) for r in read_records(old)
         ):
             old.unlink()
             native(old).unlink(missing_ok=True)
-    new = [r for r in read_records(runs) if r.get("error") is None and when(r)]
+    found = read_records(runs)
     raw = raw_lines(runs)
     for version_hash, set_hash in {
-        (r.get("config_hash"), r.get("set_hash")) for r in new
+        (r.get("config_hash"), r.get("set_hash")) for r in found
     }:
-        if not (version_hash and set_hash):
-            continue
+        if not all(
+            isinstance(h, str) and h.isalnum() for h in (version_hash, set_hash)
+        ):
+            continue  # a hash names a file
         path = cache / f"{version_hash}-{set_hash}.jsonl"
-        merged = results(path, version_hash, set_hash)
-        raw_old = raw_lines(path)
-        for r in new:
-            if (r["config_hash"], r["set_hash"]) != (version_hash, set_hash):
-                continue
-            key = r["case"], r["rep"]
-            if key not in merged or when(r) > (
-                when(merged[key]) or datetime.min.replace(tzinfo=UTC)
-            ):
-                merged[key] = {k: v for k, v in r.items() if k != "reused"}
+        merged, raw_old = cached(path, version_hash, set_hash), raw_lines(path)
+        for at, r in cached(runs, version_hash, set_hash).items():
+            before = when(merged[at]) if at in merged else None
+            if when(r) and (before is None or when(r) > before):
+                merged[at] = {k: v for k, v in r.items() if k != "reused"}
         lines = "".join(json.dumps(r) + "\n" for r in merged.values())
         kept = "".join(
             line
             for r in merged.values()
-            if (line := raw.get(r["run_id"]) or raw_old.get(r["run_id"]))
+            if (line := raw.get(key(r)) or raw_old.get(key(r)))
         )
         native(path).write_text(kept)
         path.write_text(lines)
@@ -300,7 +327,12 @@ def one(
             and dated(candidate / p.config)
         ):
             reused = reuse(
-                cache, hashes[0], set_hash, p.base_max_age_days, dest / "base.jsonl"
+                cache,
+                hashes[0],
+                set_hash,
+                p.base_max_age_days,
+                p.k,
+                dest / "base.jsonl",
             )
             with logs[0].open("a") as f:
                 f.write(f"{reused} runs of {hashes[0][:12]} reused from the cache\n")
@@ -464,7 +496,12 @@ def refresh(
                 print(f"{name}: not cached, {why}")
                 continue
             reused = reuse(
-                cache / name, here, set_hash, p.base_max_age_days, dest / "base.jsonl"
+                cache / name,
+                here,
+                set_hash,
+                p.base_max_age_days,
+                p.k,
+                dest / "base.jsonl",
             )
             done = call(
                 [*PYTHON, "-m", "llm_release_gate.runner", "--golden", str(golden), "-k", str(p.k),
@@ -482,6 +519,9 @@ def refresh(
             print(f"{name}: infra error: {e}", file=sys.stderr)
             if e.log and e.log.is_file():
                 print(e.log.read_text(errors="replace"), file=sys.stderr)
+            code = INFRA_ERROR
+        except Exception:  # noqa: BLE001 - a bug is an infra error too, never exit 1
+            traceback.print_exc()
             code = INFRA_ERROR
     return code
 
