@@ -2,14 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { isDocsPath } from "@/lib/access";
 import { PAGES } from "@/lib/docs";
 
 /** Docs and Projects in the header; the one the reader is in is marked. The home page belongs to neither. */
 export function SiteNav() {
   const path = usePathname();
-  const docs = isDocsPath(path);
-  const projects = !docs && path !== "/" && path !== "/access";
+  const docs = path === "/docs" || path.startsWith("/docs/");
+  const projects = !docs && path !== "/";
   const item = (active: boolean) =>
     `relative flex h-full items-center px-0.5 text-base ${
       active ? "text-ink after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:bg-ink" : "text-ink-2 hover:text-ink"
