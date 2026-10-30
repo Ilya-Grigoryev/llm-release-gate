@@ -34,6 +34,9 @@ def version(repo, mode, gate=GATE):
 @pytest.fixture
 def repo(tmp_path, monkeypatch):
     """A project whose target branch answers every case right; the gate runs in this interpreter, without uv."""
+    monkeypatch.delenv(
+        "GITHUB_ACTIONS", raising=False
+    )  # no lookups of other jobs' runs
     monkeypatch.setattr(pr, "SYNC", None)
     monkeypatch.setattr(pr, "PYTHON", [sys.executable])
     repo = tmp_path / "repo"
@@ -529,6 +532,9 @@ def test_a_model_without_a_date_never_comes_from_the_cache(repo):
     cached_gate(repo)
     _, out = cached_gate(repo)
     assert not any(r.get("reused") for r in records(out / "base.jsonl"))
+    assert (out / "shared.txt").read_text().split()[
+        0
+    ] == "candidate"  # the base's alias is never shared
 
 
 def test_more_runs_per_case_add_to_the_cached_ones(repo):
@@ -732,3 +738,43 @@ def test_the_comment_counts_only_paid_runs_and_says_how_old_the_reused_are(repo)
         "Base: 1 of 2 runs come from earlier jobs; the oldest ran 2.0 days before"
         in (out / "comment.md").read_text()
     )
+
+
+def test_other_jobs_runs_are_reused_and_this_jobs_are_named_for_upload(
+    repo, monkeypatch
+):
+    version(repo, "bare")
+    _, out = cached_gate(repo)
+    shared_txt = (out / "shared.txt").read_text().split()
+    base, candidate = shared_txt[1], shared_txt[3]
+    assert shared_txt[0::2] == ["base", "candidate"] and base != candidate
+    assert base.startswith("llm-release-gate-runs-demo-")
+    other_job = repo.parent / "artifact" / "base.jsonl"
+    other_job.parent.mkdir()
+    shutil.copy(out / "base.jsonl", other_job)
+    shutil.rmtree(repo.parent / "cache")  # a new job starts without a cache
+    asked = []
+
+    def fetch(name, keep, days, env):
+        asked.append(name)
+        keep(other_job)
+        return "earlier runs: found", None
+
+    monkeypatch.setattr(pr.shared, "fetch", fetch)
+    version(repo, "answer-again")
+    _, out = cached_gate(repo)
+    assert asked == [base]
+    assert all(r["reused"] for r in records(out / "base.jsonl"))
+    assert (out / "shared.txt").read_text().split()[
+        0
+    ] == "candidate"  # nothing new to share of the base
+
+
+def test_a_job_that_cannot_read_other_runs_says_so(repo, monkeypatch):
+    monkeypatch.setattr(
+        pr.shared, "fetch", lambda *a: ("earlier runs: 403", "Give it `actions: read`.")
+    )
+    version(repo, "bare")
+    _, out = cached_gate(repo)
+    assert "Give it `actions: read`." in (out / "comment.md").read_text()
+    assert "earlier runs: 403" in (out / "base.log").read_text()

@@ -8,7 +8,7 @@ inputs:
     description: The project's directory in the repository, with gate.yaml.
     default: "."
   github-token:
-    description: Writes the comment; needs pull-requests write.
+    description: Writes the comment (pull-requests write) and reads earlier runs (actions read).
     default: ${{ github.token }}
   cases:
     description: Upload the golden set's text files (cases and text inputs) as a second artifact, for a dashboard to show.
@@ -47,20 +47,6 @@ runs:
         echo "name=$PIPELINE" >> "$GITHUB_OUTPUT"
         echo "out=$RUNNER_TEMP/llm-release-gate/$PIPELINE" >> "$GITHUB_OUTPUT"
         echo "cache=$RUNNER_TEMP/llm-release-gate-cache" >> "$GITHUB_OUTPUT"
-    # GitHub shows a request its own caches before its target branch's, so each gets its own prefix and a request
-    # restores both: its own, then the branch's on top. A pipeline's name may contain "-", never ":".
-    - uses: actions/cache/restore@v6
-      if: steps.fork.outputs.fork != 'true' && github.base_ref != ''
-      with:
-        path: ${{ steps.pipeline.outputs.cache }}/${{ steps.pipeline.outputs.name }}
-        key: "llm-release-gate:${{ steps.pipeline.outputs.name }}:request:${{ github.run_id }}-${{ github.run_attempt }}"
-        restore-keys: "llm-release-gate:${{ steps.pipeline.outputs.name }}:request:"
-    - uses: actions/cache/restore@v6
-      if: steps.fork.outputs.fork != 'true'
-      with:
-        path: ${{ steps.pipeline.outputs.cache }}/${{ steps.pipeline.outputs.name }}
-        key: "llm-release-gate:${{ steps.pipeline.outputs.name }}:branch:${{ github.run_id }}-${{ github.run_attempt }}"
-        restore-keys: "llm-release-gate:${{ steps.pipeline.outputs.name }}:branch:"
     - name: can comment
       if: steps.fork.outputs.fork != 'true' && github.base_ref != ''
       shell: bash
@@ -75,34 +61,47 @@ runs:
         PROJECT: ${{ inputs.project-dir }}
         NAME: ${{ steps.pipeline.outputs.name }}
         CACHE: ${{ steps.pipeline.outputs.cache }}
-        # a schedule runs on the default branch; requests see the default branch's caches
+        GITHUB_TOKEN: ${{ inputs.github-token }}  # reads other jobs' runs; needs actions: read
+        # a schedule runs on the default branch
         REFRESH: ${{ (github.event_name == 'schedule' || ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref_name == github.event.repository.default_branch)) && 'true' || '' }}
       run: |
         if [ -n "$GITHUB_BASE_REF" ]; then
           git fetch --depth=1 origin "$GITHUB_BASE_REF"
           uv run --project "$PROJECT" llm-release-gate pr --base FETCH_HEAD --project "$PROJECT" --pipeline "$NAME" \
             --out "$RUNNER_TEMP/llm-release-gate" --cache "$CACHE"
-        elif [ "$REFRESH" = true ]; then  # run the default branch's version where the cache has no recent runs
+        elif [ "$REFRESH" = true ]; then  # run the default branch's version unless a job did lately
           uv run --project "$PROJECT" llm-release-gate pr --refresh --project "$PROJECT" --pipeline "$NAME" \
             --out "$RUNNER_TEMP/llm-release-gate" --cache "$CACHE"
         else
           echo "::error::the gate runs on a pull request, or on a push or schedule on the default branch"
           exit 1
         fi
-    - name: cached runs
-      id: cached
-      if: ${{ !cancelled() && steps.pipeline.outputs.name != '' }}
+    # each arm this job paid for, named by its version and set, so a later job does not run it again (`shared`);
+    # pull_request_target runs the request's code with the target branch's trust, so it shares nothing
+    - name: shared runs
+      id: shared
+      if: ${{ !cancelled() && steps.pipeline.outputs.name != '' && github.event_name != 'pull_request_target' }}
       shell: bash
       env:
-        DIR: ${{ steps.pipeline.outputs.cache }}/${{ steps.pipeline.outputs.name }}
-      run: |  # an empty directory cannot be saved
-        if ls "$DIR"/*.jsonl > /dev/null 2>&1; then echo "any=true" >> "$GITHUB_OUTPUT"; fi
-    - uses: actions/cache/save@v6
-      # pull_request_target saves to the target branch's cache, which the request's code must not fill
-      if: ${{ !cancelled() && steps.cached.outputs.any == 'true' && github.event_name != 'pull_request_target' }}
+        OUT: ${{ steps.pipeline.outputs.out }}
+      run: |
+        [ ! -f "$OUT/shared.txt" ] || while read -r arm name; do echo "$arm=$name" >> "$GITHUB_OUTPUT"; done < "$OUT/shared.txt"
+    - uses: actions/upload-artifact@v7
+      if: ${{ !cancelled() && steps.shared.outputs.base != '' }}
       with:
-        path: ${{ steps.pipeline.outputs.cache }}/${{ steps.pipeline.outputs.name }}
-        key: "llm-release-gate:${{ steps.pipeline.outputs.name }}:${{ github.base_ref != '' && 'request' || 'branch' }}:${{ github.run_id }}-${{ github.run_attempt }}"
+        name: ${{ steps.shared.outputs.base }}
+        path: |
+          ${{ steps.pipeline.outputs.out }}/base.jsonl
+          ${{ steps.pipeline.outputs.out }}/base.native.jsonl
+        overwrite: true
+    - uses: actions/upload-artifact@v7
+      if: ${{ !cancelled() && steps.shared.outputs.candidate != '' }}
+      with:
+        name: ${{ steps.shared.outputs.candidate }}
+        path: |
+          ${{ steps.pipeline.outputs.out }}/candidate.jsonl
+          ${{ steps.pipeline.outputs.out }}/candidate.native.jsonl
+        overwrite: true
     - name: comment
       if: ${{ !cancelled() && steps.fork.outputs.fork != 'true' && github.base_ref != '' }}
       shell: bash

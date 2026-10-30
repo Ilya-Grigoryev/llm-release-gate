@@ -173,31 +173,24 @@ def test_refresh_runs_only_on_the_default_branch():
     assert "'schedule'" in when
 
 
-@pytest.mark.parametrize("files, saved", [([], ""), (["v-s.jsonl"], "any=true\n")])
-def test_only_a_cache_with_runs_is_saved(tmp_path, files, saved):
-    (tmp_path / "cache").mkdir()
-    for name in files:
-        (tmp_path / "cache" / name).write_text("{}\n")
+def test_each_paid_arm_is_shared_under_its_name(tmp_path):
+    (tmp_path / "shared.txt").write_text("base llm-release-gate-runs-demo-a-b\n")
     output = tmp_path / "output"
-    output.write_text("")
-    env = {
-        "PATH": "/usr/bin:/bin",
-        "DIR": str(tmp_path / "cache"),
-        "GITHUB_OUTPUT": str(output),
-    }
-    subprocess.run(["bash", "-c", _step("cached runs")["run"]], env=env, check=True)
-    assert output.read_text() == saved
-
-
-def test_a_requests_cache_never_hides_its_target_branchs():
+    env = {"PATH": "/usr/bin:/bin", "OUT": str(tmp_path), "GITHUB_OUTPUT": str(output)}
+    subprocess.run(["bash", "-c", _step("shared runs")["run"]], env=env, check=True)
+    assert output.read_text() == "base=llm-release-gate-runs-demo-a-b\n"
+    (tmp_path / "shared.txt").unlink()
+    subprocess.run(["bash", "-c", _step("shared runs")["run"]], env=env, check=True)
     action = yaml.safe_load((ROOT / "action.yml").read_text())
-    cache = [s for s in action["runs"]["steps"] if "actions/cache" in s.get("uses", "")]
-    restores = [s["with"]["restore-keys"] for s in cache if "restore" in s["uses"]]
-    [save] = [s["with"]["key"] for s in cache if "save" in s["uses"]]
-    assert [k.split(":")[2] for k in restores] == [
-        "request",
-        "branch",
-    ]  # the branch's last, on top
-    assert "github.base_ref != '' && 'request' || 'branch'" in save
-    saves = [s["if"] for s in cache if "save" in s["uses"]]
-    assert "github.event_name != 'pull_request_target'" in saves[0]
+    uploads = [
+        s
+        for s in action["runs"]["steps"]
+        if "steps.shared.outputs" in str(s.get("with", {}).get("name"))
+    ]
+    assert [s["with"]["name"] for s in uploads] == [
+        "${{ steps.shared.outputs.base }}",
+        "${{ steps.shared.outputs.candidate }}",
+    ]
+    assert all(s["with"]["overwrite"] for s in uploads)
+    assert "pull_request_target" in _step("shared runs")["if"]
+    assert "actions/cache" not in (ROOT / "action.yml").read_text()

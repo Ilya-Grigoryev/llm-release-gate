@@ -6,7 +6,9 @@ the verdict, both arms' runs and logs, and cases/ with the set's text files (nev
 Exits with the worst outcome: 20 infra error, 10 quality fail, 12 budget fail, 11 inconclusive, 0 pass.
 
 With --cache, runs outlive the job (D-007): the gate reuses the target branch's runs of the same version on the same set,
-up to `base_max_age_days` old, instead of running them again; --refresh fills the cache on the target branch itself.
+up to `base_max_age_days` old, from that directory and from other jobs' artifacts (`shared`), instead of running them
+again. OUT/NAME/shared.txt names the arms this job paid for, for the CI to upload; --refresh runs the target branch's
+version on its own.
 """
 
 import argparse
@@ -20,7 +22,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from llm_release_gate import project
+from llm_release_gate import project, shared
 from llm_release_gate.gate import (
     BUDGET_FAIL,
     INCONCLUSIVE,
@@ -250,6 +252,49 @@ def keep(cache: Path, runs: Path, days: float) -> None:
         path.write_text(lines)
 
 
+def earlier(
+    p: project.Pipeline,
+    cache: Path,
+    version_hash: str,
+    set_hash: str,
+    out: Path,
+    log: Path,
+) -> tuple[int, str | None]:
+    """Put the version's recent runs, from CACHE and from other jobs, into OUT. Returns how many, and a note for the
+    comment when the job cannot read other jobs' runs."""
+    line, note = shared.fetch(
+        shared.name(p.name, version_hash, set_hash),
+        lambda runs: keep(cache, runs, p.base_max_age_days),
+        p.base_max_age_days,
+        os.environ,
+    )
+    reused = reuse(cache, version_hash, set_hash, p.base_max_age_days, p.k, out)
+    with log.open("a") as f:
+        f.write(f"{line}\n{reused} runs of {version_hash[:12]} reused\n")
+    return reused, note
+
+
+def share(dest: Path, pipeline: str) -> None:
+    """Name each arm with runs this job paid for in DEST/shared.txt (`base NAME`), for the CI to upload as an artifact
+    of that name; the candidate only if its version differs from the base's, neither for a model without a date."""
+    names = {}
+    for arm in ("base", "candidate"):
+        found = read_records(dest / f"{arm}.jsonl")
+        paid = {
+            (r.get("config_hash"), r.get("set_hash"))
+            for r in found
+            if r.get("error") is None and not r.get("reused")
+        }
+        if any(is_alias(r.get("requested_model")) for r in found):
+            continue
+        hashes = paid.pop() if len(paid) == 1 else ()
+        if all(isinstance(h, str) and h.isalnum() for h in hashes) and hashes:
+            n = shared.name(pipeline, *hashes)
+            if n not in names.values():
+                names[arm] = n
+    (dest / "shared.txt").write_text("".join(f"{a} {n}\n" for a, n in names.items()))
+
+
 def checked_set(p: project.Pipeline, candidate: Path, dest: Path) -> tuple[Path, str]:
     """The pipeline's set and its hash; its text files go to DEST/cases first, so a reader sees the cases whatever
     happens next."""
@@ -312,7 +357,7 @@ def one(
         base = None
     if not p.base_max_age_days:
         cache = None
-    logs = dest / "base.log", dest / "candidate.log"
+    logs, note = (dest / "base.log", dest / "candidate.log"), None
     if base is not None and (may_skip or cache):
         hashes = both(
             lambda: version(base, base_config, logs[0]),
@@ -326,16 +371,9 @@ def one(
             and dated(base / base_config)
             and dated(candidate / p.config)
         ):
-            reused = reuse(
-                cache,
-                hashes[0],
-                set_hash,
-                p.base_max_age_days,
-                p.k,
-                dest / "base.jsonl",
+            _, note = earlier(
+                p, cache, hashes[0], set_hash, dest / "base.jsonl", logs[0]
             )
-            with logs[0].open("a") as f:
-                f.write(f"{reused} runs of {hashes[0][:12]} reused from the cache\n")
     runs = [
         *PYTHON,
         "-m",
@@ -352,6 +390,7 @@ def one(
     if cache:  # what was paid for is kept, a failed arm's finished runs too
         for arm in ("base.jsonl", "candidate.jsonl"):
             keep(cache, dest / arm, p.base_max_age_days)
+        share(dest, p.name)
     for arm, code, log in zip(("base version", "candidate"), codes, logs, strict=True):
         if code != 0:
             raise Infra(f"The {arm} did not finish its runs.", log)
@@ -366,6 +405,9 @@ def one(
     code = call(decide, candidate, dest / "gate.log")
     if code not in WORST or code == INFRA_ERROR or not (dest / "comment.md").is_file():
         raise Infra("The gate could not compare the runs.", dest / "gate.log")
+    if note:
+        with (dest / "comment.md").open("a") as f:
+            f.write(f"\n{note}\n")
     return code
 
 
@@ -495,14 +537,11 @@ def refresh(
             if why:
                 print(f"{name}: not cached, {why}")
                 continue
-            reused = reuse(
-                cache / name,
-                here,
-                set_hash,
-                p.base_max_age_days,
-                p.k,
-                dest / "base.jsonl",
+            reused, note = earlier(
+                p, cache / name, here, set_hash, dest / "base.jsonl", dest / "base.log"
             )
+            if note:
+                print(f"{name}: {note}")
             done = call(
                 [*PYTHON, "-m", "llm_release_gate.runner", "--golden", str(golden), "-k", str(p.k),
                  "--config", p.config, "--out", str(dest / "base.jsonl")],
@@ -510,6 +549,7 @@ def refresh(
                 dest / "base.log",
             )  # fmt: skip
             keep(cache / name, dest / "base.jsonl", p.base_max_age_days)
+            share(dest, name)
             if done:
                 raise Infra("The runs did not finish.", dest / "base.log")
             print(
@@ -545,7 +585,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument(
         "--cache",
         type=Path,
-        help="a directory that keeps runs between jobs; the gate reuses the target branch's recent runs from it",
+        help="a directory for earlier jobs' runs; the gate reuses the target branch's recent runs from it and, on GitHub, "
+        "from other jobs' artifacts",
     )
     p.add_argument(
         "--refresh",
