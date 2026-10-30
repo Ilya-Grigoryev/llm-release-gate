@@ -828,3 +828,10 @@ def test_a_run_from_a_wrong_clock_gives_way_to_a_new_one(tmp_path):
     runs.write_text(lines(record("a", 0, now)))
     pr.keep(tmp_path, runs, 7)
     assert [r["run_id"] for r in records(tmp_path / "v-s.jsonl")] == ["R1"]
+
+
+def test_a_config_that_is_not_yaml_is_an_infra_error(repo):
+    (repo / "demo.yaml").write_text("pipeline: [unclosed\n")
+    code, out = gate(repo)
+    assert code == pr.INFRA_ERROR
+    assert "infra error" in (out / "comment.md").read_text()

@@ -14,6 +14,8 @@ import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
+import yaml
+
 from llm_release_gate import project
 from llm_release_gate.hashing import canonical_hash
 from llm_release_gate.pipeline import config_hash, load_config
@@ -79,7 +81,7 @@ def prompts(config: Path) -> list[Path]:
     """The prompt files a config names; none if it does not load (its own run reports why)."""
     try:
         prompt = load_config(config).prompt
-    except (ValueError, OSError):
+    except (ValueError, OSError, yaml.YAMLError):
         return []
     return [prompt] if isinstance(prompt, Path) else list(prompt.values())
 
