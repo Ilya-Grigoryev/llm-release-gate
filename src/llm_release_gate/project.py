@@ -25,7 +25,7 @@ class Pipeline:
     delta: float = 5.0
     prices: str | None = None
     budgets: dict = field(default_factory=dict)
-    base_max_age_days: float = 7.0
+    base_max_age_days: float = 3.0
 
 
 @dataclass(frozen=True)
