@@ -40,6 +40,18 @@
   --tint-wait: #fdf3dc;
 
   --header: 3.5rem;
+
+  /* Code (lib/highlight.ts): violet, teal and magenta, apart from the arms' and the verdicts' colours. */
+  --code-foreground: var(--ink);
+  --code-token-keyword: #7a3db8;
+  --code-token-string: #17786d;
+  --code-token-string-expression: #17786d;
+  --code-token-link: #17786d;
+  --code-token-constant: #a8456b;
+  --code-token-comment: var(--ink-3);
+  --code-token-function: var(--ink);
+  --code-token-parameter: var(--ink);
+  --code-token-punctuation: var(--ink-2);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -62,6 +74,11 @@
     --housing: #050505;
     --base-ink: #5a9cf0;
     --cand-ink: #f07a45;
+    --code-token-keyword: #c9a2f5;
+    --code-token-string: #6fc6b9;
+    --code-token-string-expression: #6fc6b9;
+    --code-token-link: #6fc6b9;
+    --code-token-constant: #f08dbb;
   }
 }
 

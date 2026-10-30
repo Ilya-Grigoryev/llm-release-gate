@@ -23,6 +23,7 @@ const LANGUAGE: Record<string, string> = {
   javascript: "JavaScript",
   ts: "TypeScript",
   go: "Go",
+  toml: "TOML",
   markdown: "Markdown",
   md: "Markdown",
   text: "Text",
@@ -32,7 +33,11 @@ const LANGUAGE: Record<string, string> = {
 function Pre({ children }: { children?: ReactNode }) {
   const code = isValidElement<{ className?: string; children?: ReactNode }>(children) ? children : null;
   const language = code?.props.className?.replace("language-", "") ?? "";
-  return <Code label={LANGUAGE[language] ?? (language || undefined)}>{textOf(code?.props.children ?? children)}</Code>;
+  return (
+    <Code label={LANGUAGE[language] ?? (language || undefined)} language={language || undefined}>
+      {textOf(code?.props.children ?? children)}
+    </Code>
+  );
 }
 
 /** Links inside the docs go through the router; links out open in place, as any link. */
