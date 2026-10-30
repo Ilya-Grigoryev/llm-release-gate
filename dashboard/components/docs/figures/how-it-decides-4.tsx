@@ -22,7 +22,17 @@ function Switch<T extends string | number | boolean>({ label, value, options, on
           type="button"
           role="radio"
           aria-checked={value === o.value}
+          tabIndex={value === o.value ? 0 : -1}
           onClick={() => onChange(o.value)}
+          onKeyDown={(e) => {
+            const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
+            if (!step) return;
+            e.preventDefault();
+            const i = options.findIndex((x) => x.value === value);
+            const next = options[(i + step + options.length) % options.length];
+            onChange(next.value);
+            (e.currentTarget.parentElement?.children[options.indexOf(next)] as HTMLElement | undefined)?.focus();
+          }}
           className={`px-3 py-1 ${value === o.value ? "bg-ink text-panel" : "hover:bg-paper"}`}
         >
           {o.label}

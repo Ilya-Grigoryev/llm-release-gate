@@ -183,7 +183,7 @@ export default function Home() {
         <H2 id="answers">Three answers</H2>
         <p className="mt-4 max-w-[64ch] text-lg text-ink-2">The barrier has three lamps. Today two of them work; the third is planned.</p>
         <div className="mt-8 overflow-hidden rounded-lg border border-line bg-panel">
-          <div className="hidden grid-cols-[13rem_1fr_1fr] border-b border-line px-6 py-2.5 text-sm text-ink-2 md:grid">
+          <div className="hidden grid-cols-[13rem_1fr_1fr] gap-x-8 border-b border-line px-6 py-2.5 text-sm text-ink-2 md:grid">
             <span>Answer</span>
             <span>Today</span>
             <span>Planned</span>

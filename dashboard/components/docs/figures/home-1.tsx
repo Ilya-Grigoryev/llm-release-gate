@@ -253,10 +253,11 @@ export default function Home1() {
   }, [play]);
 
   const onKey = (e: KeyboardEvent, i: number) => {
-    const step = { ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1 }[e.key];
-    if (!step) return;
+    const last = EXAMPLES.length - 1;
+    const to = { ArrowDown: i + 1, ArrowRight: i + 1, ArrowUp: i - 1, ArrowLeft: i - 1, Home: 0, End: last }[e.key];
+    if (to === undefined) return;
     e.preventDefault();
-    const next = (i + step + EXAMPLES.length) % EXAMPLES.length;
+    const next = (to + EXAMPLES.length) % EXAMPLES.length;
     tabs.current[next]?.focus();
     play(next);
   };

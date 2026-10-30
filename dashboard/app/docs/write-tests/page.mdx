@@ -534,10 +534,10 @@ the files elsewhere and commit a manifest: the set's ids and its hash.
      - uses: actions/checkout@v7
      - uses: Ilya-Grigoryev/llm-release-gate/setup@v0.1.0-dev.9
        with:
-         gate-ssh-key: $\{\{ secrets.LLM_RELEASE_GATE_KEY \}\}  # while the gate's repository is private
+         gate-ssh-key: ${{ secrets.LLM_RELEASE_GATE_KEY }}  # while the gate's repository is private
      - name: test set
        env:
-         GH_TOKEN: $\{\{ github.token \}\}
+         GH_TOKEN: ${{ github.token }}
        run: |  # the invoices stay out of git: the set is a release asset of this repository
          gh release download golden-invoices-ae3c003b -p invoices.tar.gz -D "$RUNNER_TEMP"
          mkdir -p data/golden && tar -xzf "$RUNNER_TEMP/invoices.tar.gz" -C data/golden

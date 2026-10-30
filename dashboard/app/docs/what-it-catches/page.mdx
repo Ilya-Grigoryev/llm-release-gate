@@ -433,14 +433,14 @@ more is planned.
   on stdout. The steps it reports in its answer feed the same trace checks as a Python adapter's:
 
   ```json
-  \{"protocol": 1,
-   "output": \{"reply": "Booking B-104 is cancelled. A manager will look at your credit today."\},
-   "trace": \{"steps": [
-     \{"kind": "retrieval", "actor": "agent", "query": "late cancellation", "docs": [\{"id": "kb-cancellation"\}]\},
-     \{"kind": "tool", "actor": "agent", "status": "ok", "name": "find_customer", "args": \{"email": "ana@example.com"\}\},
-     \{"kind": "tool", "actor": "agent", "status": "ok", "name": "cancel_booking", "args": \{"booking_id": "B-104"\}\},
-     \{"kind": "tool", "actor": "agent", "status": "ok", "name": "escalate_to_manager", "args": \{"booking_id": "B-104"\}\}],
-    "final_state": null, "state_change": \{"B-104": "cancelled"\}, "stop": "done"\}\}
+  {"protocol": 1,
+   "output": {"reply": "Booking B-104 is cancelled. A manager will look at your credit today."},
+   "trace": {"steps": [
+     {"kind": "retrieval", "actor": "agent", "query": "late cancellation", "docs": [{"id": "kb-cancellation"}]},
+     {"kind": "tool", "actor": "agent", "status": "ok", "name": "find_customer", "args": {"email": "ana@example.com"}},
+     {"kind": "tool", "actor": "agent", "status": "ok", "name": "cancel_booking", "args": {"booking_id": "B-104"}},
+     {"kind": "tool", "actor": "agent", "status": "ok", "name": "escalate_to_manager", "args": {"booking_id": "B-104"}}],
+    "final_state": null, "state_change": {"B-104": "cancelled"}, "stop": "done"}}
   ```
 
 - **Your own steps.** `trace.current().step(kind, actor, ...)` records what the wrappers cannot see, as in the retrieval

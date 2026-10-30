@@ -542,8 +542,8 @@ runs `k` times per case; today the decision uses the first run of each case, and
 A request that changes nothing that counts costs nothing, unless it changes `gate.yaml`'s `ignore`, which files belong
 to a pipeline or which price file it names, as the request above does: then every pipeline runs.
 
-**More than one pipeline.** List each under `pipelines` and add one gate step per pipeline, with `if: $\{\{ !cancelled()
-\}\}` on all but the first, so a block in one does not skip the others. Each gets its own comment and artifact:
+**More than one pipeline.** List each under `pipelines` and add one gate step per pipeline, with `if: ${{ !cancelled()
+}}` on all but the first, so a block in one does not skip the others. Each gets its own comment and artifact:
 
 ```yaml
       - uses: Ilya-Grigoryev/llm-release-gate@v0.1.0-dev.9
