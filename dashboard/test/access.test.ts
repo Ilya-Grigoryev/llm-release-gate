@@ -50,8 +50,8 @@ describe("access", () => {
 });
 
 describe("isDocsPath", () => {
-  it("covers the home page and /docs, nothing else", () => {
-    for (const p of ["/", "/docs", "/docs/", "/docs/how-it-works"]) expect(isDocsPath(p)).toBe(true);
-    for (const p of ["/projects", "/docsy", "/octo/docs", "/access", "/api/auth/login"]) expect(isDocsPath(p)).toBe(false);
+  it("covers /docs and its pages, not the home page", () => {
+    for (const p of ["/docs", "/docs/", "/docs/how-it-works"]) expect(isDocsPath(p)).toBe(true);
+    for (const p of ["/", "/projects", "/docsy", "/octo/docs", "/access", "/api/auth/login"]) expect(isDocsPath(p)).toBe(false);
   });
 });

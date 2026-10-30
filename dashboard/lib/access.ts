@@ -25,9 +25,9 @@ export function access(login: string | null | undefined, raw: string | undefined
   return canView(login, parseViewers(raw)) ? { state: "allowed", login } : { state: "denied", login };
 }
 
-/** The paths the documentation lives on: the home page and everything under /docs. */
+/** The paths the documentation lives on: /docs and everything under it. The home page is open to everyone. */
 export function isDocsPath(pathname: string): boolean {
-  return pathname === "/" || pathname === "/docs" || pathname.startsWith("/docs/");
+  return pathname === "/docs" || pathname.startsWith("/docs/");
 }
 
 /** Where the proxy shows the sign-in or no-access screen instead of a docs page. */

@@ -44,7 +44,7 @@ the CI for the database: install the App only on repositories whose runs may lea
 | `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` | the App's OAuth credentials, for signing in |
 | `GITHUB_WEBHOOK_SECRET` | to check that a webhook comes from GitHub |
 | `SESSION_SECRET` | a long random string; encrypts the session cookie |
-| `DOCS_VIEWERS` | GitHub logins, comma-separated, that may read the docs; unset or empty means nobody |
+| `DOCS_VIEWERS` | GitHub logins, comma-separated, that may read the docs under `/docs`; unset or empty means nobody. The home page is open to everyone |
 
 ## Deploy
 

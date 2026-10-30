@@ -102,7 +102,7 @@ function H2({ id, children }: { id: string; children: ReactNode }) {
   );
 }
 
-/** The docs' home: the question, the gate scene, the three answers, what it checks and where to go. */
+/** The site's home page, open to everyone: the question, the gate scene, the three answers, what it checks and where to go. */
 export default function Home() {
   return (
     <main className="mx-auto w-full max-w-[76rem] flex-1 px-4 pt-14 pb-28 sm:px-6 sm:pt-20 lg:px-10">

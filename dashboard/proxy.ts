@@ -17,4 +17,4 @@ export function proxy(req: NextRequest) {
   return NextResponse.rewrite(url);
 }
 
-export const config = { matcher: ["/", "/docs/:path*"] };
+export const config = { matcher: ["/docs/:path*"] };
