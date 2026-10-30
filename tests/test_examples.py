@@ -164,6 +164,14 @@ def project(request, tmp_path, monkeypatch, provider):
     return Command(load_config(Path("configs/invoice.yaml"))), case
 
 
+def test_prepare_passes_in_a_tree_without_the_program(tmp_path):
+    """`pr` prepares the target branch's tree too; on the first request it has no program yet."""
+    for files in TABS.values():
+        if "gate.yaml" in files:
+            prepare = yaml.safe_load(files["gate.yaml"])["prepare"]
+            subprocess.run(prepare, cwd=tmp_path, check=True)
+
+
 def test_every_language_has_its_tab():
     assert list(TABS) == list(RUNTIME)
 

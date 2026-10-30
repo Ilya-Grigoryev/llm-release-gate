@@ -124,21 +124,26 @@ def test_exit_codes_map_to_retry_stop_or_a_failed_run(tmp_path, mode, error, mat
         run_case(config(tmp_path, mode))
 
 
-def test_the_providers_details_reach_the_record(tmp_path):
-    a = run_case(config(tmp_path, "details"))
-    assert (a.fingerprint, a.finish_reason, a.request_id, a.reasoning_tokens) == (
-        "fp_1",
-        "stop",
-        "req-1",
-        7,
+@pytest.mark.parametrize(
+    "mode, details",
+    [("details", ("fp_1", "stop", "req-1", 7)), ("bare", (None, None, None, 0))],
+)
+def test_the_providers_details_reach_the_record(tmp_path, mode, details):
+    set_hash, _ = validate(GOLDEN)
+    out = tmp_path / "runs.jsonl"
+    runner.run(
+        Command(config(tmp_path, mode)),
+        load_cases(GOLDEN),
+        1,
+        out,
+        config_hash="c" * 64,
+        set_hash=set_hash,
+        score=hits,
+        workers=1,
     )
-    b = run_case(config(tmp_path, "bare"))
-    assert (b.fingerprint, b.finish_reason, b.request_id, b.reasoning_tokens) == (
-        None,
-        None,
-        None,
-        0,
-    )
+    [r] = read_records(out)
+    keys = ("fingerprint", "finish_reason", "request_id", "reasoning_tokens")
+    assert tuple(r[k] for k in keys) == details
 
 
 @pytest.mark.parametrize(
