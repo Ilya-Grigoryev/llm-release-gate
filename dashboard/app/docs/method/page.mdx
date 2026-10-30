@@ -55,7 +55,7 @@ The decisions below answer the first research question; D-numbers are the thesis
   sees it, not a version number raised by hand.
 - **The rules come from the target branch** (D-024, built), so a pull request cannot raise its own `delta`.
 - **Any program, one protocol** (D-023, partly built): an engine with one JSON protocol, not a Python dependency or an
-  SDK with a hosted service.
+  SDK with a hosted service. Today the gate is still added to a project as a dependency.
 - **Checks that the team writes** (D-019, D-020, D-022, partly built), over the answer and the trace.
 - **No model grades the text by default** (D-005, D-022); a model-graded check is planned as an option.
 - **Models without a date** (D-018, built) are accepted, with
@@ -64,7 +64,7 @@ The decisions below answer the first research question; D-numbers are the thesis
 ## Decisions: deciding under noise
 
 These answer the second research question. Today the gate uses the naive rule with a fixed `delta` (δ), 5 points by
-default; only the first decision is built, the others are the statistical rule planned for stage C.
+default; the first decision is built and the last partly, the others are the statistical rule planned for stage C.
 
 - **Both versions run on the same cases, at the same time** (D-007, D-018, built; part open), so a case's difficulty
   and changes in the service behind a model name cancel out. Reusing the base's runs for a dated model is open (D-007,
@@ -78,7 +78,7 @@ default; only the first decision is built, the others are the statistical rule p
 - **Intervals that stay valid when runs are added** (D-011): from the spread of runs within each case, by a method a
   simulation will choose.
 - **An anchor against slow creep** (D-012): each pull request is also compared with a fixed earlier version, so losses
-  smaller than δ cannot add up.
+  smaller than δ cannot add up unseen.
 - **Checks that break on their own** (D-003, partly built): a rule per check exists, outside the verdict.
 
 ## Planned experiments

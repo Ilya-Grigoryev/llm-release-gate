@@ -14,7 +14,7 @@ expectation. Answer four questions:
 3. **The state of the world**: what must have changed, and what not? (`state`)
 4. **The limits**: how many steps, which calls are off limits? (`max_steps`, `not_called`)
 
-Anything else goes in a [`function` check](#your-own-check). Cost and latency are budgets for the whole version in
+Anything else that code can express goes in a [`function` check](#your-own-check). Cost and latency are budgets for the whole version in
 `gate.yaml`, not per-case checks.
 
 <Fig id="write-tests-1" caption={"Answer checks read the output; trace checks read the steps; `state` reads the world after the run. Example run."} alt={"A run has three parts the checks can read. The answer is read by field_match, exact, contains, regex, number, json_schema and refusal. The steps are read by called, not_called, order, actions, active, max_steps and doc_found. The world after the run, its final state or the change, is read by state. A function check gets all three."} />
@@ -118,7 +118,7 @@ def names_the_booking(expected, output, trace, check):
 
 `booking` is a key of your own. Put the module in your project's package: `golden validate` imports it, and editing it
 makes a new version. No built-in check asks a model for an opinion. Checks shared by a whole set are planned
-([Method](/docs/method)).
+([The list grows](/docs/what-it-catches#the-list-grows)).
 
 ## From checks to a case score
 

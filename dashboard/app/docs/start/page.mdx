@@ -216,7 +216,7 @@ process.stdin.on("end", async () => {
 ```
 
 Only `output` is required in the answer. Exit with 75 to retry the run and with 78 to stop all runs of the version.
-[Connect your app](/docs/connect) has every field.
+[Reference](/docs/reference#protocol) has every field.
 
 ## 5. Write a first case
 
@@ -328,8 +328,8 @@ Push your branch and open a pull request. The job posts one comment and edits it
 
 <Fig id="start-2" caption={"The first comment. Nothing to compare with yet, so the job passes and the comment reports the candidate's score."} alt={"A comment on the pull request titled \"Release gate: no base version\". It says the target branch has no version of this pipeline yet, so there is nothing to compare with, and that the candidate scores 1.000 on 1 case, with the short hashes of the config and the test set."} />
 
-An `infra error` that reads "The target branch's project could not be prepared." means the target branch is not a uv
-project yet: merge `pyproject.toml` and `uv.lock` in a pull request of their own first.
+If the target branch is not a uv project yet, the comment reads "The target branch's project could not be prepared."
+(`infra error`): merge `pyproject.toml` and `uv.lock` in a pull request of their own first.
 
 After you merge, later requests are compared with the target branch's version. One that changes only documentation or
 other files that do not count gets `unchanged` and calls no model. A request from a fork gets no secrets and fails as

@@ -195,6 +195,7 @@ pipeline gets `infra error`. Merge the package files first, or use
 
 | Adapter raises | Program exits | What the gate does |
 |---|---|---|
+| returns | 0 | reads the answer |
 | `Retryable` | 75 | rate limit, timeout: retries after 1, 2, 4… seconds (at most 60), up to `max_retries` times |
 | `Fatal` | 78; 126, 127 from a shell in `command` | no quota, wrong key: stops all runs of this version |
 | any other exception | any other code | records the error, goes on with the other cases |

@@ -83,7 +83,8 @@ between repeats of the same request, and the level of noise differed between two
 meet the same conditions, so a shift that hits both cancels out.
 
 Prefer a dated snapshot. For a model without a date, the comment warns, and the gate refuses to compare
-(`infra error`) runs with a pause longer than one hour or with different models reported to the two versions. Whether
+(`infra error`) runs with a pause longer than one hour. For a model without a date that both versions asked for, it also
+refuses when the provider reported different models to the two versions. Whether
 the base's runs may be reused for a dated model is open.
 
 ## Budgets: cost and latency
@@ -109,7 +110,7 @@ gpt-5.4-mini-2026-03-17: [0.75, 4.50, 0.075]
 ```
 
 **Cost.** The gate prices every model call of each candidate run and blocks when the mean cost per run is above
-`cost_per_run_usd`. Without `prices`, or with a model missing from the price file, the result is `infra error`.
+`cost_per_run_usd`. With a cost budget, a missing `prices` or a model missing from the price file gives `infra error`.
 
 **Latency.** The gate blocks only when a 95 % interval around the quantile of the candidate's run latencies (0.95 by
 default) lies wholly above the limit: with 10 runs, at least three must be over it. A run with no answer is an error,

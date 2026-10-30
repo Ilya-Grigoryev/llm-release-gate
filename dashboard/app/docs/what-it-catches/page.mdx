@@ -22,7 +22,7 @@ check looks at cannot lower a score.
 A deliberate change of behaviour, such as a new business rule, makes the old cases wrong: update them in the same
 request. An engineering change, such as a reworded prompt or another model, should not change behaviour, but noise can
 block it or hide a real drop. In the author's measurement on a support agent, one unchanged version's mean moved between
-0.4 and 0.7 over 11 runs of the same 10 cases ([How it decides](/docs/how-it-decides#planned-several-runs-and-an-interval)).
+0.4 and 0.7 over 11 runs of the same 10 cases ([How it decides](/docs/how-it-decides#the-same-version-answers-differently)).
 
 ## The catalog at a glance
 
@@ -106,7 +106,7 @@ application reads from the repository are code, except `docs/` at the root and f
 - **Changes outside the version**: untracked files, environment variables, data outside the repository, services your
   tools call, a provider's change behind a model name.
 - **Changes smaller than the noise** of one run per version.
-- **Qualities no built-in check expresses**, such as tone, unless you write a `function` check.
+- **Qualities no built-in check expresses**, such as tone, unless code can express them in a `function` check.
 
 To find gaps, break your application on purpose in a branch (delete one rule, change one number) and open a request:
 if the gate does not block, no case checks that rule, or noise hid it.

@@ -18,7 +18,7 @@ match this list.
 3. **What was compared.** The first run of each case, even when `k` asks for more. Each `config` hash covers the whole
    version; `set` is the test set's hash.
 4. **Model without a date.** Not in this example: a warning that both versions' runs had no pause longer than an hour
-   and got the same model, or the gate would have refused to compare them.
+   and, where both asked for the same model, got the same one, or the gate would have refused to compare them.
 5. **Cost of the decision.** Every call that got an answer, both sides, at the target branch's list prices.
 6. **Budget.** See [The budget line](#the-budget-line).
 7. **Cases that got worse.** Up to five, largest drop first, on any outcome. The [dashboard](#the-dashboard) lists
@@ -126,7 +126,8 @@ To gate it, a maintainer reads the change and pushes the branch to this reposito
 ## The artifacts
 
 Each gate step keeps `release-gate-NAME-ATTEMPT`, with the comment, `verdict.json`, both versions' records and the
-logs, and `release-gate-NAME-ATTEMPT-cases`, with the test set's text files, for 30 days. A record is one JSON line per run ([fields](/docs/reference#the-record-of-a-run)). To read one case on both
+logs, for the repository's artifact retention period, and `release-gate-NAME-ATTEMPT-cases`, with the test set's text
+files, for 30 days. A record is one JSON line per run ([fields](/docs/reference#the-record-of-a-run)). To read one case on both
 sides (`RUN_ID` ends the "Job log" link):
 
 ```sh
