@@ -2,7 +2,8 @@
 
 /*
  * Colour carries meaning only: the two arms (base = main, cand = the pull request) and the three signal lamps
- * (go = pass, stop = block, wait = not sure yet). Everything else is ink on paper.
+ * (go = pass, stop = block, wait = not sure yet). Everything else is ink on paper, except code, coloured apart from
+ * these (`--code-*`).
  */
 :root {
   color-scheme: light;
