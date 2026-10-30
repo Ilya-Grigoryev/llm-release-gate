@@ -110,3 +110,15 @@ def test_rules_for_a_pipeline_and_for_one_the_project_lacks(tmp_path):
     assert (a.config, a.golden, a.delta, a.k) == ("c2.yaml", "g2", 2, 3)
     new = rules.rules(project.Pipeline("b", "b.yaml", "gb", delta=50))
     assert (new.delta, new.k) == (5.0, 3)
+
+
+def test_the_rule_on_checks_blocks_unless_set_to_report(tmp_path):
+    p = load(
+        tmp_path,
+        "checks: report\npipelines:\n  a: {config: c, golden: g}\n  b: {config: c, golden: g, checks: block}\n",
+    )
+    assert (p.pipelines["a"].checks, p.pipelines["b"].checks) == ("report", "block")
+    [d] = load(tmp_path, "pipelines: {a: {config: c, golden: g}}\n").pipelines.values()
+    assert d.checks == "block"
+    with pytest.raises(ValueError, match="checks"):
+        load(tmp_path, "pipelines: {a: {config: c, golden: g}}\nchecks: maybe\n")

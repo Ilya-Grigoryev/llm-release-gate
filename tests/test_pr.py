@@ -183,6 +183,16 @@ def test_the_rules_come_from_the_target_branch(repo):
     assert "changes the gate's rules for `demo`" in (out / "comment.md").read_text()
 
 
+def test_the_rule_on_checks_follows_the_target_branch(repo):
+    (repo / "gate.yaml").write_text(GATE + "checks: report\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "report only")
+    version(repo, "bare", GATE)  # the request asks to block again: not before merge
+    code, out = gate(repo)
+    assert code == pr.QUALITY_FAIL  # the naive rule still blocks the worse version
+    assert json.loads((out / "verdict.json").read_text())["checks"]["mode"] == "report"
+
+
 def test_new_prices_in_the_request_wait_for_merge(repo):
     (repo / "prices.yaml").write_text("fake-model-2026-01-01: [1, 1]\n")
     (repo / "gate.yaml").write_text(GATE + "prices: prices.yaml\n")

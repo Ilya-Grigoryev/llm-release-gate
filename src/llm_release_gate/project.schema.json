@@ -42,6 +42,9 @@
     "delta": {
       "$ref": "#/$defs/delta"
     },
+    "checks": {
+      "$ref": "#/$defs/checks"
+    },
     "prices": {
       "$ref": "#/$defs/prices"
     },
@@ -87,6 +90,9 @@
         "delta": {
           "$ref": "#/$defs/delta"
         },
+        "checks": {
+          "$ref": "#/$defs/checks"
+        },
         "prices": {
           "$ref": "#/$defs/prices"
         },
@@ -100,7 +106,7 @@
       "additionalProperties": false
     },
     "k": {
-      "description": "Runs per case and version (default 1). The naive rule decides on the first; budgets use all.",
+      "description": "Runs per case and version (default 1). The naive rule on the mean reads the first; the rule on checks and budgets use all.",
       "type": "integer",
       "minimum": 1
     },
@@ -108,6 +114,13 @@
       "description": "Block when the candidate's mean score is lower by more than this many points (default 5).",
       "type": "number",
       "minimum": 0
+    },
+    "checks": {
+      "description": "A check that broke over the runs (Fisher's exact test per case and check) blocks, or is only reported (default block).",
+      "enum": [
+        "block",
+        "report"
+      ]
     },
     "prices": {
       "description": "A price file, relative to the project: model: [input, output] or [input, output, cached input], USD per 1M tokens.",
