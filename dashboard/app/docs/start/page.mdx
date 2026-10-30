@@ -255,8 +255,8 @@ It needs Node 18 or newer and no packages.
 <Tab label="Go">
 
 ```yaml
-# gate.yaml: build the program before the runs, in both versions' trees
-prepare: [go, build, -o, bin/gate-extract, ./gate/extract.go]
+# gate.yaml: build the program before the runs; the target branch's tree may not have it yet
+prepare: [sh, -c, "test ! -f gate/extract.go || go build -o bin/gate-extract ./gate/extract.go"]
 ```
 
 ```yaml
@@ -387,15 +387,16 @@ func main() {
 }
 ```
 
-Add `bin/` to `.gitignore`. Do not use `go run` in `command`: it turns every exit code of the program into 1, so the
-gate cannot tell a rate limit from a wrong key.
+Add `bin/` to `.gitignore`, and build once with the same `go build` before the check in [step
+5](#5-write-a-first-case): only `pr` runs `prepare`. Do not use `go run` in `command`: it turns every exit code of the
+program into 1, so the gate cannot tell a rate limit from a wrong key.
 
 </Tab>
 </LanguageTabs>
 
-Only `output` is required in the answer; the tokens and the model let the gate count the cost, and `fingerprint` shows
-when the provider changes the system behind a model name. The exit code says what went wrong: 75 retries the run with
-backoff, 78 stops all runs of the version, any other code fails this run. If your application already has this code,
+Only `output` is required in the answer; the tokens and the model let the gate count the cost, and the run's record
+keeps `fingerprint`, the provider's mark of the system that answered. The exit code says what went wrong: 75 retries
+the run with backoff, 78 (or 126 and 127 from a shell) stops all runs of the version, any other code fails this run. If your application already has this code,
 call it from the program with the request's model, prompt and `params`. [Connect your app](/docs/connect) covers agents
 and their traces, [Reference](/docs/reference#protocol) every field.
 

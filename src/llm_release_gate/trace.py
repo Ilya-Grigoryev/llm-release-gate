@@ -66,7 +66,7 @@ class Trace:
         self.lock = threading.RLock()
 
     def step(self, kind: str, actor: str, /, **fields: Any) -> dict:
-        """Add a step (the manual path). Raises ValueError if it breaks the format."""
+        """Add a step. Raises ValueError if it breaks the format."""
         with self.lock:
             step = {"ts": now(), **fields}
             step.update(

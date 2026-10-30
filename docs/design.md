@@ -35,8 +35,8 @@ agent over a booking system, alone on a ticket or in a chat with a simulated use
 - **Answer** (`Answer`): `output` (parsed), `raw`, `input_tokens`, `output_tokens`, `latency_s`, `model` (as the provider
   reported it), `fingerprint`, `reasoning_tokens`, `finish_reason`, `request_id`.
 - **Pipeline**: the program the version's config names (`command.Command`; its `run(case) -> Answer` raises `Retryable`
-  when the same run may succeed later and `Fatal` when no run can). The gate's code imports no application; it starts the
-  program, in any language, once per run.
+  when the same run may succeed later and `Fatal` when no run can). The gate imports no application code (only a
+  `function` check's module); it starts the program, in any language, once per run.
 - **Version** (`PipelineConfig`, `load_config(path)`): `command`, `model`, `prompt` (a file or named files), `input`,
   `params`, `max_retries`, `timeout_s`. `config_hash(config)` covers every field
   and the bytes of each prompt file; `version.version_hash(path)` adds the repository's code (D-025): every tracked file
@@ -322,7 +322,7 @@ The trace:
 | `final_state`, `state_change` | the world after the run and what changed, as the program reports them |
 | `stop` | why the run ended, as the program says: `done`, `user_stop`, `max_steps`, `max_turns`, `error`, `aborted`; the runner sets `error` on a failed run with steps and no `stop`. The gate does not check the value |
 | `last_attempt` | the number of the runner's final attempt; checks look at its steps |
-| `notes` | calls that went unrecorded, and why |
+| `notes` | what went unrecorded, and why |
 | `native` | the file with the raw provider responses |
 
 Any step may carry `extra` for what the format does not name. Only new model output is stored, not the full prompt of each

@@ -79,7 +79,7 @@ from booking_assistant.world import World
 
 request = json.load(sys.stdin)
 config, inputs = request["config"], request["case"]["inputs"]
-steps = []  # filled as the agent goes, so paid calls are kept even if it fails
+steps = []  # filled as the agent goes; fail() prints them, so a failed run keeps the calls it paid for
 
 
 def model_step(r):  # the agent calls it after each model call

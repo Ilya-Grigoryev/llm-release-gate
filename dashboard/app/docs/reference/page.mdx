@@ -489,7 +489,7 @@ paid for also go up as `llm-release-gate-runs-NAME-VERSION-SET` (16 characters o
 | `comment.md` | the comment |
 | `verdict.json` | the verdict, below; missing after an `infra error` |
 | `base.jsonl`, `candidate.jsonl` | each version's run records, below; no `base.jsonl` without a base version or when nothing ran |
-| `base.native.jsonl`, `candidate.native.jsonl` | the raw provider responses, if the pipeline recorded them |
+| `base.native.jsonl`, `candidate.native.jsonl` | raw provider responses; nothing records them yet |
 | `base.log`, `candidate.log`, `gate.log` | the logs of the two runners and of the comparison |
 | `.prepare-base.log`, `.prepare-candidate.log` | the logs of `prepare` and `uv sync --locked`, printed to the job log |
 | `shared.txt` | the versions whose runs this job paid for, as `base NAME` / `candidate NAME`, by the artifact name above |
@@ -551,7 +551,7 @@ The record's `trace`:
 | `final_state`, `state_change` | as reported |
 | `stop` | as reported; the runner sets `error` on a failed run with steps and no `stop` |
 | `last_attempt` | the runner's final attempt, whose steps checks read |
-| `notes` | unrecorded calls, and why |
+| `notes` | what went unrecorded, and why |
 | `native` | the file of raw provider responses |
 
 Any step may carry `extra`. A model step stores only its new output: the system prompt and the tools are part of the

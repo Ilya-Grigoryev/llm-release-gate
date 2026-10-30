@@ -43,7 +43,7 @@ time, the gate's comment warns about it, and the gate refuses to compare two ver
 pause longer than an hour, or that asked for the same model and got different ones from the provider (or runs that do
 not say which one they got: report `model`).
 
-The gate's code imports no application. [receipt-intake](https://github.com/Ilya-Grigoryev/receipt-intake) is a whole project set up this way.
+The gate imports no application code, only the module of a `function` check. [receipt-intake](https://github.com/Ilya-Grigoryev/receipt-intake) is a whole project set up this way.
 
 ## Traces
 
