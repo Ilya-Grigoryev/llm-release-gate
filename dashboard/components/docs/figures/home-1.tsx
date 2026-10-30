@@ -129,56 +129,92 @@ Cost of this decision $0.191: base $0.094, candidate $0.097 (successful calls, l
 const LAMP: Record<Outcome, Lamp> = { pass: "go", block: "stop", unchanged: "neutral" };
 
 /*
- * The scene is drawn on a 720 × 220 grid. Main's rail runs at y = 70 and the request's at y = 160. Ten stations, one per
- * case, stand every 46 units from x = 36, each with a lamp 36 above its rail. The barrier stands on the request's rail and
- * turns about its foot at (540, 196); it lies open along the ground and closes upright across the rail. The signal head
- * sits left of the foot. A train's front is its x; it passes a station when its front reaches the station's x.
+ * The scene is drawn on a 760 × 220 grid. Main's rail runs at y = 70 and the request's at y = 160; from x = 590 both
+ * bend into one rail at y = 115. Ten stations, one per case, stand every 46 units from x = 36, each with a lamp 36 above
+ * its rail. Each rail has a barrier at x = 548 with its foot on the outer side: it lies open along the ground and turns
+ * across the rail to close. A train's position is the distance of its front along its route, counted so that it equals
+ * x on the straight part.
  */
-const W = 720;
+const W = 760;
 const H = 220;
 const RAIL: Record<Arm, number> = { base: 70, cand: 160 };
+const BEND = 590;
+const JOIN = { x: 670, y: 115 };
 const R = 11;
 const LIFT = 36;
 const stationX = (k: number) => 36 + 46 * k;
-const PIVOT = { x: 540, y: 196 };
-const FROM = -6; // off the left edge
-const PAST = 480; // past the last station
-const OUT = W + 70; // off the right edge
-const STOP = 526; // in front of the closed barrier
-const PARKED = 96; // where the trains wait when nothing runs
-const RUN = 3.4; // seconds to pass the ten stations
+const GATE = 548;
+const FOOT: Record<Arm, number> = { base: 40, cand: 196 }; // y of each barrier's foot
+const LEAD = 150; // routes start this far left of the scene
+const curve = (arm: Arm) => `C${BEND + 40} ${RAIL[arm]} ${JOIN.x - 40} ${JOIN.y} ${JOIN.x} ${JOIN.y}`;
+const rail = (arm: Arm) => `M0 ${RAIL[arm]}H${BEND}${curve(arm)}`;
+const route = (arm: Arm) => `M${-LEAD} ${RAIL[arm]}H${BEND}${curve(arm)}H${W + 260}`;
+const CARS = [13, 41, 67, 93]; // from a train's front to the middle of each car: the engine, then three coaches
+const FROM = -10; // off the left edge
+const PAST = 470; // past the last station
+const STOP = 532; // in front of a closed barrier
+const PARKED = 150; // where the trains wait when nothing runs
+const RUN = 1.8; // seconds to pass the ten stations
 const SPEED = (PAST - FROM) / RUN;
 const DWELL = 7; // seconds a decided example stays before the next one plays
 
 const mean = (xs: number[]) => (xs.length ? (xs.reduce((a, b) => a + b, 0) / xs.length).toFixed(3) : "–");
 const pct = (x: number) => `${(x / W) * 100}%`;
 
-/** A two-car train in its version's colour, front at x = 0, wheels on y = 0. */
-function Train({ arm }: { arm: Arm }) {
+/** Puts each car of a train on its route, turned along it, for the train's front at `front`. */
+function place(path: SVGPathElement, cars: Element[], front: number) {
+  const total = path.getTotalLength();
+  cars.forEach((car, i) => {
+    const s = Math.min(total, Math.max(0, front + LEAD - CARS[i]));
+    const p = path.getPointAtLength(s);
+    const n = path.getPointAtLength(Math.min(total, s + 1));
+    car.setAttribute("transform", `translate(${p.x} ${p.y}) rotate(${(Math.atan2(n.y - p.y, n.x - p.x) * 180) / Math.PI})`);
+  });
+}
+
+/** An engine and three coaches in the version's colour, standing with the front at `at` on the straight part. */
+function Train({ arm, at }: { arm: Arm; at: number }) {
   const color = `var(--${arm})`;
-  return (
-    <>
-      <rect x="-54" y="-16" width="25" height="11" rx="2" fill={color} />
-      <rect x="-50" y="-13.5" width="6.5" height="4" rx="1" fill="var(--panel)" />
-      <rect x="-40" y="-13.5" width="6.5" height="4" rx="1" fill="var(--panel)" />
-      <path d="M-29.5 -8h4" stroke={color} strokeWidth="2" />
-      <path d="M-26 -5V-15q0-3 3-3h14l9 8v5z" fill={color} />
-      <rect x="-14" y="-15" width="5" height="4" rx="1" fill="var(--panel)" />
-      {[-49, -35, -21, -9].map((x) => (
+  return CARS.map((back, i) => (
+    <g key={i} data-car={arm} transform={`translate(${at - back} ${RAIL[arm]})`}>
+      {i === 0 ? (
+        <>
+          <path d="M-13 -5V-15q0-3 3-3h15l8 8v5z" fill={color} />
+          <rect x="-1" y="-15" width="5" height="4" rx="1" fill="var(--panel)" />
+        </>
+      ) : (
+        <>
+          <rect x="-11" y="-16" width="22" height="11" rx="2" fill={color} />
+          <rect x="-8" y="-13.5" width="6.5" height="4" rx="1" fill="var(--panel)" />
+          <rect x="1.5" y="-13.5" width="6.5" height="4" rx="1" fill="var(--panel)" />
+          <path d="M11 -8h4" stroke={color} strokeWidth="2" />
+        </>
+      )}
+      {(i === 0 ? [-8, 5] : [-6, 6]).map((x) => (
         <circle key={x} cx={x} cy="-3" r="3" fill="var(--ink)" />
       ))}
+    </g>
+  ));
+}
+
+/** Sleepers and a rail along a path. */
+function Rail({ d, color }: { d: string; color: string }) {
+  return (
+    <>
+      <path d={d} transform="translate(0 2)" fill="none" stroke="var(--ink-3)" strokeOpacity="0.3" strokeWidth="7" strokeDasharray="2 10" />
+      <path d={d} fill="none" stroke={color} strokeOpacity="0.5" strokeWidth="2" />
     </>
   );
 }
 
-/** One version's rail with its sleepers and its ten case lamps, empty until a train passes them. */
+/** One version's rail up to the bend and its ten case lamps, empty until a train passes them. */
 function Track({ arm, uid }: { arm: Arm; uid: string }) {
   const y = RAIL[arm];
   const cy = y - LIFT;
   return (
     <g>
-      <line x1="0" x2={W} y1={y + 2} y2={y + 2} stroke="var(--ink-3)" strokeOpacity="0.3" strokeWidth="7" strokeDasharray="2 10" />
-      <line x1="0" x2={W} y1={y} y2={y} stroke={`var(--${arm})`} strokeOpacity="0.5" strokeWidth="2" />
+      <Rail d={rail(arm)} color={`var(--${arm})`} />
+      <path data-route={arm} d={route(arm)} fill="none" stroke="none" />
       {Array.from({ length: 10 }, (_, k) => {
         const cx = stationX(k);
         return (
@@ -198,8 +234,8 @@ function Track({ arm, uid }: { arm: Arm; uid: string }) {
   );
 }
 
-/** The barrier on the request's rail, open, and the signal head: stop, not sure yet (planned, so never lit), go. */
-function Barrier({ uid }: { uid: string }) {
+/** The two barriers, open, and the signal head at the join: stop, not sure yet (planned, so never lit), go. */
+function Barriers({ uid }: { uid: string }) {
   return (
     <g>
       <defs>
@@ -208,16 +244,20 @@ function Barrier({ uid }: { uid: string }) {
           <rect x="11" width="7" height="10" fill="var(--panel)" />
         </pattern>
       </defs>
-      <rect data-arm x={PIVOT.x} y={PIVOT.y - 4.5} width="80" height="9" rx="3" fill={`url(#${uid}-stripes)`} stroke="var(--stop)" strokeWidth="1.5" />
-      <circle cx={PIVOT.x} cy={PIVOT.y} r="7" fill="var(--housing)" stroke="var(--neutral)" strokeOpacity="0.4" />
-      <rect x="472" y="186" width="58" height="20" rx="10" fill="var(--housing)" stroke="var(--neutral)" strokeOpacity="0.4" />
+      {(["base", "cand"] as const).map((arm) => (
+        <g key={arm}>
+          <rect data-arm={arm} x={GATE - 80} y={FOOT[arm] - 4.5} width="80" height="9" rx="3" fill={`url(#${uid}-stripes)`} stroke="var(--stop)" strokeWidth="1.5" />
+          <circle cx={GATE} cy={FOOT[arm]} r="7" fill="var(--housing)" stroke="var(--neutral)" strokeOpacity="0.4" />
+        </g>
+      ))}
+      <rect x="690" y="136" width="58" height="20" rx="10" fill="var(--housing)" stroke="var(--neutral)" strokeOpacity="0.4" />
       {(["stop", "wait", "go"] as const).map((lamp, i) => {
-        const cx = 484 + i * 17;
-        if (lamp === "wait") return <circle key={lamp} cx={cx} cy="196" r="5.5" fill="none" stroke="var(--neutral)" strokeWidth="1.5" strokeDasharray="2.5 2" />;
+        const cx = 702 + i * 17;
+        if (lamp === "wait") return <circle key={lamp} cx={cx} cy="146" r="5.5" fill="none" stroke="var(--neutral)" strokeWidth="1.5" strokeDasharray="2.5 2" />;
         return (
           <g key={lamp}>
-            <circle data-glow={lamp} cx={cx} cy="196" r="11" fill={`var(--${lamp})`} opacity="0" />
-            <circle data-signal={lamp} cx={cx} cy="196" r="6" fill="color-mix(in srgb, var(--neutral) 40%, var(--housing))" />
+            <circle data-glow={lamp} cx={cx} cy="146" r="11" fill={`var(--${lamp})`} opacity="0" />
+            <circle data-signal={lamp} cx={cx} cy="146" r="6" fill="color-mix(in srgb, var(--neutral) 40%, var(--housing))" />
           </g>
         );
       })}
@@ -227,8 +267,9 @@ function Barrier({ uid }: { uid: string }) {
 
 /**
  * Four example pull requests through the gate, as two trains: main's and the request's run the same ten cases side by
- * side, lighting each case's lamp to its score. A request that passes rolls on; for one that is blocked, the barrier
- * closes in front of its train. The examples play in turn until the reader picks one or pauses them.
+ * side, lighting each case's lamp to its score, and then their rails join into one. A request that passes takes the
+ * joined rail and a barrier stops main's train; for a request that is blocked, it is the other way round. The examples
+ * play in turn until the reader picks one or pauses them.
  */
 export default function Home1() {
   const [index, setIndex] = useState(0);
@@ -252,8 +293,7 @@ export default function Home1() {
   // The first example plays when the scene comes into view.
   useGSAP(
     () => {
-      const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
-      if (reduce) {
+      if (matchMedia("(prefers-reduced-motion: reduce)").matches) {
         autoplay.current = false;
         setAuto(false);
         setStill(true);
@@ -268,7 +308,7 @@ export default function Home1() {
       if (!started) return;
       const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
       const q = gsap.utils.selector(root);
-      const tl = gsap.timeline({ delay: first.current && !reduce ? 0.9 : 0.15 });
+      const tl = gsap.timeline({ delay: first.current && !reduce ? 0.3 : 0.15 });
       first.current = false;
 
       startDwell.current = contextSafe!(() => {
@@ -289,18 +329,23 @@ export default function Home1() {
         );
       });
 
-      const [base, cand] = [q("[data-train=base]"), q("[data-train=cand]")];
+      const cars = { base: q("[data-car=base]"), cand: q("[data-car=cand]") };
       if (!ran) {
-        tl.to([...base, ...cand], { opacity: 0.45, duration: 0.4 });
+        tl.to([...cars.base, ...cars.cand], { opacity: 0.45, duration: 0.4 });
       } else {
-        tl.fromTo([...base, ...cand], { x: FROM }, { x: PAST, duration: RUN, ease: "none" }, 0);
+        const routeOf = (arm: Arm) => root.current!.querySelector<SVGPathElement>(`[data-route=${arm}]`)!;
+        const path = { base: routeOf("base"), cand: routeOf("cand") };
+        const at = { base: { x: FROM }, cand: { x: FROM } };
+        const move = (arm: Arm) => () => place(path[arm], cars[arm], at[arm].x);
+        tl.to(at.base, { x: PAST, duration: RUN, ease: "none", onUpdate: move("base") }, 0);
+        tl.to(at.cand, { x: PAST, duration: RUN, ease: "none", onUpdate: move("cand") }, 0);
         ex.cases.forEach(([, b, c], k) => {
-          const at = (stationX(k) - FROM) / SPEED;
+          const t = (stationX(k) - FROM) / SPEED;
           (["base", "cand"] as const).forEach((arm) => {
             const score = arm === "base" ? b : c;
             const cy = RAIL[arm] - LIFT;
-            tl.set(q(`[data-ring=${arm}][data-k="${k}"]`), { attr: { stroke: `var(--${arm})` } }, at);
-            tl.to(q(`[data-fill=${arm}][data-k="${k}"]`), { attr: { y: cy + R - 2 * R * score, height: 2 * R * score }, duration: 0.35, ease: "power2.out" }, at);
+            tl.set(q(`[data-ring=${arm}][data-k="${k}"]`), { attr: { stroke: `var(--${arm})` } }, t);
+            tl.to(q(`[data-fill=${arm}][data-k="${k}"]`), { attr: { y: cy + R - 2 * R * score, height: 2 * R * score }, duration: 0.3, ease: "power2.out" }, t);
           });
           tl.call(
             () => {
@@ -308,17 +353,17 @@ export default function Home1() {
               q("[data-mean=cand]").forEach((el) => (el.textContent = mean(ex.cases.slice(0, k + 1).map((x) => x[2]))));
             },
             undefined,
-            at,
+            t,
           );
         });
-        tl.to(base, { x: OUT, duration: (OUT - PAST) / SPEED, ease: "none" }, RUN);
-        if (ex.outcome === "block") {
-          tl.to(q("[data-arm]"), { rotation: -90, svgOrigin: `${PIVOT.x} ${PIVOT.y}`, duration: 0.6, ease: "back.out(1.6)" }, RUN - 0.35);
-          tl.to(cand, { x: STOP, duration: (3 * (STOP - PAST)) / SPEED, ease: "power3.out" }, RUN);
-          tl.to(cand, { x: STOP - 2.5, duration: 0.08, yoyo: true, repeat: 1 }, ">");
-        } else {
-          tl.to(cand, { x: OUT, duration: (OUT - PAST) / SPEED, ease: "none" }, RUN);
-        }
+        // The request takes the joined rail when it passes; otherwise main keeps it.
+        const winner: Arm = ex.outcome === "pass" ? "cand" : "base";
+        const loser: Arm = winner === "cand" ? "base" : "cand";
+        const end = path[winner].getTotalLength() - LEAD;
+        tl.to(at[winner], { x: end, duration: (end - PAST) / SPEED, ease: "none", onUpdate: move(winner) }, RUN);
+        tl.to(q(`[data-arm=${loser}]`), { rotation: loser === "base" ? -90 : 90, svgOrigin: `${GATE} ${FOOT[loser]}`, duration: 0.5, ease: "back.out(1.6)" }, RUN - 0.3);
+        tl.to(at[loser], { x: STOP, duration: (3 * (STOP - PAST)) / SPEED, ease: "power3.out", onUpdate: move(loser) }, RUN);
+        tl.to(at[loser], { x: STOP - 2.5, duration: 0.08, yoyo: true, repeat: 1, onUpdate: move(loser) }, ">");
         const lamp = LAMP[ex.outcome];
         tl.set(q(`[data-signal=${lamp}]`), { attr: { fill: `var(--${lamp})` } }, RUN + 0.1);
         tl.fromTo(q(`[data-glow=${lamp}]`), { opacity: 0 }, { opacity: 0.35, duration: 0.25, yoyo: true, repeat: lamp === "stop" ? 4 : 0 }, RUN + 0.1);
@@ -471,16 +516,12 @@ export default function Home1() {
             </div>
             <div className="relative">
               <svg key={key} aria-hidden viewBox={`0 0 ${W} ${H}`} className="block h-auto w-full">
+                <Rail d={`M${JOIN.x} ${JOIN.y}H${W}`} color="var(--ink-3)" />
                 <Track arm="base" uid={uid} />
                 <Track arm="cand" uid={uid} />
-                <Barrier uid={uid} />
-                {(["base", "cand"] as const).map((arm) => (
-                  <g key={arm} transform={`translate(0 ${RAIL[arm]})`}>
-                    <g data-train={arm} transform={`translate(${ran ? FROM : PARKED} 0)`}>
-                      <Train arm={arm} />
-                    </g>
-                  </g>
-                ))}
+                <Barriers uid={uid} />
+                <Train arm="base" at={ran ? FROM : PARKED} />
+                <Train arm="cand" at={ran ? FROM : PARKED} />
               </svg>
               {ran &&
                 ex.cases.map(([id, base, cand], k) => (
