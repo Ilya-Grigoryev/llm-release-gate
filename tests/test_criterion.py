@@ -3,7 +3,7 @@ from fractions import Fraction
 
 import pytest
 
-from llm_release_gate.criterion import fisher, per_check
+from llm_release_gate.criterion import fisher, per_check, runs_to_block
 
 
 def runs(k, n):
@@ -135,3 +135,27 @@ def test_false_blocks_stay_under_alpha_when_nothing_changed():
         }
         blocks += per_check(base, cand).outcome == "block"
     assert blocks / sims <= 0.025
+
+
+@pytest.mark.parametrize(
+    "alpha, sides, k",
+    [(0.025, 1, 4), (0.05, 1, 3), (0.05, 2, 4), (0.001, 1, 7)],
+)
+def test_runs_to_block_is_the_fewest_runs_a_full_break_needs(alpha, sides, k):
+    assert runs_to_block(alpha, sides) == k
+    full = per_check(
+        {("c", "x"): runs(k, k)}, {("c", "x"): runs(0, k)}, alpha=alpha, sides=sides
+    )
+    fewer = per_check(
+        {("c", "x"): runs(k - 1, k - 1)},
+        {("c", "x"): runs(0, k - 1)},
+        alpha=alpha,
+        sides=sides,
+    )
+    assert (full.outcome, fewer.outcome, fewer.testable) == ("block", "pass", 0)
+
+
+@pytest.mark.parametrize("alpha, sides", [(0, 1), (1, 1), (0.05, 3)])
+def test_runs_to_block_refuses_bad_arguments(alpha, sides):
+    with pytest.raises(ValueError):
+        runs_to_block(alpha, sides)

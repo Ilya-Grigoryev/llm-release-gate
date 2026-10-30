@@ -70,6 +70,16 @@ def fisher(x: int, kb: int, y: int, kc: int, sides: int) -> tuple[Fraction, Frac
     return two(y), min(two(i) for i in support)
 
 
+def runs_to_block(alpha: float = 0.025, sides: int = 1) -> int:
+    """The fewest runs per version at which one check that always passed and now always fails can block."""
+    if not 0 < alpha < 1 or sides not in (1, 2):
+        raise ValueError("alpha must lie in (0, 1), sides be 1 or 2")
+    a, k = Fraction(str(alpha)), 1
+    while fisher(k, k, 0, k, sides)[1] > a:
+        k += 1
+    return k
+
+
 def per_check(
     base: dict[Key, list[Any]],
     candidate: dict[Key, list[Any]],

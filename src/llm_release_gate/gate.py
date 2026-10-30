@@ -1,4 +1,4 @@
-"""The naive gate: one run per version, block if the mean score drops by more than a fixed threshold."""
+"""The gate: the naive rule on the mean (first run per version, a fixed threshold) and the rule on checks (all runs)."""
 
 import argparse
 import json
@@ -10,7 +10,7 @@ from dataclasses import asdict, dataclass, replace
 from fractions import Fraction
 from pathlib import Path
 
-from llm_release_gate import budget
+from llm_release_gate import budget, criterion
 from llm_release_gate.compare import Arm, Mismatch, load_arm, pair
 from llm_release_gate.golden import load_cases, validate
 from llm_release_gate.hashing import canonical_hash
@@ -137,6 +137,75 @@ def first_run(records: list[dict]) -> float:
     return r["score"]
 
 
+def check_runs(
+    pairs: dict[str, tuple[list[dict], list[dict]]],
+) -> tuple[dict[criterion.Key, list], dict[criterion.Key, list]]:
+    """Per (case, check), its result in every run of the base and of the candidate; a run without results gives None."""
+    keys = sorted(
+        {(case, check) for case, arms in pairs.items() for rs in arms for r in rs for check in r.get("hits") or {}}
+    )  # fmt: skip
+    base, candidate = (
+        {(case, check): [(r.get("hits") or {}).get(check) for r in pairs[case][side]] for case, check in keys}
+        for side in (0, 1)
+    )  # fmt: skip
+    return base, candidate
+
+
+def checks_report(c: criterion.CheckVerdict) -> dict:
+    return {
+        "outcome": c.outcome,
+        "mode": c.mode,
+        "alpha": c.alpha,
+        "sides": c.sides,
+        "m": c.m,
+        "testable": c.testable,
+        "runs_to_block": criterion.runs_to_block(c.alpha, c.sides),
+        "checked": len(c.units),
+        "one_sided": [list(k) for k in c.one_sided],
+        "broken": [asdict(u) for u in c.broken],
+    }
+
+
+def checks_lines(c: criterion.CheckVerdict) -> tuple[str, list[str]]:
+    """The comment's line on the rule on checks, and its table of broken checks."""
+    if not c.units:
+        return "Checks: no check was scored in both versions.", []
+    test = f"{'one' if c.sides == 1 else 'two'}-sided Fisher, α {c.alpha:g}"
+    kb = max(u.base[1] for u in c.units)
+    kc = max(u.candidate[1] for u in c.units)
+    left = (
+        f" {len(c.one_sided)} checks scored in one version only are left out."
+        if c.one_sided
+        else ""
+    )
+    if c.broken:
+        verb = (
+            "the mode `report` does not block on them"
+            if c.outcome == "report"
+            else "they block"
+        )
+        rows = ["", "| Case | Check | Base | Candidate | p |", "|---|---|---|---|---|"]
+        rows += [
+            f"| {u.case} | {u.check} | {u.base[0]}/{u.base[1]} | {u.candidate[0]}/{u.candidate[1]} | {u.p:.2g} |"
+            for u in c.broken[:5]
+        ]
+        if len(c.broken) > 5:
+            rows += ["", f"{len(c.broken) - 5} more in the JSON report."]
+        line = f"Checks: {len(c.broken)} broke, {verb} ({test} on {kb} + {kc} runs, Tarone m = {c.m}).{left}"
+        return line, rows
+    if not c.testable:
+        need = criterion.runs_to_block(c.alpha, c.sides)
+        line = (
+            f"Checks: with {kb} + {kc} runs no break can be significant; one broken check needs {need} runs "
+            f"of each version ({test}).{left}"
+        )
+        return line, []
+    return (
+        f"Checks: none broke ({len(c.units)} checked, {test} on {kb} + {kc} runs, Tarone m = {c.m}).{left}",
+        [],
+    )
+
+
 def record_cost(r: dict, prices: Prices) -> float | None:
     """USD for one record's calls at the gate's prices; None if a model has no price.
 
@@ -218,6 +287,7 @@ def markdown(
     candidate: Arm,
     costs: tuple[float | None, float | None] | None = None,
     spend: budget.Budget | None = None,
+    checks: criterion.CheckVerdict | None = None,
 ) -> str:
     icon = {
         "pass": "✅",
@@ -237,6 +307,9 @@ def markdown(
             f"{candidate.config_hash[:8]} · set {base.set_hash[:8]}"
         ),
     ]
+    line, broken = checks_lines(checks) if checks else (None, [])
+    if line:
+        lines.append(line)
     runs, days = reused(base, candidate)
     if runs:
         lines.append(
@@ -264,6 +337,7 @@ def markdown(
         )
     if spend:
         lines.append(budget_line(spend))
+    lines += broken
     if v.worse:
         lines += ["", "| Case | Base | Candidate |", "|---|---|---|"]
         lines += [f"| {k} | {b:.2f} | {c:.2f} |" for k, b, c in v.worse[:5]]
@@ -386,6 +460,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="read --threshold as percent of the base mean",
     )
     p.add_argument(
+        "--checks",
+        choices=("block", "report"),
+        default="block",
+        help="a check that broke over the runs blocks, or is only reported (default block)",
+    )
+    p.add_argument(
         "--golden",
         type=Path,
         help="rescore both versions from their saved answers against this set",
@@ -441,16 +521,25 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.threshold,
             args.relative,
         )
+        base_runs, candidate_runs = check_runs(pairs)
+        checks = (
+            criterion.per_check(base_runs, candidate_runs, mode=args.checks)
+            if base_runs
+            else None
+        )
+        if v.exit_code == PASS and checks and checks.outcome == "block":
+            v = replace(v, outcome=VERDICTS[QUALITY_FAIL], exit_code=QUALITY_FAIL)
         prices = load_prices(args.prices) if args.prices else None
         costs = (cost(base, prices), cost(candidate, prices)) if prices else None
         spend = candidate_budget(candidate, prices, args)
         if v.exit_code == PASS and spend and spend.outcome == "over":
             v = replace(v, outcome=VERDICTS[BUDGET_FAIL], exit_code=BUDGET_FAIL)
-        text = markdown(v, base, candidate, costs, spend)
+        text = markdown(v, base, candidate, costs, spend, checks)
         report = {
             **asdict(v),
             "threshold_pp": args.threshold,
             "relative": args.relative,
+            "checks": checks_report(checks) if checks else None,
             "base_config": base.config_hash,
             "candidate_config": candidate.config_hash,
             "set_hash": base.set_hash,
@@ -463,7 +552,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "base_reused": dict(
                 zip(("runs", "days_before_candidate"), reused(base, candidate))
             ),
-            # the naive gate uses only the first of these
+            # the naive rule reads only the first of these, the rule on checks all
             "runs_per_case": {
                 "base": max(len(b) for b, _ in pairs.values()),
                 "candidate": max(len(c) for _, c in pairs.values()),

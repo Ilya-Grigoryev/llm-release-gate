@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from llm_release_gate import gate, runner
+from llm_release_gate import criterion, gate, runner
 from llm_release_gate.golden import load_cases
 from llm_release_gate.pipeline import Answer
 
@@ -84,11 +84,13 @@ def config(tmp_path, name, temperature):
     return path
 
 
-def runs(tmp_path, monkeypatch, name, temperature, pipeline, golden=GOLDEN):
+def runs(tmp_path, monkeypatch, name, temperature, pipeline, golden=GOLDEN, k=1):
     monkeypatch.setattr(runner, "Command", lambda c: pipeline)
     out = tmp_path / f"{name}.jsonl"
     cfg = config(tmp_path, name, temperature)
-    runner.main(["--config", str(cfg), "--golden", str(golden), "--out", str(out)])
+    runner.main(
+        ["--config", str(cfg), "--golden", str(golden), "--out", str(out), "-k", str(k)]
+    )
     return out
 
 
@@ -389,3 +391,72 @@ def test_the_age_of_reused_runs_reads_as_hours_or_days():
         "5 hours",
         "2.0 days",
     ]
+
+
+def test_a_check_broken_in_every_run_blocks_while_the_mean_holds(
+    tmp_path, monkeypatch, capsys
+):
+    base = runs(tmp_path, monkeypatch, "base", 0, Fixed(), k=4)
+    broken = runs(tmp_path, monkeypatch, "broken", 1, Fixed(total="21.50"), k=4)
+    report, comment = tmp_path / "v.json", tmp_path / "c.md"
+    args = ["--base", str(base), "--candidate", str(broken), "--threshold", "30"]
+    args += ["--json", str(report), "--markdown", str(comment)]
+    assert (
+        gate.main(args) == gate.QUALITY_FAIL
+    )  # the mean lost 25 points, under the threshold
+    checks = json.loads(report.read_text())["checks"]
+    assert (checks["outcome"], checks["m"], checks["runs_to_block"]) == ("block", 1, 4)
+    [unit] = checks["broken"]
+    assert (unit["check"], unit["base"], unit["candidate"]) == ("total", [4, 4], [0, 4])
+    text = comment.read_text()
+    assert (
+        "Checks: 1 broke, they block (one-sided Fisher, α 0.025 on 4 + 4 runs" in text
+    )
+    assert f"| {CASE.id} | total | 4/4 | 0/4 | 0.014 |" in text
+
+    assert gate.main([*args, "--checks", "report"]) == gate.PASS
+    assert json.loads(report.read_text())["checks"]["outcome"] == "report"
+    assert "the mode `report` does not block on them" in comment.read_text()
+
+
+def test_with_one_run_the_comment_says_the_checks_cannot_block(
+    tmp_path, monkeypatch, capsys
+):
+    base = runs(tmp_path, monkeypatch, "base", 0, Fixed())
+    broken = runs(tmp_path, monkeypatch, "broken", 1, Fixed(total="21.50"))
+    report, comment = tmp_path / "v.json", tmp_path / "c.md"
+    args = ["--base", str(base), "--candidate", str(broken), "--threshold", "30"]
+    assert (
+        gate.main([*args, "--json", str(report), "--markdown", str(comment)])
+        == gate.PASS
+    )
+    assert json.loads(report.read_text())["checks"]["testable"] == 0
+    assert (
+        "with 1 + 1 runs no break can be significant; one broken check needs 4 runs of each version"
+        in comment.read_text()
+    )
+
+
+def test_check_runs_keeps_runs_aligned_and_marks_missing_results():
+    pairs = {
+        "a": (
+            [{"hits": {"x": True}}, {"hits": None, "score_error": "boom"}],
+            [{"hits": {"x": False, "y": True}}],
+        ),
+        "b": ([{}], [{}]),
+    }
+    base, candidate = gate.check_runs(pairs)
+    assert base == {("a", "x"): [True, None], ("a", "y"): [None, None]}
+    assert candidate == {("a", "x"): [False], ("a", "y"): [True]}
+    assert gate.check_runs({"b": ([{}], [{}])}) == ({}, {})
+
+
+def test_more_than_five_broken_checks_point_to_the_report():
+    base = {(f"c{i}", "x"): [True] * 8 for i in range(7)}
+    candidate = {(f"c{i}", "x"): [False] * 8 for i in range(7)}
+    line, rows = gate.checks_lines(criterion.per_check(base, candidate))
+    assert line.startswith("Checks: 7 broke, they block")
+    assert (
+        sum(r.startswith("| c") for r in rows) == 5
+        and rows[-1] == "2 more in the JSON report."
+    )
