@@ -75,17 +75,28 @@ Not decided yet: how many runs to add, and the interval method. A second compari
 earlier version that only a person moves, is planned so that small losses cannot pile up.
 Until experiments measure the rule, this site states no error rates.
 
-## Why both versions run at the same time
+## Where the base's runs come from
 
-The gate runs both versions fresh and at the same time, each in its own checkout, because a model's behaviour under one
-name can shift. In the author's runs with a dated snapshot, the server configuration the provider reported changed
-between repeats of the same request, and the level of noise differed between two days. Run together, both versions
-meet the same conditions, so a shift that hits both cancels out.
+A version stays the same version in any commit ([What a version is](/docs/how-it-works#what-a-version-is)), so the gate
+runs it once and shares the runs. Each job uploads the runs it paid for as an artifact named after the version and the
+test set. Before running the base, the next job looks for that artifact and reuses its runs when they are at most
+`base_max_age_days` old, 3 by default. A merged request's candidate is the target branch's new version, so the next
+request usually finds its base already run. The comment says how many base runs came from earlier jobs, and its cost
+counts only the runs this job paid for.
 
-Prefer a dated snapshot. For a model without a date, the comment warns, and the gate refuses to compare
-(`infra error`) runs with a pause longer than one hour. For a model without a date that both versions asked for, it also
-refuses when the provider reported different models to the two versions. Whether
-the base's runs may be reused for a dated model is open.
+Reuse has two prices:
+
+- **Drift.** A model's behaviour under one name can shift. In the author's runs with a dated snapshot, the server
+  configuration the provider reported changed between repeats of the same request, and the level of noise differed
+  between two days. Within the age limit, such a shift counts as an effect of your change. With
+  `base_max_age_days: 0` both versions run together, and a shift that hits both cancels out.
+- **Shared luck.** Every request within the age limit compares with the same base runs. With one run per case, a lucky
+  or unlucky base run moves all their verdicts the same way. Use `0` when you count the gate's errors across requests.
+
+The gate never reuses the runs of a model without a date, nor a base that ran under a request's own `prepare`. Prefer
+a dated snapshot. For a model without a date, the comment warns, and the gate refuses to compare (`infra error`) runs
+with a pause longer than one hour, and, when both versions asked for it, runs the provider reported as different models.
+Reuse needs `actions: read` in the job's `permissions`; without it the base runs again and the comment says why.
 
 ## Budgets: cost and latency
 

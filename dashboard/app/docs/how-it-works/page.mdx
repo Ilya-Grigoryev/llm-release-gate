@@ -20,9 +20,10 @@ rewrites the cancellation rule in its system prompt.
    their own locked dependencies, so a request that updates an SDK is compared with the old SDK.
 3. **Each tree works out its version.** If the two [version](#what-a-version-is) hashes are equal, the pipeline is
    `unchanged` and nothing runs.
-4. **Both versions run.** The base (the target branch's version) and the candidate (the request's) run in parallel,
-   [in the same window](/docs/how-it-decides#why-both-versions-run-at-the-same-time), `k` times on each
-   [case](#cases) of the request's test set.
+4. **Both versions run.** The candidate (the request's version) runs `k` times on each [case](#cases) of the
+   request's test set, and the base (the target branch's version) next to it, unless an earlier job ran that version on
+   the same set in the last 3 days: then the gate
+   [reuses those runs](/docs/how-it-decides#where-the-bases-runs-come-from).
 5. **Checks score every run.** The case's [checks](#checks) read the answer and the [trace](/docs/connect#traces) of
    steps that produced it, and give the run a score from 0 to 1.
 6. **The gate decides and answers.** It applies [today's rule](#the-decision-today), posts the [verdict](#verdicts)

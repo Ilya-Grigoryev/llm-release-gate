@@ -16,10 +16,13 @@ match this list.
 2. **Mean scores**, base → candidate, and the difference in points. "blocks below -5.00" marks −`delta`; a drop of
    exactly 5.00 passes. Today the rule is always the naive rule.
 3. **What was compared.** The first run of each case, even when `k` asks for more. Each `config` hash covers the whole
-   version; `set` is the test set's hash.
+   version; `set` is the test set's hash. When the base's runs came from earlier jobs, a line follows, for example
+   "Base: 20 of 20 runs come from earlier jobs; the oldest ran 5 hours before the candidate's"
+   ([where from](/docs/how-it-decides#where-the-bases-runs-come-from)).
 4. **Model without a date.** Not in this example: a warning that both versions' runs had no pause longer than an hour
    and, where both asked for the same model, got the same one, or the gate would have refused to compare them.
-5. **Cost of the decision.** Every call that got an answer, both sides, at the target branch's list prices.
+5. **Cost of the decision.** Every call that got an answer, both sides, at the target branch's list prices; base runs
+   reused from earlier jobs are left out.
 6. **Budget.** See [The budget line](#the-budget-line).
 7. **Cases that got worse.** Up to five, largest drop first, on any outcome. The [dashboard](#the-dashboard) lists
    every case.
@@ -47,6 +50,7 @@ fail stays a quality fail whatever the budget says
 | ⚙️ This request changes the gate's rules … | Nothing, unless the request should be judged by the new rules: then merge them first, in their own request. |
 | This request changes the test set … | Review case edits as code: a request that deletes or loosens its failing cases passes without being better. |
 | ❌ This request removes `faq` … | See [Inconclusive](#inconclusive). |
+| Base ran again: this job cannot read earlier runs … | Add `actions: read` to the job's `permissions`. |
 
 ## What to do for each outcome
 

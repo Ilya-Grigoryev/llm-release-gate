@@ -21,6 +21,7 @@ target architecture.
 | Budget | `budget.py`, `gate.py` | cost of the decision; cost and latency limits | built |
 | Report and comment | `gate.py`, `comment.py` | Markdown and JSON verdict; one comment on the pull or merge request, edited on later pushes | built |
 | CI adapter | `action.yml`, `setup/action.yml`, `project.py` (`gate.yaml`), `pr.py`, `comment.py`, `cli.py` | runs both versions of each changed pipeline of a request and posts the verdict | built (a GitHub Action; `llm-release-gate` for any CI) |
+| Shared runs | `pr.py` (`--cache`, `--refresh`), `shared.py` | a version's runs outlive the job: the base's recent runs come from earlier jobs (D-007) | built (a directory any CI keeps; GitHub artifacts) |
 | Dashboard | `dashboard/` (Next.js) | the gate's runs per repository: history of pull requests, a run's cases, a case's answers, checks and steps on both sides | built (first version) |
 
 Projects use the gate as a dependency, each in its own repository: [receipt-intake](https://github.com/Ilya-Grigoryev/receipt-intake) (receipt
@@ -164,25 +165,43 @@ runner's scorer is `hits(case, answer, trace=None)` (by default the run's trace,
 
 A project says what to gate in `gate.yaml` (`project.schema.json`, `project.load`): named pipelines, each a version's
 config and a golden set (with an optional manifest and `inputs-url`), and the settings `k`, `delta`, `prices`,
-`budgets`, which a pipeline may override, plus a `prepare` command. Its pull request job (on GitHub: `uses:
+`budgets` and `base_max_age_days`, which a pipeline may override, plus a `prepare` command. Its pull request job (on GitHub: `uses:
 Ilya-Grigoryev/llm-release-gate@<tag>` after its `setup` action) checks that it can comment, gets the golden set (from
 the repository, a GitHub release or a GitLab package), then runs `llm-release-gate pr --base REV --out OUT` from the
 repository's root. For each pipeline `pr` first copies the golden set's text files (cases and text inputs, never
 images; links followed) to `OUT/NAME/cases`, so even a run without a verdict shows what it was given, and checks the set
 against its manifest. It checks out the target branch in a worktree, runs `prepare` and syncs the environment in both
-trees, and asks each tree's own gate for the version's hash. The rules (`delta`, `k`, `budgets`, `prices`) come
+trees, and asks each tree's own gate for the version's hash. The rules (`delta`, `k`, `budgets`, `prices`,
+`base_max_age_days`) come
 from the target branch's `gate.yaml` when it has one (D-024); price files are copied before the request's `prepare`
 runs in that tree. Pipelines are matched by name, and the base arm runs the target branch's config of the pipeline, so
 renaming a config file keeps the base. A pipeline the target branch lacks gives `no base version`: only the candidate
 runs (`gate --no-base`), for its score and budget, exit 0. The comment notes changed rules, a new pipeline and a changed
 test set. The gate runs the request's code, workflow and lock file: it catches mistakes, not a hostile author. Equal hashes give `unchanged` (exit 0, no runs) when the two `gate.yaml` agree on `ignore` and on which files belong to which pipeline; a request that removes a pipeline exits 11;
 otherwise both versions run in parallel, each with its own code, `k` runs per case, and the gate writes `comment.md` and
-`verdict.json`. A step that cannot run gives an infra-error comment and 20; `pr` exits with the worst outcome of its
+`verdict.json`. With `--cache DIR` the base's runs come from earlier jobs first (below). A step that cannot run gives an infra-error comment and 20; `pr` exits with the worst outcome of its
 pipelines. The action gates one pipeline per step (`pipeline:`, or the only one), posts the comment and keeps the
 records as an artifact (`release-gate-NAME-ATTEMPT`) and the text files as a second one (`…-cases`, 30 days). It
 advises: on GitHub until the check is made required, on GitLab while the job has `allow_failure: true`. On a pull
 request from a fork GitHub passes no secrets: the action runs nothing and fails as `not checked`, so a required check
 never passes an unchecked request.
+
+**Shared runs** (D-007). A version is the same in any commit (config, prompts, tracked code), so the gate runs it once.
+`pr --cache DIR` keeps each version's error-free runs in `DIR/NAME/VERSION-SET.jsonl` (the newest run per case and
+repetition, raw responses next to them) and, before running the base, copies that version's runs on that set into
+`base.jsonl`, the first `k` per case and at most `base_max_age_days` old (default 3), each marked `reused`; the runner
+then runs only what is missing. On GitHub the directory starts empty: `shared.fetch` asks the REST API for the newest
+artifact `llm-release-gate-runs-NAME-VERSION16-SET16` of this repository's own runs (not a fork's) within the age limit,
+downloads it (the redirect to storage gets no token) and adds its runs to the directory; `pr` names the versions this
+job paid for in `OUT/NAME/shared.txt`, and the action uploads them under that name. A merged request's candidate is the
+target branch's new version when the merge keeps the tree, so the next request usually finds its base run. Reuse never
+fails a check: any error there runs the base. It is skipped for a model without a date (D-018) and for a base prepared
+with a request's own `prepare`, and needs `actions: read`; without it the comment says so. The verdict counts the cost
+of the runs this job paid for and reports `base_reused` (how many, how much older than the candidate). `pr --refresh`
+runs the default branch's version on a push or schedule, for later requests or a drift series. The price of reuse:
+drift at the provider within the age limit counts as an effect, and all requests in the window share one base sample,
+so their verdicts are not independent (`base_max_age_days: 0` for experiments that count errors). The environment of a
+request's workflow is not part of the version.
 
 ```mermaid
 flowchart LR
@@ -319,7 +338,8 @@ about 25-fold for a long dialog.
 
 ## Planned
 
-- **Statistical gate** (see Criterion), interleaved arms in the runner, latency budgets, the anchor comparison.
+- **Statistical gate** (see Criterion), interleaved arms in the runner, latency budgets, the anchor comparison; more
+  base runs than candidate runs, paid once and shared through the reused runs.
 - **Adoption** (D-023): the protocol's schema for any program (built), `gate.yaml` and `llm-release-gate pr` (built), a
   verdict without a base version and forks (built), a maintainer's run of a fork's request, Python adapters in a worker process, the engine through `uvx`, `init` and
   `doctor`, a recording proxy for traces, a GitLab component and a pytest plugin; a JUnit report.

@@ -49,16 +49,18 @@ too ([What it catches](/docs/what-it-catches#what-it-cannot-see)).
 The gate compares each version's mean score over the first run of each case and blocks when the candidate's is lower
 by more than `delta` points. In the author's measurement on a support agent, one unchanged version on the same 10 tasks
 had a spread of 30 points over 11 runs, and twice the same version, run as base and as candidate in one job, differed by
-10 points. So a block or a pass can be noise. A loss smaller than `delta` passes, so small losses add up unseen.
+10 points. So a block or a pass can be noise. Requests within `base_max_age_days` compare with the same base runs, so
+one noisy base run moves all their verdicts. A loss smaller than `delta` passes, so small losses add up unseen.
 Planned: several runs per version, an interval around the difference, a "not sure yet" outcome, and an anchor version
 that only a person moves ([How it decides](/docs/how-it-decides#planned-several-runs-and-an-interval)).
 
 ## How it differs from other tools
 
-The gate runs both versions fresh in the same job, each from its own checkout, and refuses to compare runs on
-different test sets or scored by different scorers (`infra error`, exit 20).
+The gate runs each version from its own checkout. It reuses the target branch's runs for up to `base_max_age_days`
+(3 by default; `0` runs both versions in the same job) and refuses to compare runs on different test sets or scored by
+different scorers (`infra error`, exit 20).
 
-<Fig id="limits-2" caption={"When the base ran earlier, anything that changed at the provider in between counts as an effect of your change. When both versions run together, a shift that hits both cancels out in the difference; run-to-run noise remains in both cases."} alt={"Two timelines. In the first, the base version ran last week and the candidate runs today; the difference between them mixes the effect of the change with anything that changed at the provider in between, plus run-to-run noise. In the second, both versions run in the same job at the same time, so a shift at the provider affects both, and the difference shows the change plus run-to-run noise, without the drift."} />
+<Fig id="limits-2" caption={"When the base ran earlier, anything that changed at the provider in between counts as an effect of your change. When both versions run together (`base_max_age_days: 0`), a shift that hits both cancels out in the difference; run-to-run noise remains in both cases."} alt={"Two timelines. In the first, the base version ran last week and the candidate runs today; the difference between them mixes the effect of the change with anything that changed at the provider in between, plus run-to-run noise. In the second, both versions run in the same job at the same time, so a shift at the provider affects both, and the difference shows the change plus run-to-run noise, without the drift."} />
 
 The table compares only how each tool decides that a new version is worse, as documented in October 2026.
 

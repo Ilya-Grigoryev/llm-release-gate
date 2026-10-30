@@ -174,7 +174,7 @@ A check compares against its own `value` or against the case's expected value at
    dependencies = ["llm-release-gate"]
 
    [tool.uv.sources]
-   llm-release-gate = { git = "https://github.com/Ilya-Grigoryev/llm-release-gate", tag = "v0.1.0-dev.6" }
+   llm-release-gate = { git = "https://github.com/Ilya-Grigoryev/llm-release-gate", tag = "v0.1.0-dev.10" }
    ```
 2. Write an adapter (`build(config)` and `run(case)`, [Your pipeline](#your-pipeline)) or a program
    ([Any program](#any-program)), a config for the version in production and a golden set.
@@ -192,15 +192,15 @@ A check compares against its own `value` or against the case's expected value at
    jobs:
      release-gate:
        runs-on: ubuntu-latest
-       permissions: {contents: read, pull-requests: write}
+       permissions: {contents: read, pull-requests: write, actions: read}  # actions: reuse earlier runs
        env:
          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
        steps:
          - uses: actions/checkout@v7
-         - uses: Ilya-Grigoryev/llm-release-gate/setup@v0.1.0-dev.6
+         - uses: Ilya-Grigoryev/llm-release-gate/setup@v0.1.0-dev.10
            with:
              gate-ssh-key: ${{ secrets.LLM_RELEASE_GATE_KEY }}  # while this repository is private
-         - uses: Ilya-Grigoryev/llm-release-gate@v0.1.0-dev.6
+         - uses: Ilya-Grigoryev/llm-release-gate@v0.1.0-dev.10
    ```
 
 `gate.yaml` ([`project.schema.json`](src/llm_release_gate/project.schema.json)) takes these fields; settings at the top
@@ -215,6 +215,7 @@ apply to every pipeline, and a pipeline's own win:
 | `delta` | points of mean score the candidate may lose, default 5 |
 | `prices` | YAML of `model: [input, output]` USD per 1M tokens, for costs and the cost budget |
 | `budgets` | `cost_per_run_usd` (needs `prices`), `latency_s` and `latency_quantile` (default 0.95) |
+| `base_max_age_days` | how old the target branch's runs from earlier jobs may be to be reused instead of run again, default 3; `0` runs both versions in every job |
 | `prepare` | a command that readies the project in both trees before their runs, such as `[npm, ci]` |
 | `ignore` | glob patterns, from the project's directory, of files that never change what the model gets, such as `web/` (a trailing `/` takes the directory, `**` crosses directories); on top of documentation and CI; `!docs/kb/` takes files back, for an app that reads them |
 
@@ -226,7 +227,17 @@ files (another pipeline's prompt, say) do not count for the others. A request th
 belong to which pipeline (the prompts its configs name included) runs every pipeline, so it cannot hide new code from
 its own gate. The verdict comes as one comment, edited on later pushes.
 
-The rules (`delta`, `k`, `budgets`, `prices`) come from the target branch's `gate.yaml`, so editing the rules in a
+A version is the same in any commit, so the gate runs it once and shares the runs. Each job uploads the runs it paid
+for as an artifact named after the version and the test set (`llm-release-gate-runs-NAME-VERSION-SET`); before running
+the base, a later job reuses such runs if they are at most `base_max_age_days` old. A merged request's candidate is the
+target branch's new version, so the next request usually finds its base already run, and the comment counts only what
+this job paid for. The price: within the age limit, a shift at the provider counts as an effect of the change, and every
+request compares with the same base runs, so one noisy base run moves all their verdicts; `base_max_age_days: 0` runs
+both versions together, as an experiment that counts the gate's errors should. Runs of a model without a date, and a
+base that ran under a request's own `prepare`, are never reused. The job needs `actions: read` to find earlier runs;
+without it the base runs again and the comment says so.
+
+The rules (`delta`, `k`, `budgets`, `prices`, `base_max_age_days`) come from the target branch's `gate.yaml`, so editing the rules in a
 request does not loosen that request's gate: new rules apply after merge, and the comment says when a request changes
 them, adds a pipeline or changes a test set. A request that removes a pipeline (or renames it, which looks the same)
 fails as inconclusive (exit 11; the other pipelines keep their verdicts): no version of it was compared, so a
@@ -240,7 +251,8 @@ mistakes, not a hostile author: protect `.github/`, `gate.yaml` and the lock fil
 
 On `pull_request` GitHub gives a request from a fork no secrets, so the gate cannot call the model: the job fails as
 `not checked` and says why, and a maintainer gates the request by pushing its branch to the repository. The action
-runs on the `pull_request` event. The action keeps
+runs on the `pull_request` event; on a push or a schedule on the default branch it runs that branch's version for
+later requests instead, which is optional. The action keeps
 the records as an artifact, and the golden set's case files and text inputs as a second one for 30 days
 (`cases: false` leaves it out), so the [dashboard](#dashboard) can show what each case asked. It fails the job with the
 gate's verdict; the job only advises until it is made a required check. With several pipelines in `gate.yaml`, add one
@@ -258,7 +270,7 @@ Three projects use it, each with its own `.github/workflows/ci.yml`: [receipt-in
 
 Outside GitHub Actions the gate's command does the work, from the repository's root. `llm-release-gate pr --base
 origin/main --out OUT` runs every pipeline of `gate.yaml` and writes `OUT/NAME` (`--project DIR` when `gate.yaml` is not
-at the root, `--list` only checks it). `llm-release-gate comment OUT/NAME/comment.md --name NAME` posts a verdict (on
+at the root, `--list` only checks it; `--cache DIR` reuses the base's runs from a directory the CI keeps between jobs). `llm-release-gate comment OUT/NAME/comment.md --name NAME` posts a verdict (on
 GitLab with `GITLAB_TOKEN`, a project access token with the `api` scope); `--check` tells beforehand whether the job
 can comment, `--dry-run` prints the comment and posts nothing.
 
