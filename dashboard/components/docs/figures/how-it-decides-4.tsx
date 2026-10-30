@@ -130,7 +130,7 @@ export default function HowItDecides4() {
         )}
         <p>
           δ = 5 points: today&apos;s default, used here for illustration. {copies === 4 && "40 cases: the ten cases repeated. "}
-          Assumes both versions run K times; where the base&apos;s runs come from is not decided. The planned rule will use an
+          Assumes both versions run K times; requests within the age limit share the base&apos;s runs. The planned rule will use an
           interval that stays valid when runs are added; it will be somewhat wider than this one.
         </p>
       </div>

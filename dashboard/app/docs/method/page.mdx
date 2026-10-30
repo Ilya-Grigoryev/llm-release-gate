@@ -66,9 +66,11 @@ The decisions below answer the first research question; D-numbers are the thesis
 These answer the second research question. Today the gate uses the naive rule with a fixed `delta` (δ), 5 points by
 default; the first decision is built and the last partly, the others are the statistical rule planned for stage C.
 
-- **Both versions run on the same cases, at the same time** (D-007, D-018, built; part open), so a case's difficulty
-  and changes in the service behind a model name cancel out. Reusing the base's runs for a dated model is open (D-007,
-  proposed; the accepted D-011 assumes it).
+- **Both versions run on the same cases** (D-007, D-018, built), so a case's difficulty cancels out. The base's runs of a
+  dated model come from earlier jobs for up to `base_max_age_days` (3 by default), so a shift in the service within
+  that window counts as an effect and the requests in it share one base sample; `0` runs both versions together. A
+  model without a date always runs together
+  ([Where the base's runs come from](/docs/how-it-decides#where-the-bases-runs-come-from)).
 - **A pass speaks for these cases** (D-004), as a test suite does, not for inputs like these.
 - **δ is the loss you accept** (D-004), specified in advance and not tuned to the noise.
 - **Three outcomes** (D-004): pass, block, or "not sure yet" and run more, as the figure below shows.

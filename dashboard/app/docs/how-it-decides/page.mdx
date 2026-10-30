@@ -33,8 +33,8 @@ Equally, a base run that lands low can let a worse candidate pass.
 
 On every pull request that changes the version, the gate:
 
-1. runs both versions on the request's test set, `k` times per case (default 1), and uses only the first run of each
-   case for quality;
+1. has both versions' runs on the request's test set, `k` per case (default 1), the base's from an earlier job when
+   they are recent, and uses only the first run of each case for quality;
 2. returns `infra error` (exit 20) unless both sides have the same set hash, the same scorer and a result for every
    case;
 3. takes each version's mean score and computes the difference in points: 100 × (candidate mean − base mean);
@@ -93,8 +93,8 @@ Reuse has two prices:
 - **Shared luck.** Every request within the age limit compares with the same base runs. With one run per case, a lucky
   or unlucky base run moves all their verdicts the same way. Use `0` when you count the gate's errors across requests.
 
-The gate never reuses the runs of a model without a date, nor a base that ran under a request's own `prepare`. Prefer
-a dated snapshot. For a model without a date, the comment warns, and the gate refuses to compare (`infra error`) runs
+The gate never reuses runs when either version's model has no date, when the base ran under a request's own `prepare`, or when the target branch has no valid `gate.yaml`. Prefer a dated
+snapshot. For a model without a date, the comment warns, and the gate refuses to compare (`infra error`) runs
 with a pause longer than one hour, and, when both versions asked for it, runs the provider reported as different models.
 Reuse needs `actions: read` in the job's `permissions`; without it the base runs again and the comment says why.
 

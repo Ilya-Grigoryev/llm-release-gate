@@ -29,7 +29,7 @@ sure yet" (exit 11) and adds its interval and seed to the verdict.
 It lives in the project's directory: the repository's root, or the one you pass as `--project` (`project-dir` in the
 action). Top-level
 settings apply to every pipeline; a pipeline's own setting replaces them. The rules (`k`, `delta`, `prices`,
-`budgets`) come from the target branch, so a request that edits them runs under the old ones, unless
+`budgets`, `base_max_age_days`) come from the target branch, so a request that edits them runs under the old ones, unless
 the target branch has none or a broken one ([Whose rules apply](/docs/how-it-works#whose-rules-apply)).
 
 ```yaml
@@ -71,8 +71,9 @@ What the schema does not say:
 
 - **Names**: letters, digits, `_`, `-` and `.`, not starting with `.`; the name also labels `OUT/NAME`.
 - **`golden`**: both versions run on the request's test set.
-- **`base_max_age_days`**: comes from the target branch, like `delta`. Runs of a model without a date, and a base that
-  ran under a request's own `prepare`, are never reused ([why](/docs/how-it-decides#where-the-bases-runs-come-from)).
+- **`base_max_age_days`**: comes from the target branch, like `delta`. The gate never reuses runs when either version's model has no date, when the base ran under a request's own `prepare`,
+  or when the target branch has no valid `gate.yaml`.
+  ([Why](/docs/how-it-decides#where-the-bases-runs-come-from))
 - **`delta`**: points out of 100; a drop of exactly `delta` passes. Only `gate --relative` makes it relative.
 - **`prices`**: commit the price file; the gate copies the target branch's before `prepare` runs. `pr` passes it to the
   comparison only, so the records have `prices_hash: null`.
@@ -342,7 +343,7 @@ are recent ([where from](/docs/how-it-decides#where-the-bases-runs-come-from)).
 | `--pipeline NAME` | gate only this pipeline |
 | `--list` | check `gate.yaml` and print its pipelines; runs nothing |
 | `--cache DIR` | a directory for earlier jobs' runs: the base's runs of the same version on the same set, at most `base_max_age_days` old, are reused from it and, on GitHub, from other jobs' artifacts |
-| `--refresh` | with `--cache`, on the target branch itself: run its version unless recent runs exist; compares nothing |
+| `--refresh` | with `--cache` and `--out`, on the target branch itself: reuse its version's recent runs, run what is missing and name them for upload; compares nothing |
 
 ```sh
 uv run llm-release-gate pr --base origin/main --out gate-out
@@ -425,8 +426,9 @@ uv run llm-release-gate comment gate-out/invoice/comment.md --name invoice
 
 Two actions, pinned to the same release, in a workflow in `.github/workflows/`. The job runs on `pull_request`, needs
 `permissions: {contents: read, pull-requests: write, actions: read}` and gets the provider's key from the repository's
-secrets as an environment variable. On a push or a schedule on the default branch, the action runs that branch's
-version for later requests instead (optional). GitLab and other CI run `pr` and `comment` themselves, with `--cache` on
+secrets as an environment variable. On a push, a manual run or a schedule on the default branch, the action runs that
+branch's version for later requests instead (optional; its artifact is `llm-release-gate-base-NAME-ATTEMPT`). On
+`pull_request_target` it shares no runs. GitLab and other CI run `pr` and `comment` themselves, with `--cache` on
 a cached directory.
 
 `Ilya-Grigoryev/llm-release-gate/setup@v0.1.0-dev.11` installs Python, uv and the project's locked environment:
@@ -507,11 +509,12 @@ paid for also go up as `llm-release-gate-runs-NAME-VERSION-SET` (16 characters o
 | `budget` | `outcome` (`within` or `over`), `over`, `unchecked`, `runs`, `retried`, `cost_per_run`, `cost_limit`, `latency_q`, `latency_s`, `latency_ci`, `latency_limit`, `level`; `null` without budgets |
 | `models_without_date` | undated model names in the runs |
 | `runs_per_case` | `{base, candidate}` |
-| `base_reused` | `{runs, days_before_candidate}`: base runs that came from earlier jobs, and how much earlier the oldest ran |
+| `base_reused` | `{runs, days_before_candidate}`: base runs that came from earlier jobs, and how much earlier the oldest ran; `{0, null}` when none |
 
 `unchanged` writes only `outcome`, `exit_code`, the three hashes, and `base_mean`, `candidate_mean` and `diff_pp` as
 `null`. `no base` has no `limit_pp`, `rule`, `cases`, `worse`, `threshold_pp`, `relative` or `rescored`; its
-`base_mean`, `diff_pp`, `base_config` and (with prices) `cost_usd.base` are `null`, and `runs_per_case.base` is `0`.
+`base_mean`, `diff_pp`, `base_config` and (with prices) `cost_usd.base` are `null`, `runs_per_case.base` is `0`, and
+it has no `base_reused`.
 
 ## The record of a run
 

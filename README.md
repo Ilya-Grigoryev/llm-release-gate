@@ -215,13 +215,13 @@ apply to every pipeline, and a pipeline's own win:
 | `delta` | points of mean score the candidate may lose, default 5 |
 | `prices` | YAML of `model: [input, output]` USD per 1M tokens, for costs and the cost budget |
 | `budgets` | `cost_per_run_usd` (needs `prices`), `latency_s` and `latency_quantile` (default 0.95) |
-| `base_max_age_days` | how old the target branch's runs from earlier jobs may be to be reused instead of run again, default 3; `0` runs both versions in every job |
+| `base_max_age_days` | the gate reuses the target branch's runs from earlier jobs up to this many days old, default 3; `0` runs both versions in every job |
 | `prepare` | a command that readies the project in both trees before their runs, such as `[npm, ci]` |
 | `ignore` | glob patterns, from the project's directory, of files that never change what the model gets, such as `web/` (a trailing `/` takes the directory, `**` crosses directories); on top of documentation and CI; `!docs/kb/` takes files back, for an app that reads them |
 
 `setup` installs Python, uv and the project's locked environment. The gate action checks that it can comment, checks
 the golden set (against its manifest, if any), and compares the version from the target branch with the one from the
-request, in parallel and each with its own code. A request that leaves a pipeline's version as it is (config,
+request, each with its own code; the base runs next to the candidate unless recent runs of it exist (below). A request that leaves a pipeline's version as it is (config,
 prompts and code, see [Running a version](#running-a-version)) gets `unchanged` and costs nothing; a pipeline's own
 files (another pipeline's prompt, say) do not count for the others. A request that changes `ignore` or which files
 belong to which pipeline (the prompts its configs name included) runs every pipeline, so it cannot hide new code from
@@ -230,11 +230,10 @@ its own gate. The verdict comes as one comment, edited on later pushes.
 A version is the same in any commit, so the gate runs it once and shares the runs. Each job uploads the runs it paid
 for as an artifact named after the version and the test set (`llm-release-gate-runs-NAME-VERSION-SET`); before running
 the base, a later job reuses such runs if they are at most `base_max_age_days` old. A merged request's candidate is the
-target branch's new version, so the next request usually finds its base already run, and the comment counts only what
-this job paid for. The price: within the age limit, a shift at the provider counts as an effect of the change, and every
+target branch's new version, so the next request usually finds its base already run, and the comment's cost counts
+only what this job paid for. The price: within the age limit, a shift at the provider counts as an effect of the change, and every
 request compares with the same base runs, so one noisy base run moves all their verdicts; `base_max_age_days: 0` runs
-both versions together, as an experiment that counts the gate's errors should. Runs of a model without a date, and a
-base that ran under a request's own `prepare`, are never reused. The job needs `actions: read` to find earlier runs;
+both versions together, as an experiment that counts the gate's errors should. The gate never reuses runs when either version's model has no date, when the base ran under a request's own `prepare`, or when the target branch has no valid `gate.yaml`. The job needs `actions: read` to find earlier runs;
 without it the base runs again and the comment says so.
 
 The rules (`delta`, `k`, `budgets`, `prices`, `base_max_age_days`) come from the target branch's `gate.yaml`, so editing the rules in a
@@ -251,8 +250,8 @@ mistakes, not a hostile author: protect `.github/`, `gate.yaml` and the lock fil
 
 On `pull_request` GitHub gives a request from a fork no secrets, so the gate cannot call the model: the job fails as
 `not checked` and says why, and a maintainer gates the request by pushing its branch to the repository. The action
-runs on the `pull_request` event; on a push or a schedule on the default branch it runs that branch's version for
-later requests instead, which is optional. The action keeps
+runs on the `pull_request` event; on a push, a manual run or a schedule on the default branch it runs that branch's
+version for later requests instead, which is optional. The action keeps
 the records as an artifact, and the golden set's case files and text inputs as a second one for 30 days
 (`cases: false` leaves it out), so the [dashboard](#dashboard) can show what each case asked. It fails the job with the
 gate's verdict; the job only advises until it is made a required check. With several pipelines in `gate.yaml`, add one

@@ -22,7 +22,7 @@ rewrites the cancellation rule in its system prompt.
    `unchanged` and nothing runs.
 4. **Both versions run.** The candidate (the request's version) runs `k` times on each [case](#cases) of the
    request's test set, and the base (the target branch's version) next to it, unless an earlier job ran that version on
-   the same set in the last 3 days: then the gate
+   the same set within `base_max_age_days` (3 by default): then the gate
    [reuses those runs](/docs/how-it-decides#where-the-bases-runs-come-from).
 5. **Checks score every run.** The case's [checks](#checks) read the answer and the [trace](/docs/connect#traces) of
    steps that produced it, and give the run a score from 0 to 1.
@@ -78,7 +78,7 @@ ignore:
 
 ## Whose rules apply
 
-The rules come from the target branch's `gate.yaml`: `delta`, `k`, `budgets` and `prices`. What is tested comes from
+The rules come from the target branch's `gate.yaml`: `delta`, `k`, `budgets`, `prices` and `base_max_age_days`. What is tested comes from
 the request: the candidate's config, the test set, its manifest and `prepare`. A request therefore cannot loosen its own
 gate: a raised `delta` applies after merge. If the target branch has no `gate.yaml`, or a broken one, the request's
 rules hold.
