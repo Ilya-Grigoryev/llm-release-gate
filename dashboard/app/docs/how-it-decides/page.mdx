@@ -34,19 +34,23 @@ Equally, a base run that lands low can let a worse candidate pass.
 On every pull request that changes the version, the gate:
 
 1. has both versions' runs on the request's test set, `k` per case (default 1), the base's from an earlier job when
-   they are recent, and uses only the first run of each case for quality;
+   they are recent, and uses the first run of each case for the mean, every run for checks;
 2. returns `infra error` (exit 20) unless both sides have the same set hash, the same scorer and a result for every
    case;
 3. takes each version's mean score and computes the difference in points: 100 × (candidate mean − base mean);
 4. blocks with `quality fail` (exit 10) when the difference is below −`delta`, 5 points by default;
-5. checks the [budgets](#budgets-cost-and-latency), if you set any.
+5. blocks with `quality fail` too when a check passed significantly less often in the candidate's runs than in the
+   base's (Fisher's exact test per case and check, one-sided, α 0.025, corrected for the number of checks that could
+   show it). With one run of each version this cannot happen: one broken check needs 4 runs of each. `checks: report`
+   only lists it;
+6. checks the [budgets](#budgets-cost-and-latency), if you set any.
 
 ```yaml
 pipelines:
   support:
     config: configs/support.yaml   # the version
     golden: golden/support         # its test set
-k: 1        # runs per case and version; the quality rule uses the first
+k: 1        # runs per case and version; the mean uses the first, checks all
 delta: 5    # block when the mean score drops by more than 5 points
 ```
 
@@ -132,7 +136,8 @@ A budget only turns a quality pass into `budget fail` (exit 12).
 ## What a pass means
 
 Today a pass means: on your cases, the candidate's first run had a mean score no more than `delta` points below the
-base's, under the target branch's rules, and the candidate was not shown over any budget you set. It does not mean:
+base's, no check got significantly worse over the runs, under the target branch's rules, and the candidate was not
+shown over any budget you set. It does not mean:
 
 - **The change is safe on new inputs.** The gate answers only for your cases.
 - **Nothing got worse.** Losses smaller than `delta` pass and can add up, and a mean that holds can hide one check

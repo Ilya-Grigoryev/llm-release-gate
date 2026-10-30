@@ -14,8 +14,9 @@ match this list.
 
 1. **Pipeline and outcome.** Later runs edit this comment.
 2. **Mean scores**, base → candidate, and the difference in points. "blocks below -5.00" marks −`delta`; a drop of
-   exactly 5.00 passes. Today the rule is always the naive rule.
-3. **What was compared.** The first run of each case, even when `k` asks for more. Each `config` hash covers the whole
+   exactly 5.00 passes. The mean follows the naive rule.
+3. **What was compared.** The mean reads the first run of each case, even when `k` asks for more; the line on checks
+   after it reads all runs and names the checks that broke, or how many runs one would need to show. Each `config` hash covers the whole
    version; `set` is the test set's hash. When the base's runs came from earlier jobs, a line follows, for example
    "Base: 20 of 20 runs come from earlier jobs; the oldest ran 5 hours before the candidate's"
    ([where from](/docs/how-it-decides#where-the-bases-runs-come-from)).
@@ -68,18 +69,19 @@ Any code other than 0 fails the job, which blocks the merge only once it is a re
 
 ### Pass
 
-The mean of the candidate's first runs was no more than `delta` points below the base's, and the candidate was not
-shown over a budget. Read the cases that got worse anyway: a mean can hold while single cases drop
+The mean of the candidate's first runs was no more than `delta` points below the base's, no check got significantly
+worse over the runs, and the candidate was not shown over a budget. Read the cases that got worse anyway: a mean can hold while single cases drop
 ([What a pass means](/docs/how-it-decides#what-a-pass-means)).
 
 <Fig id="read-a-verdict-2" caption={"An example pass, case by case, in a documentation view, not the dashboard's page. Two cases lost half their score and one gained, so the mean held. The comment lists only the two losses; the case table shows all three and the checks behind them."} alt={"An example pass of the booking assistant with 20 cases, shown in a documentation view. Three cases changed. cancel-on-arrival fell from 1.00 to 0.50 because its no-fee-waiver check failed. move-to-full-day fell from 1.00 to 0.50 because its looked-up check failed. refund-60 rose from 0.00 to 1.00 because both of its checks now pass. The other 17 cases scored the same on both sides. With three runs per case, the loss on cancel-on-arrival repeats in all three runs, while the loss on move-to-full-day appears only in the first run (rep 0), the one today's rule reads."} />
 
 ### Quality fail
 
-The candidate's mean dropped by more than `delta` points. Open the cases in the table in the
+The candidate's mean dropped by more than `delta` points, or a check got significantly worse over the runs (a table
+names it). Open the cases in the table in the
 [dashboard](#the-dashboard) or [artifact](#the-artifacts) and look for a check that flips: in the example,
-`cancel-after-deadline` fails `no-fee-waiver` because the agent called `waive_fee`. One run of each version decides
-today, and scores move with no change: in the author's measurement, one unchanged version of a support agent scored
+`cancel-after-deadline` fails `no-fee-waiver` because the agent called `waive_fee`. With `k: 1`, one run of each version decides
+the mean, and scores move with no change: in the author's measurement, one unchanged version of a support agent scored
 between 0.40 and 0.70 over 11 runs on the same 10 tasks, 30 points, six times the default `delta`. A block is more
 likely real when the failing checks match your change. Fix it and push, or merge a new `delta` first in its own
 request; re-running until it passes defeats the gate.

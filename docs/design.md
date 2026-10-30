@@ -17,7 +17,7 @@ target architecture.
 | Scoring | `metrics.py`, `checks.py` | turns an answer and its trace into per-check results and a case score | built |
 | Prices | `prices.py` | list prices per model prefix, cached input included | built |
 | Comparison | `compare.py` | pairs the records of two versions case by case, refuses what cannot be compared | built |
-| Criterion | `gate.py`, `criterion.py` | the verdict and its exit code | built (naive rule; the rule on checks as a library function); planned (the rule on the mean, inconclusive, the rule on checks in the gate's verdict) |
+| Criterion | `gate.py`, `criterion.py` | the verdict and its exit code | built (naive rule; the rule on checks in the verdict); planned (the statistical rule on the mean, inconclusive) |
 | Budget | `budget.py`, `gate.py` | cost of the decision; cost and latency limits | built |
 | Report and comment | `gate.py`, `comment.py` | Markdown and JSON verdict; one comment on the pull or merge request, edited on later pushes | built |
 | CI adapter | `action.yml`, `setup/action.yml`, `project.py` (`gate.yaml`), `pr.py`, `comment.py`, `cli.py` | runs both versions of each changed pipeline of a request and posts the verdict | built (a GitHub Action; `llm-release-gate` for any CI) |
@@ -124,14 +124,18 @@ runner's scorer is `hits(case, answer, trace=None)` (by default the run's trace,
   `outcome`, `exit_code`, `base_mean`, `candidate_mean`, `diff_pp`, `limit_pp`, `rule`, `cases` and the cases that got
   worse. It gives `pass` (0) or `quality fail` (10); a budget can turn a pass into `budget fail` (12); `inconclusive` (11)
   is reserved for the planned rules; `infra error` (20) is any failure to compare.
-- **Built — the rule on checks (library; not yet in the gate's verdict).** `per_check(base, candidate, alpha, sides, mode,
+- **Built — the rule on checks.** `per_check(base, candidate, alpha, sides, mode,
   threshold) -> CheckVerdict`, a pure function over the results of each (case, check) per repetition: Fisher's exact test
   on k of K passes in each version, computed in exact fractions; Tarone's correction (only checks that could reach
   significance count, m the smallest number with at most m of them) and Bonferroni over those; a two-sided test blocks
   only a check that got worse; a share passes at `threshold`, None is left out; `block` or `report` mode. Defaults —
-  one-sided, alpha 0.025 — wait on D-003's open choice (M-12); the list by a discrete BH is not built.
+  one-sided, alpha 0.025 — wait on D-003's open choice (M-12); the list by a discrete BH is not built. The gate builds
+  its input from every run's `hits` (`check_runs`; a run without results gives None) and turns a pass into `quality fail`
+  when it blocks; `checks: report` in `gate.yaml` only lists. `runs_to_block(alpha, sides)` gives the fewest runs per
+  version at which one check that broke in every run can block, 4 at the defaults; the comment names it when no check is
+  testable.
 - **Planned — statistical rules.** A paired test on the mean with a margin δ and three outcomes (pass, block, buy more
-  runs and leave it to a human); the rule on checks in the gate's verdict and report; a second comparison against an
+  runs and leave it to a human); a second comparison against an
   anchor version, so that many small losses cannot add up unseen;
   an adaptive runner that pays for repeated runs only where the versions disagree. Each takes a seed as an argument and
   reports it in the verdict.

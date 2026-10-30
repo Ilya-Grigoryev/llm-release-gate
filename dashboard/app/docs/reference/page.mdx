@@ -6,7 +6,7 @@ export const metadata = { title: "Reference" };
 
 The exact names of what you write for the gate and what it writes back, for release `v0.1.0-dev.12`. Tables labelled
 "from … .schema.json" are built from the JSON Schemas the gate validates against. Today the gate decides with the naive
-rule ([How it decides](/docs/how-it-decides)); the
+rule on the mean and the rule on checks ([How it decides](/docs/how-it-decides)); the
 [planned statistical rule](/docs/how-it-decides#planned-several-runs-and-an-interval) uses every run, can answer "not
 sure yet" (exit 11) and adds its interval and seed to the verdict.
 
@@ -28,7 +28,7 @@ sure yet" (exit 11) and adds its interval and seed to the verdict.
 
 It lives in the project's directory: the repository's root, or the one you pass as `--project` (`project-dir` in the
 action). Top-level
-settings apply to every pipeline; a pipeline's own setting replaces them. The rules (`k`, `delta`, `prices`,
+settings apply to every pipeline; a pipeline's own setting replaces them. The rules (`k`, `delta`, `checks`, `prices`,
 `budgets`, `base_max_age_days`) come from the target branch, so a request that edits them runs under the old ones, unless
 the target branch has none or a broken one ([Whose rules apply](/docs/how-it-works#whose-rules-apply)).
 
@@ -371,7 +371,7 @@ uv run --env-file .env llm-release-gate run --config configs/invoice.yaml --gold
 
 ### gate
 
-Compares two files of runs case by case with the naive rule. It gives `infra error` for different set hashes, cases on
+Compares two files of runs case by case with the naive rule and the rule on checks. It gives `infra error` for different set hashes, cases on
 one side only, different scorer versions (unless `--golden` rescores both) and, for a model name without a date, a
 pause over an hour or, when both asked for it, different reported models ([why](/docs/how-it-decides#where-the-bases-runs-come-from)).
 
@@ -382,6 +382,7 @@ pause over an hour or, when both asked for it, different reported models ([why](
 | `--candidate FILE` | the candidate version's runs; required |
 | `--threshold PP` | block when the mean score drops by more than this many points; default 5 |
 | `--relative` | read `--threshold` as a percentage of the base mean |
+| `--checks MODE` | `block` (default): a check that got significantly worse blocks; `report`: it is only listed |
 | `--golden DIR` | rescore both versions' saved answers with the current scorer, without calling the model |
 | `--prices FILE` | add the cost of the decision |
 | `--max-cost-per-run USD` | budget: the candidate's mean cost per run; needs `--prices` |
@@ -460,10 +461,10 @@ never `inconclusive` or `infra error`.
 
 | Code | Outcome | When |
 |---|---|---|
-| 0 | `pass` | the mean score did not drop by more than `delta`, and no budget is exceeded |
+| 0 | `pass` | the mean score did not drop by more than `delta`, no check got significantly worse, and no budget is exceeded |
 | 0 | `unchanged` | `pr` only: equal version hashes and none of the [changes that run every pipeline](#gate-yaml); nothing ran |
 | 0 | no base version (`outcome: "no base"`) | the target branch has no version of this pipeline: the candidate runs alone and does not block |
-| 10 | `quality fail` | the mean score dropped by more than `delta` |
+| 10 | `quality fail` | the mean score dropped by more than `delta`, or a check got significantly worse (`checks: block`) |
 | 11 | `inconclusive` | today only when a request removes or renames a pipeline: each `pr` step that would exit 0 exits 11, and the comments get a note. The naive rule never gives it |
 | 12 | `budget fail` | quality passed; a cost or latency limit did not |
 | 20 | `infra error` | the runs cannot be compared, a step could not run, or the gate failed |
@@ -505,6 +506,7 @@ paid for also go up as `llm-release-gate-runs-NAME-VERSION-SET` (16 characters o
 | `rule` | the rule, in words |
 | `cases`, `worse` | the number of cases; those that scored lower, as `[case, base, candidate]`, largest drop first |
 | `threshold_pp`, `relative` | the threshold as given |
+| `checks` | the rule on checks: `outcome` (`pass`, `block`, `report`), `mode`, `alpha`, `sides`, `m` (checks that could show a break), `testable`, `runs_to_block` (runs of each version one broken check needs), `checked`, `one_sided` (`[case, check]` scored on one side only), `broken` (`case`, `check`, `base` and `candidate` as `[passes, runs]`, `p`, `p_min`); `null` when no run has check results |
 | `base_config`, `candidate_config`, `set_hash` | the two versions' hashes and the test set's |
 | `scorer_version`, `rescored` | the scorer; whether the saved answers were rescored |
 | `cost_usd`, `prices_hash` | `{base, candidate}` at the gate's prices, runs paid in this job only, and their hash; `null` without prices |
@@ -514,7 +516,7 @@ paid for also go up as `llm-release-gate-runs-NAME-VERSION-SET` (16 characters o
 | `base_reused` | `{runs, days_before_candidate}`: base runs that came from earlier jobs, and how much earlier the oldest ran; `{0, null}` when none |
 
 `unchanged` writes only `outcome`, `exit_code`, the three hashes, and `base_mean`, `candidate_mean` and `diff_pp` as
-`null`. `no base` has no `limit_pp`, `rule`, `cases`, `worse`, `threshold_pp`, `relative` or `rescored`; its
+`null`. `no base` has no `limit_pp`, `rule`, `cases`, `worse`, `threshold_pp`, `relative`, `checks` or `rescored`; its
 `base_mean`, `diff_pp`, `base_config` and (with prices) `cost_usd.base` are `null`, `runs_per_case.base` is `0`, and
 it has no `base_reused`.
 

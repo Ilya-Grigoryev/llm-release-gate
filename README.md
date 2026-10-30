@@ -10,7 +10,7 @@ The gate runs each case several times and compares the two versions case by case
 
 ## Status
 
-Work in progress. Built: the naive gate (one run per version against a fixed threshold) with a comment on every pull or merge request, cost and latency budgets, traces of agent runs, checks over the answer and the trace, any program as a pipeline, and a [dashboard](#dashboard) of the runs. The statistical rules come next. Three projects use the gate, each in its own repository: [receipt-intake](https://github.com/Ilya-Grigoryev/receipt-intake) reads seller, date, address and total from receipt scans for a bookkeeping team (test receipts from [SROIE](https://rrc.cvc.uab.es/?ch=13), ICDAR 2019), from the OCR text or from the scan; [workbench-support](https://github.com/Ilya-Grigoryev/workbench-support) is the support agent of a coworking space, with tools on its booking system and its own test cases, alone on a ticket or in a chat with a simulated user; [telecom-support](https://github.com/Ilya-Grigoryev/telecom-support) is a mobile carrier's support agent built on the telecom domain of [tau2-bench](https://github.com/sierra-research/tau2-bench): tau2's agent, tools, tasks and evaluator, unchanged.
+Work in progress. Built: the naive gate (one run per version against a fixed threshold) and the rule on checks over all runs, with a comment on every pull or merge request, cost and latency budgets, traces of agent runs, checks over the answer and the trace, any program as a pipeline, and a [dashboard](#dashboard) of the runs. The statistical rule on the mean comes next. Three projects use the gate, each in its own repository: [receipt-intake](https://github.com/Ilya-Grigoryev/receipt-intake) reads seller, date, address and total from receipt scans for a bookkeeping team (test receipts from [SROIE](https://rrc.cvc.uab.es/?ch=13), ICDAR 2019), from the OCR text or from the scan; [workbench-support](https://github.com/Ilya-Grigoryev/workbench-support) is the support agent of a coworking space, with tools on its booking system and its own test cases, alone on a ticket or in a chat with a simulated user; [telecom-support](https://github.com/Ilya-Grigoryev/telecom-support) is a mobile carrier's support agent built on the telecom domain of [tau2-bench](https://github.com/sierra-research/tau2-bench): tau2's agent, tools, tasks and evaluator, unchanged.
 
 [`docs/design.md`](docs/design.md) describes the parts, the flow of a merge request and the record of a run.
 
@@ -85,7 +85,11 @@ uv run --env-file .env llm-release-gate run --config configs/sroie-image.yaml --
 
 ## The naive gate
 
-The first gate compares one run per version: it blocks when the candidate's mean score is lower than the base's by more than a threshold, 5 points by default (`--relative` reads it as a percentage of the base mean). It pairs the two files case by case and refuses files with different set hashes, different scorer versions or cases missing from one side. `--golden` rescores both sides from their saved answers with the current scorer, without calling the model. `--prices` takes a YAML of `model: [input, output]` in USD per 1M tokens, or `[input, output, cached input]`, and adds what the decision cost: every successful call of both runs. An agent resends the whole dialog on every call, so most of its input is billed as cached; without the third price, cached tokens cost the full input price. For a traced record that means every model step, the user simulator's included.
+The first gate compares one run per version: it blocks when the candidate's mean score is lower than the base's by more than a threshold, 5 points by default (`--relative` reads it as a percentage of the base mean). It pairs the two files case by case and refuses files with different set hashes, different scorer versions or cases missing from one side. `--golden` rescores both sides from their saved answers with the current scorer, without calling the model.
+
+The rule on checks reads every run: per case and check, Fisher's exact test compares how often the check passed in each version (one-sided, α 0.025, Bonferroni over the checks that can reach significance, after Tarone). A check that got significantly worse gives `quality fail` whatever the mean did; `--checks report` (`checks: report` in `gate.yaml`) only lists it. With one run of each version no check can reach significance: one broken check needs 4 runs of each, and the comment says so.
+
+`--prices` takes a YAML of `model: [input, output]` in USD per 1M tokens, or `[input, output, cached input]`, and adds what the decision cost: every successful call of both runs. An agent resends the whole dialog on every call, so most of its input is billed as cached; without the third price, cached tokens cost the full input price. For a traced record that means every model step, the user simulator's included.
 
 Budgets check the candidate: `--max-cost-per-run USD` against its mean cost per run at the gate's prices (it needs
 `--prices`), `--max-latency S` against a latency quantile (`--latency-quantile`, 0.95 by default). A run's latency is the
@@ -190,8 +194,9 @@ apply to every pipeline, and a pipeline's own win:
 | `pipelines.NAME.config`, `.golden` | the version's config and the test set's directory, relative to the project |
 | `pipelines.NAME.manifest` | ids and hash the set must match, for a set built or fetched outside git |
 | `pipelines.NAME.inputs-url` | where the dashboard finds the set's other files (images): a URL with `{path}` or `{name}` |
-| `k` | runs per case and version, default 1; the naive rule decides on the first run, budgets use all |
+| `k` | runs per case and version, default 1; the naive rule reads the first run, the rule on checks and budgets all |
 | `delta` | points of mean score the candidate may lose, default 5 |
+| `checks` | `block` (default): a check that got significantly worse over the runs blocks; `report`: it is only listed |
 | `prices` | YAML of `model: [input, output]` USD per 1M tokens, for costs and the cost budget |
 | `budgets` | `cost_per_run_usd` (needs `prices`), `latency_s` and `latency_quantile` (default 0.95) |
 | `base_max_age_days` | the gate reuses the target branch's runs from earlier jobs up to this many days old, default 3; `0` runs both versions in every job |
