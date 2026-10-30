@@ -197,6 +197,35 @@ function Train({ arm, at }: { arm: Arm; at: number }) {
   ));
 }
 
+/** The gate's comment while both versions run: the verdict is not in yet, and the count of cases done goes up. */
+function Pending({ ex }: { ex: Example }) {
+  const name = ex.comment.match(/^`([^`]+)`/)?.[1];
+  const n = ex.cases.length;
+  return (
+    <CommentCard compact>
+      <p>
+        <code className="rounded-sm bg-ink/[0.06] px-1 font-mono text-[0.9em]">{name}</code> ·{" "}
+        <strong>Release gate: ⏳ running</strong>
+      </p>
+      <p>
+        {n ? (
+          <>
+            Running main and this request on the same {n} cases: <span data-done>0</span> of {n} done. This comment is edited
+            when the verdict is in.
+          </>
+        ) : (
+          <>Checking whether this request changes <code className="font-mono text-[0.9em]">{name}</code>.</>
+        )}
+      </p>
+      <div aria-hidden className="space-y-2 pt-1">
+        {["w-11/12", "w-3/4", "w-1/2"].map((w) => (
+          <div key={w} className={`h-2.5 rounded-full bg-line motion-safe:animate-pulse ${w}`} />
+        ))}
+      </div>
+    </CommentCard>
+  );
+}
+
 /** Sleepers and a rail along a path. */
 function Rail({ d, color }: { d: string; color: string }) {
   return (
@@ -268,8 +297,9 @@ function Barriers({ uid }: { uid: string }) {
 /**
  * Four example pull requests through the gate, as two trains: main's and the request's run the same ten cases side by
  * side, lighting each case's lamp to its score, and then their rails join into one. A request that passes takes the
- * joined rail and a barrier stops main's train; for a request that is blocked, it is the other way round. The examples
- * play in turn until the reader picks one or pauses them.
+ * joined rail and a barrier stops main's train; for a request that is blocked, it is the other way round. The gate's
+ * comment shows from the start, as a placeholder while the trains run, and becomes the report once they are decided. The
+ * examples play in turn until the reader picks one.
  */
 export default function Home1() {
   const [index, setIndex] = useState(0);
@@ -277,8 +307,6 @@ export default function Home1() {
   const [started, setStarted] = useState(false);
   const [decided, setDecided] = useState(false);
   const [focus, setFocus] = useState<number | null>(null);
-  const [auto, setAuto] = useState(true);
-  const [still, setStill] = useState(false);
   const autoplay = useRef(true);
   const first = useRef(true);
   const dwell = useRef<gsap.core.Tween | null>(null);
@@ -293,11 +321,7 @@ export default function Home1() {
   // The first example plays when the scene comes into view.
   useGSAP(
     () => {
-      if (matchMedia("(prefers-reduced-motion: reduce)").matches) {
-        autoplay.current = false;
-        setAuto(false);
-        setStill(true);
-      }
+      if (matchMedia("(prefers-reduced-motion: reduce)").matches) autoplay.current = false;
       ScrollTrigger.create({ trigger: root.current, start: "top 85%", once: true, onEnter: () => setStarted(true) });
     },
     { scope: root },
@@ -349,6 +373,7 @@ export default function Home1() {
           });
           tl.call(
             () => {
+              q("[data-done]").forEach((el) => (el.textContent = String(k + 1)));
               q("[data-mean=base]").forEach((el) => (el.textContent = mean(ex.cases.slice(0, k + 1).map((x) => x[1]))));
               q("[data-mean=cand]").forEach((el) => (el.textContent = mean(ex.cases.slice(0, k + 1).map((x) => x[2]))));
             },
@@ -361,7 +386,7 @@ export default function Home1() {
         const loser: Arm = winner === "cand" ? "base" : "cand";
         const end = path[winner].getTotalLength() - LEAD;
         tl.to(at[winner], { x: end, duration: (end - PAST) / SPEED, ease: "none", onUpdate: move(winner) }, RUN);
-        tl.to(q(`[data-arm=${loser}]`), { rotation: loser === "base" ? -90 : 90, svgOrigin: `${GATE} ${FOOT[loser]}`, duration: 0.5, ease: "back.out(1.6)" }, RUN - 0.3);
+        tl.to(q(`[data-arm=${loser}]`), { rotation: loser === "base" ? -90 : 90, svgOrigin: `${GATE} ${FOOT[loser]}`, duration: 0.4, ease: "back.out(1.6)" }, RUN);
         tl.to(at[loser], { x: STOP, duration: (3 * (STOP - PAST)) / SPEED, ease: "power3.out", onUpdate: move(loser) }, RUN);
         tl.to(at[loser], { x: STOP - 2.5, duration: 0.08, yoyo: true, repeat: 1, onUpdate: move(loser) }, ">");
         const lamp = LAMP[ex.outcome];
@@ -404,20 +429,12 @@ export default function Home1() {
 
   const play = (i: number) => {
     autoplay.current = false;
-    setAuto(false);
     stopDwell();
     setIndex(i);
     setRun((r) => r + 1);
     setDecided(false);
     setFocus(null);
     setStarted(true);
-  };
-
-  const toggleAuto = () => {
-    autoplay.current = !autoplay.current;
-    setAuto(autoplay.current);
-    if (!autoplay.current) stopDwell();
-    else if (decided) startDwell.current();
   };
 
   const onKey = (e: KeyboardEvent, i: number) => {
@@ -470,7 +487,7 @@ export default function Home1() {
               tabIndex={i === index ? 0 : -1}
               onClick={() => play(i)}
               onKeyDown={(ev) => onKey(ev, i)}
-              className={`group relative w-56 shrink-0 border-line px-4 py-3.5 text-left max-[899px]:border-r min-[900px]:w-auto min-[900px]:border-b ${
+              className={`group relative w-56 shrink-0 cursor-pointer border-line px-4 py-3.5 text-left max-[899px]:border-r min-[900px]:w-auto min-[900px]:border-b ${
                 i === index ? "bg-panel" : "hover:bg-panel"
               }`}
             >
@@ -492,14 +509,7 @@ export default function Home1() {
 
         <div id="gate-panel" role="tabpanel" aria-labelledby={`gate-tab-${index}`} className="min-w-0 p-4 sm:p-6">
           <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-            <div className="flex items-center gap-3">
-              <Tag>Example</Tag>
-              {!still && (
-                <button type="button" onClick={toggleAuto} className="text-sm text-ink-2 underline underline-offset-4 hover:text-ink">
-                  {auto ? "Pause the examples" : "Play the examples"}
-                </button>
-              )}
-            </div>
+            <Tag>Example</Tag>
             <p className="min-w-0 text-sm text-ink-2 [overflow-wrap:anywhere]">
               changes <code className="font-mono text-ink">{ex.changes}</code>
             </p>
@@ -557,19 +567,31 @@ export default function Home1() {
             {decided ? `${ex.title}: ${ex.outcome}` : ""}
           </p>
 
-          <div className="mt-4 grid">
-            {EXAMPLES.map((e, i) => (
-              <div
-                key={i}
-                aria-hidden={i !== index}
-                className={`col-start-1 row-start-1 grid items-start gap-x-6 gap-y-4 transition-[opacity,translate] duration-500 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)] ${
-                  i !== index ? "invisible opacity-0" : decided ? "opacity-100" : "translate-y-1 opacity-0"
-                }`}
-              >
-                <CommentCard markdown={e.comment} compact />
-                <p className="text-ink-2">{e.note}</p>
-              </div>
-            ))}
+          {/* Every example's report and note sit in one cell, hidden but for the current one, so the height never jumps. */}
+          <div className="mt-4 grid items-start gap-x-6 gap-y-4 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)]">
+            <div className="grid">
+              {EXAMPLES.map((e, i) => (
+                <div key={i} aria-hidden className="invisible col-start-1 row-start-1">
+                  <CommentCard markdown={e.comment} compact />
+                </div>
+              ))}
+              {decided ? (
+                <div key={`report-${key}`} className="col-start-1 row-start-1 rounded-md motion-safe:animate-[comment-edit_1.4s_ease-out]">
+                  <CommentCard markdown={ex.comment} compact edited />
+                </div>
+              ) : (
+                <div key={`pending-${key}`} className="col-start-1 row-start-1">
+                  <Pending ex={ex} />
+                </div>
+              )}
+            </div>
+            <div className="grid max-lg:order-first">
+              {EXAMPLES.map((e, i) => (
+                <p key={i} aria-hidden={i !== index} className={`col-start-1 row-start-1 text-ink-2 ${i !== index ? "invisible" : ""}`}>
+                  {e.note}
+                </p>
+              ))}
+            </div>
           </div>
         </div>
       </div>

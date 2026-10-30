@@ -100,9 +100,22 @@ function inline(text: string): ReactNode {
 /**
  * A comment as the gate posts it on a pull request, drawn like a GitHub comment card. `markdown` is the comment's
  * text in the gate's own format: paragraphs, and a table of cases. `marks` puts numbered markers in the margin of the
- * paragraph (or table) with that index, so a figure can explain the comment part by part.
+ * paragraph (or table) with that index, so a figure can explain the comment part by part. `children` replaces the text,
+ * for a comment the gate has not filled in yet; `edited` marks one it has.
  */
-export function CommentCard({ markdown, marks = {}, compact = false }: { markdown: string; marks?: Record<number, string>; compact?: boolean }) {
+export function CommentCard({
+  markdown = "",
+  marks = {},
+  compact = false,
+  edited = false,
+  children,
+}: {
+  markdown?: string;
+  marks?: Record<number, string>;
+  compact?: boolean;
+  edited?: boolean;
+  children?: ReactNode;
+}) {
   const blocks = markdown.trim().split(/\n\s*\n/);
   return (
     <div className="overflow-hidden rounded-md border border-line bg-panel text-[0.95rem] leading-relaxed">
@@ -111,57 +124,59 @@ export function CommentCard({ markdown, marks = {}, compact = false }: { markdow
           G
         </span>
         <span className="font-bold text-ink">github-actions</span> commented
+        {edited && <span className="ml-auto text-ink-3">edited</span>}
       </div>
       <div className={`space-y-2.5 ${compact ? "px-3 py-2.5" : "px-4 py-3"} ${Object.keys(marks).length ? "pl-10" : ""}`}>
-        {blocks.map((block, i) => {
-          const mark = marks[i];
-          const lines = block.split("\n");
-          const body = lines[0].trim().startsWith("|") ? (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <tbody>
-                  {lines
-                    .filter((l) => !/^\|\s*-/.test(l.trim()))
-                    .map((l, r) => (
-                      <tr key={r} className={r === 0 ? "font-bold" : "border-t border-line"}>
-                        {l
-                          .trim()
-                          .replace(/^\||\|$/g, "")
-                          .split("|")
-                          .map((c, k) => (
-                            <td key={k} className={`py-1 pr-4 ${k > 0 ? "font-mono tabular-nums" : ""}`}>
-                              {inline(c.trim())}
-                            </td>
-                          ))}
-                      </tr>
-                    ))}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <p className="min-w-0 [overflow-wrap:anywhere]">
-              {lines.map((l, k) => (
-                <Fragment key={k}>
-                  {k > 0 && <br />}
-                  {inline(l)}
-                </Fragment>
-              ))}
-            </p>
-          );
-          return (
-            <div key={i} className="relative">
-              {mark && (
-                <span
-                  aria-label={`Marker ${mark}`}
-                  className="absolute top-0.5 -left-7 grid size-5 place-items-center rounded-full bg-ink font-mono text-[0.7rem] font-bold text-panel"
-                >
-                  {mark}
-                </span>
-              )}
-              {body}
-            </div>
-          );
-        })}
+        {children ??
+          blocks.map((block, i) => {
+            const mark = marks[i];
+            const lines = block.split("\n");
+            const body = lines[0].trim().startsWith("|") ? (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <tbody>
+                    {lines
+                      .filter((l) => !/^\|\s*-/.test(l.trim()))
+                      .map((l, r) => (
+                        <tr key={r} className={r === 0 ? "font-bold" : "border-t border-line"}>
+                          {l
+                            .trim()
+                            .replace(/^\||\|$/g, "")
+                            .split("|")
+                            .map((c, k) => (
+                              <td key={k} className={`py-1 pr-4 ${k > 0 ? "font-mono tabular-nums" : ""}`}>
+                                {inline(c.trim())}
+                              </td>
+                            ))}
+                        </tr>
+                      ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p className="min-w-0 [overflow-wrap:anywhere]">
+                {lines.map((l, k) => (
+                  <Fragment key={k}>
+                    {k > 0 && <br />}
+                    {inline(l)}
+                  </Fragment>
+                ))}
+              </p>
+            );
+            return (
+              <div key={i} className="relative">
+                {mark && (
+                  <span
+                    aria-label={`Marker ${mark}`}
+                    className="absolute top-0.5 -left-7 grid size-5 place-items-center rounded-full bg-ink font-mono text-[0.7rem] font-bold text-panel"
+                  >
+                    {mark}
+                  </span>
+                )}
+                {body}
+              </div>
+            );
+          })}
       </div>
     </div>
   );

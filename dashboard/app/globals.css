@@ -319,3 +319,13 @@ body {
     opacity: 1;
   }
 }
+
+/* The home scene's comment, when the gate edits it from the placeholder into the report: a ring that fades. */
+@keyframes comment-edit {
+  from {
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--base) 50%, transparent);
+  }
+  to {
+    box-shadow: 0 0 0 3px transparent;
+  }
+}
