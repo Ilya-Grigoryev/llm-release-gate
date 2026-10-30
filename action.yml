@@ -1,5 +1,5 @@
 name: llm-release-gate
-description: Run the target branch's version and this pull request's of a pipeline in gate.yaml, compare them and comment the verdict.
+description: Run the target branch's version and this pull request's of a pipeline in gate.yaml, compare them and comment the verdict. On a push or schedule, keep the branch's runs for the requests to come.
 inputs:
   pipeline:
     description: The pipeline in gate.yaml to gate; may be left out when gate.yaml has one.
@@ -46,8 +46,15 @@ runs:
         fi
         echo "name=$PIPELINE" >> "$GITHUB_OUTPUT"
         echo "out=$RUNNER_TEMP/llm-release-gate/$PIPELINE" >> "$GITHUB_OUTPUT"
-    - name: can comment
+        echo "cache=$RUNNER_TEMP/llm-release-gate-cache" >> "$GITHUB_OUTPUT"
+    - uses: actions/cache/restore@v6
       if: steps.fork.outputs.fork != 'true'
+      with:  # a request sees its own earlier runs and its target branch's (base_max_age_days in gate.yaml)
+        path: ${{ steps.pipeline.outputs.cache }}/${{ steps.pipeline.outputs.name }}
+        key: "llm-release-gate:${{ steps.pipeline.outputs.name }}:${{ github.run_id }}-${{ github.run_attempt }}"
+        restore-keys: "llm-release-gate:${{ steps.pipeline.outputs.name }}:"  # a name may contain "-", never ":"
+    - name: can comment
+      if: steps.fork.outputs.fork != 'true' && github.base_ref != ''
       shell: bash
       env:
         GITHUB_TOKEN: ${{ inputs.github-token }}
@@ -59,12 +66,31 @@ runs:
       env:
         PROJECT: ${{ inputs.project-dir }}
         NAME: ${{ steps.pipeline.outputs.name }}
+        CACHE: ${{ steps.pipeline.outputs.cache }}
       run: |
-        git fetch --depth=1 origin "$GITHUB_BASE_REF"
-        uv run --project "$PROJECT" llm-release-gate pr --base FETCH_HEAD --project "$PROJECT" --pipeline "$NAME" \
-          --out "$RUNNER_TEMP/llm-release-gate"
+        if [ -n "$GITHUB_BASE_REF" ]; then
+          git fetch --depth=1 origin "$GITHUB_BASE_REF"
+          uv run --project "$PROJECT" llm-release-gate pr --base FETCH_HEAD --project "$PROJECT" --pipeline "$NAME" \
+            --out "$RUNNER_TEMP/llm-release-gate" --cache "$CACHE"
+        else  # not a request: run this branch's version where the cache has no recent runs
+          uv run --project "$PROJECT" llm-release-gate pr --refresh --project "$PROJECT" --pipeline "$NAME" \
+            --out "$RUNNER_TEMP/llm-release-gate" --cache "$CACHE"
+        fi
+    - name: cached runs
+      id: cached
+      if: ${{ !cancelled() && steps.pipeline.outputs.name != '' }}
+      shell: bash
+      env:
+        DIR: ${{ steps.pipeline.outputs.cache }}/${{ steps.pipeline.outputs.name }}
+      run: |  # an empty directory cannot be saved
+        if ls "$DIR"/*.jsonl > /dev/null 2>&1; then echo "any=true" >> "$GITHUB_OUTPUT"; fi
+    - uses: actions/cache/save@v6
+      if: ${{ !cancelled() && steps.cached.outputs.any == 'true' }}
+      with:
+        path: ${{ steps.pipeline.outputs.cache }}/${{ steps.pipeline.outputs.name }}
+        key: "llm-release-gate:${{ steps.pipeline.outputs.name }}:${{ github.run_id }}-${{ github.run_attempt }}"
     - name: comment
-      if: ${{ !cancelled() && steps.fork.outputs.fork != 'true' }}
+      if: ${{ !cancelled() && steps.fork.outputs.fork != 'true' && github.base_ref != '' }}
       shell: bash
       env:
         GITHUB_TOKEN: ${{ inputs.github-token }}
@@ -75,15 +101,15 @@ runs:
         uv run --project "$PROJECT" llm-release-gate comment "$OUT/comment.md" ${NAME:+--name "$NAME"}
     - uses: actions/upload-artifact@v7
       if: ${{ !cancelled() && steps.pipeline.outputs.name != '' }}
-      with:
-        name: release-gate-${{ steps.pipeline.outputs.name }}-${{ github.run_attempt }}
+      with:  # a refresh gives no verdict: a dashboard must not read it as one
+        name: ${{ github.base_ref != '' && 'release-gate' || 'llm-release-gate-base' }}-${{ steps.pipeline.outputs.name }}-${{ github.run_attempt }}
         path: |
           ${{ steps.pipeline.outputs.out }}/*.jsonl
           ${{ steps.pipeline.outputs.out }}/*.json
           ${{ steps.pipeline.outputs.out }}/*.md
           ${{ steps.pipeline.outputs.out }}/*.log
     - uses: actions/upload-artifact@v7
-      if: ${{ !cancelled() && steps.pipeline.outputs.name != '' && inputs.cases == 'true' }}
+      if: ${{ !cancelled() && steps.pipeline.outputs.name != '' && inputs.cases == 'true' && github.base_ref != '' }}
       with:
         name: release-gate-${{ steps.pipeline.outputs.name }}-${{ github.run_attempt }}-cases
         path: ${{ steps.pipeline.outputs.out }}/cases/

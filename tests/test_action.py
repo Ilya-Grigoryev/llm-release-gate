@@ -63,7 +63,7 @@ def test_the_action_finds_the_pipeline(tmp_path, names, pipeline, ok, name):
     if ok:
         assert (
             output.read_text()
-            == f"name={name}\nout={tmp_path}/llm-release-gate/{name}\n"
+            == f"name={name}\nout={tmp_path}/llm-release-gate/{name}\ncache={tmp_path}/llm-release-gate-cache\n"
         )
     else:
         assert "several pipelines" in done.stdout
@@ -123,3 +123,44 @@ def test_a_fork_fails_the_job_and_says_why(tmp_path):
         and "::error title=Release gate: not checked::" in done.stdout
     )
     assert "comes from a fork" in (tmp_path / "summary").read_text()
+
+
+@pytest.mark.parametrize(
+    "base_ref, command",
+    [("main", "pr --base FETCH_HEAD"), ("", "pr --refresh")],
+)
+def test_a_request_is_gated_and_a_push_refreshes_the_cache(tmp_path, base_ref, command):
+    bin_dir, log = tmp_path / "bin", tmp_path / "log"
+    bin_dir.mkdir()
+    for tool in ("uv", "git"):
+        (bin_dir / tool).write_text(f'#!/bin/sh\necho "{tool} $*" >> {log}\n')
+        (bin_dir / tool).chmod(0o755)
+    env = {
+        "PATH": f"{bin_dir}:/usr/bin:/bin",
+        "PROJECT": ".",
+        "NAME": "demo",
+        "CACHE": str(tmp_path / "cache"),
+        "GITHUB_BASE_REF": base_ref,
+        "RUNNER_TEMP": str(tmp_path),
+    }
+    subprocess.run(["bash", "-c", _step("gate")["run"]], env=env, check=True)
+    calls = log.read_text()
+    assert f"llm-release-gate {command}" in calls
+    assert f"--cache {tmp_path / 'cache'}" in calls
+    assert ("git fetch" in calls) is bool(base_ref)
+
+
+@pytest.mark.parametrize("files, saved", [([], ""), (["v-s.jsonl"], "any=true\n")])
+def test_only_a_cache_with_runs_is_saved(tmp_path, files, saved):
+    (tmp_path / "cache").mkdir()
+    for name in files:
+        (tmp_path / "cache" / name).write_text("{}\n")
+    output = tmp_path / "output"
+    output.write_text("")
+    env = {
+        "PATH": "/usr/bin:/bin",
+        "DIR": str(tmp_path / "cache"),
+        "GITHUB_OUTPUT": str(output),
+    }
+    subprocess.run(["bash", "-c", _step("cached runs")["run"]], env=env, check=True)
+    assert output.read_text() == saved

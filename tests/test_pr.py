@@ -2,6 +2,7 @@ import json
 import shutil
 import subprocess
 import sys
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -448,3 +449,180 @@ def test_another_pipeline_cannot_declare_code_as_its_prompt(repo):
     (repo / "other.yaml").write_text(text)
     _, out = gate(repo, "--pipeline", "demo")
     assert "unchanged" not in (out / "comment.md").read_text()
+
+
+# the base from the cache (D-007)
+
+
+def cached_gate(repo, *args):
+    return gate(repo, "--cache", str(repo.parent / "cache"), *args)
+
+
+def records(path):
+    return [json.loads(line) for line in path.read_text().splitlines()]
+
+
+def age(cache, days):
+    """Make every cached run DAYS older."""
+    for path in cache.glob("*/*.jsonl"):
+        lines = []
+        for r in records(path):
+            t = datetime.fromisoformat(r["timestamp"]) - timedelta(days=days)
+            lines.append(json.dumps({**r, "timestamp": t.isoformat()}) + "\n")
+        path.write_text("".join(lines))
+
+
+def test_a_recent_base_comes_from_the_cache(repo):
+    version(repo, "bare")
+    _, out = cached_gate(repo)
+    first = {r["run_id"] for r in records(out / "base.jsonl")}
+    assert not any(r.get("reused") for r in records(out / "base.jsonl"))
+    assert "reused" not in (out / "comment.md").read_text()
+    version(repo, "answer-again")  # another push to the request
+    code, out = cached_gate(repo)
+    assert code == pr.PASS
+    again = records(out / "base.jsonl")
+    assert {r["run_id"] for r in again} == first and all(r["reused"] for r in again)
+    assert (
+        "Base: 1 of 1 runs come from earlier jobs; the oldest ran 0.0 days before"
+        in (out / "comment.md").read_text()
+    )
+    verdict = json.loads((out / "verdict.json").read_text())
+    assert verdict["base_reused"]["runs"] == 1
+    assert "1 runs of" in (out / "base.log").read_text()
+
+
+def test_an_old_base_runs_again(repo):
+    version(repo, "bare")
+    cached_gate(repo)
+    age(repo.parent / "cache", 8)  # the default limit is 7 days
+    _, out = cached_gate(repo)
+    assert not any(r.get("reused") for r in records(out / "base.jsonl"))
+    assert "Base:" not in (out / "comment.md").read_text()
+
+
+def test_the_target_branch_sets_the_age_limit(repo):
+    for days, reused in (("0", False), ("10", True)):
+        version(repo, "answer", GATE + f"base_max_age_days: {days}\n")
+        git(repo, "add", "-A")
+        git(repo, "commit", "-q", "-m", f"limit {days}")
+        version(repo, "bare", GATE)  # the request's own limit does not count
+        shutil.rmtree(repo.parent / "cache", ignore_errors=True)
+        cached_gate(repo)
+        kept = list((repo.parent / "cache").glob("*/*.jsonl"))
+        assert bool(kept) is reused  # 0 keeps nothing
+        age(repo.parent / "cache", 8)
+        _, out = cached_gate(repo)
+        assert any(r.get("reused") for r in records(out / "base.jsonl")) is reused
+        assert "changes the gate's rules" in (out / "comment.md").read_text()
+
+
+def test_a_model_without_a_date_never_comes_from_the_cache(repo):
+    for config in (repo / "demo.yaml",):
+        config.write_text(
+            config.read_text().replace("fake-model-2026-01-01", "fake-model")
+        )
+    git(repo, "commit", "-q", "-am", "alias")
+    version(
+        repo, "bare"
+    )  # the request asks for a dated model: the base's alias still counts
+    cached_gate(repo)
+    _, out = cached_gate(repo)
+    assert not any(r.get("reused") for r in records(out / "base.jsonl"))
+
+
+def test_more_runs_per_case_add_to_the_cached_ones(repo):
+    version(repo, "bare")
+    cached_gate(repo)
+    (repo / "gate.yaml").write_text(GATE + "k: 2\n")
+    git(repo, "add", "gate.yaml")
+    git(repo, "commit", "-q", "-m", "k 2")  # the version stays: gate.yaml is not code
+    version(repo, "bare", GATE + "k: 2\n")
+    _, out = cached_gate(repo)
+    base = records(out / "base.jsonl")
+    assert sorted((r["rep"], bool(r.get("reused"))) for r in base) == [
+        (0, True),
+        (1, False),
+    ]
+
+
+def test_a_new_target_branch_version_is_not_matched_to_old_runs(repo):
+    version(repo, "bare")
+    cached_gate(repo)
+    version(repo, "answer")
+    (repo / "prompt.md").write_text((repo / "prompt.md").read_text() + "\nBe brief.\n")
+    git(repo, "commit", "-q", "-am", "new prompt on the target branch")
+    version(repo, "bare")
+    _, out = cached_gate(repo)
+    assert not any(r.get("reused") for r in records(out / "base.jsonl"))
+
+
+def test_reused_runs_are_not_counted_in_the_cost(repo):
+    (repo / "prices.yaml").write_text("fake-model-2026-01-01: [1, 1]\n")
+    rules = GATE + "prices: prices.yaml\n"
+    (repo / "gate.yaml").write_text(rules)
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "prices")
+    version(repo, "answer-again", rules)
+    cached_gate(repo)
+    _, out = cached_gate(repo)
+    verdict = json.loads((out / "verdict.json").read_text())
+    assert verdict["cost_usd"]["base"] == 0 and verdict["cost_usd"]["candidate"] > 0
+    assert "without the reused base runs" in (out / "comment.md").read_text()
+
+
+def test_refresh_fills_the_cache_on_the_target_branch(repo, capsys):
+    cache, out = repo.parent / "cache", repo.parent / "refresh"
+    assert pr.main(["--refresh", "--cache", str(cache), "--out", str(out)]) == pr.PASS
+    assert "demo: 0 runs reused" in capsys.readouterr().out
+    assert pr.main(["--refresh", "--cache", str(cache), "--out", str(out)]) == pr.PASS
+    assert "demo: 1 runs reused" in capsys.readouterr().out
+    version(repo, "bare")
+    _, dest = cached_gate(repo)
+    assert all(r["reused"] for r in records(dest / "base.jsonl"))
+
+
+def test_refresh_needs_a_cache(repo):
+    with pytest.raises(SystemExit):
+        pr.main(["--refresh", "--out", str(repo.parent / "out")])
+
+
+def test_the_cache_keeps_raw_responses_and_the_newest_run(tmp_path):
+    runs, cache = tmp_path / "base.jsonl", tmp_path / "cache"
+    now = datetime.now(UTC)
+
+    def record(run_id, when, **more):
+        return {"config_hash": "v", "set_hash": "s", "case": "a", "rep": 0, "run_id": run_id,
+                "timestamp": when.isoformat(), "requested_model": "m-2026-01-01", "error": None,
+                "trace": {"steps": [], "native": "base.native.jsonl"}, **more}  # fmt: skip
+
+    runs.write_text(
+        json.dumps(record("old", now - timedelta(days=2))) + "\n"
+        + json.dumps(record("new", now, reused=True)) + "\n"
+        + json.dumps(record("bad", now, error="boom")) + "\n"
+    )  # fmt: skip
+    pr.native(runs).write_text(
+        "".join(json.dumps({"run_id": i, "native": [i]}) + "\n" for i in ("old", "new"))
+    )
+    (cache / "x-y.jsonl").parent.mkdir()
+    (cache / "x-y.jsonl").write_text(
+        json.dumps(record("stale", now - timedelta(days=9))) + "\n"
+    )
+    pr.keep(cache, runs, 7)
+    assert not (cache / "x-y.jsonl").exists()  # nothing recent in it
+    [kept] = records(cache / "v-s.jsonl")
+    assert kept["run_id"] == "new" and "reused" not in kept
+    assert records(pr.native(cache / "v-s.jsonl")) == [
+        {"run_id": "new", "native": ["new"]}
+    ]
+    out = tmp_path / "next" / "candidate.jsonl"
+    out.parent.mkdir()
+    assert pr.reuse(cache, "v", "s", 7, out) == 1
+    [r] = records(out)
+    assert r["reused"] and r["trace"]["native"] == "candidate.native.jsonl"
+    assert records(pr.native(out)) == [{"run_id": "new", "native": ["new"]}]
+    alias = cache / "w-s.jsonl"
+    alias.write_text(
+        json.dumps(record("x", now, config_hash="w", requested_model="m")) + "\n"
+    )
+    assert pr.reuse(cache, "w", "s", 7, tmp_path / "none.jsonl") == 0

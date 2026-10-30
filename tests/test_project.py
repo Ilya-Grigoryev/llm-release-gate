@@ -11,9 +11,9 @@ def load(tmp_path, text):
 def test_a_pipelines_settings_win_over_the_top_ones(tmp_path):
     p = load(
         tmp_path,
-        "prepare: [npm, ci]\nk: 3\ndelta: 2\n"
+        "prepare: [npm, ci]\nk: 3\ndelta: 2\nbase_max_age_days: 3\n"
         "pipelines:\n"
-        "  chat: {config: c.yaml, golden: g, k: 5, manifest: m.yaml, inputs-url: 'https://x/{name}'}\n"
+        "  chat: {config: c.yaml, golden: g, k: 5, manifest: m.yaml, inputs-url: 'https://x/{name}', base_max_age_days: 0}\n"
         "  docs: {config: d.yaml, golden: h}\n",
     )
     assert p.prepare == ("npm", "ci")
@@ -25,13 +25,20 @@ def test_a_pipelines_settings_win_over_the_top_ones(tmp_path):
         "https://x/{name}",
     )
     assert (docs.k, docs.delta, docs.prices, docs.budgets) == (3, 2, None, {})
+    assert (chat.base_max_age_days, docs.base_max_age_days) == (0, 3)
 
 
 def test_defaults(tmp_path):
     [p] = load(
         tmp_path, "pipelines: {a: {config: c.yaml, golden: g}}\n"
     ).pipelines.values()
-    assert (p.k, p.delta, p.prices, p.budgets) == (1, 5.0, None, {})
+    assert (p.k, p.delta, p.prices, p.budgets, p.base_max_age_days) == (
+        1,
+        5.0,
+        None,
+        {},
+        7,
+    )
 
 
 @pytest.mark.parametrize(
@@ -55,6 +62,10 @@ def test_defaults(tmp_path):
             "k: 2.0 is not of type 'integer'",
         ),
         ("pipelines: {a b: {config: c, golden: g}}\n", "does not match"),
+        (
+            "pipelines: {a: {config: c, golden: g}}\nbase_max_age_days: -1\n",
+            "base_max_age_days: -1 is less than the minimum of 0",
+        ),
         (
             "pipelines: {a: {config: c, golden: g}}\nprepare: npm ci\n",
             "prepare: 'npm ci' is not of type 'array'",

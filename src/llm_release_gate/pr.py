@@ -4,6 +4,9 @@ For each pipeline in the project's gate.yaml whose version the request changes, 
 checkout's on the pipeline's test set, each in its own tree and environment, and compare them. OUT/NAME gets the comment,
 the verdict, both arms' runs and logs, and cases/ with the set's text files (never images) for whoever reads the results.
 Exits with the worst outcome: 20 infra error, 10 quality fail, 12 budget fail, 11 inconclusive, 0 pass.
+
+With --cache, runs outlive the job (D-007): the gate reuses the target branch's runs of the same version on the same set,
+up to `base_max_age_days` old, instead of running them again; --refresh fills the cache on the target branch itself.
 """
 
 import argparse
@@ -14,6 +17,7 @@ import subprocess
 import sys
 import traceback
 from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from llm_release_gate import project
@@ -25,6 +29,8 @@ from llm_release_gate.gate import (
     QUALITY_FAIL,
 )
 from llm_release_gate.golden import check
+from llm_release_gate.pipeline import is_alias, load_config
+from llm_release_gate.runner import read_records, results
 from llm_release_gate.version import own_files
 
 SYNC = [
@@ -123,6 +129,100 @@ def write_comment(
     (dest / "comment.md").write_text(text)
 
 
+def native(runs: Path) -> Path:
+    """The runner's file of raw provider responses next to RUNS."""
+    return runs.with_name(runs.stem + ".native.jsonl")
+
+
+def raw_lines(runs: Path) -> dict[str, str]:
+    """Run id -> its line of raw responses."""
+    return {
+        r["run_id"]: json.dumps(r) + "\n"
+        for r in read_records(native(runs))
+        if "run_id" in r
+    }
+
+
+def when(record: dict) -> datetime | None:
+    try:
+        t = datetime.fromisoformat(record["timestamp"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    return t if t.tzinfo else t.replace(tzinfo=UTC)
+
+
+def dated(config: Path) -> bool:
+    """The config names a dated model; a model without a date never runs from the cache (D-018)."""
+    try:
+        return not is_alias(load_config(config).model)
+    except (ValueError, OSError):
+        return False
+
+
+def reuse(cache: Path, version_hash: str, set_hash: str, days: float, out: Path) -> int:
+    """Copy the cache's error-free runs of this version on this set, at most DAYS old, to OUT with their raw responses,
+    each marked `reused`; the runner then runs only the rest. Returns how many it copied."""
+    path = cache / f"{version_hash}-{set_hash}.jsonl"
+    since = datetime.now(UTC) - timedelta(days=days)
+    runs = [
+        r
+        for r in results(path, version_hash, set_hash).values()
+        if (t := when(r)) and t >= since
+    ]
+    if not runs or any(is_alias(r.get("requested_model")) for r in runs):
+        return 0
+    raw = raw_lines(path)
+    with out.open("a") as f, native(out).open("a") as g:
+        for r in runs:
+            if (r.get("trace") or {}).get("native"):
+                if r["run_id"] in raw:
+                    g.write(raw[r["run_id"]])
+                    r["trace"]["native"] = native(out).name
+                else:
+                    del r["trace"]["native"]
+            f.write(json.dumps({**r, "reused": True}) + "\n")
+    return len(runs)
+
+
+def keep(cache: Path, runs: Path, days: float) -> None:
+    """Add RUNS' error-free runs to the cache, the newest per case and repetition, and delete files whose runs are all
+    older than DAYS."""
+    cache.mkdir(parents=True, exist_ok=True)
+    since = datetime.now(UTC) - timedelta(days=days)
+    for old in cache.glob("*.jsonl"):
+        if not old.name.endswith(".native.jsonl") and not any(
+            (t := when(r)) and t >= since for r in read_records(old)
+        ):
+            old.unlink()
+            native(old).unlink(missing_ok=True)
+    new = [r for r in read_records(runs) if r.get("error") is None and when(r)]
+    raw = raw_lines(runs)
+    for version_hash, set_hash in {
+        (r.get("config_hash"), r.get("set_hash")) for r in new
+    }:
+        if not (version_hash and set_hash):
+            continue
+        path = cache / f"{version_hash}-{set_hash}.jsonl"
+        merged = results(path, version_hash, set_hash)
+        raw_old = raw_lines(path)
+        for r in new:
+            if (r["config_hash"], r["set_hash"]) != (version_hash, set_hash):
+                continue
+            key = r["case"], r["rep"]
+            if key not in merged or when(r) > (
+                when(merged[key]) or datetime.min.replace(tzinfo=UTC)
+            ):
+                merged[key] = {k: v for k, v in r.items() if k != "reused"}
+        lines = "".join(json.dumps(r) + "\n" for r in merged.values())
+        kept = "".join(
+            line
+            for r in merged.values()
+            if (line := raw.get(r["run_id"]) or raw_old.get(r["run_id"]))
+        )
+        native(path).write_text(kept)
+        path.write_text(lines)
+
+
 def checked_set(p: project.Pipeline, candidate: Path, dest: Path) -> tuple[Path, str]:
     """The pipeline's set and its hash; its text files go to DEST/cases first, so a reader sees the cases whatever
     happens next."""
@@ -174,21 +274,36 @@ def one(
     prices: str | None,
     dest: Path,
     may_skip: bool = True,
+    cache: Path | None = None,
 ) -> int:
     """Compare the target branch's version (`base_config` in `base`) with the request's; without one only the candidate
-    runs, for its score and a neutral exit. `may_skip`: an unchanged version may skip the runs."""
+    runs, for its score and a neutral exit. `may_skip`: an unchanged version may skip the runs. `cache`: reuse the
+    base's recent runs from it and keep both versions' runs there."""
     if not (candidate / p.config).is_file():
         raise Infra(f"There is no {p.config}.")
     if base is None or base_config is None or not (base / base_config).is_file():
         base = None
+    if not p.base_max_age_days:
+        cache = None
     logs = dest / "base.log", dest / "candidate.log"
-    if base is not None and may_skip:
+    if base is not None and (may_skip or cache):
         hashes = both(
             lambda: version(base, base_config, logs[0]),
             lambda: version(candidate, p.config, logs[1]),
         )
-        if hashes[0] and hashes[0] == hashes[1]:
+        if may_skip and hashes[0] and hashes[0] == hashes[1]:
             return unchanged(p, hashes[0], set_hash, dest)
+        if (
+            cache
+            and hashes[0]
+            and dated(base / base_config)
+            and dated(candidate / p.config)
+        ):
+            reused = reuse(
+                cache, hashes[0], set_hash, p.base_max_age_days, dest / "base.jsonl"
+            )
+            with logs[0].open("a") as f:
+                f.write(f"{reused} runs of {hashes[0][:12]} reused from the cache\n")
     runs = [
         *PYTHON,
         "-m",
@@ -202,6 +317,9 @@ def one(
         lambda: call([*runs, "--config", base_config, "--out", str(dest / "base.jsonl")], base, logs[0]) if base else 0,
         lambda: call([*runs, "--config", p.config, "--out", str(dest / "candidate.jsonl")], candidate, logs[1]),
     )  # fmt: skip
+    if cache:  # what was paid for is kept, a failed arm's finished runs too
+        for arm in ("base.jsonl", "candidate.jsonl"):
+            keep(cache, dest / arm, p.base_max_age_days)
     for arm, code, log in zip(("base version", "candidate"), codes, logs, strict=True):
         if code != 0:
             raise Infra(f"The {arm} did not finish its runs.", log)
@@ -320,6 +438,54 @@ def show(dest: Path) -> None:
             )
 
 
+def refresh(
+    settings: project.Project, tree: Path, out: Path, names: list[str], cache: Path
+) -> int:
+    """On the target branch: run its version of each pipeline where the cache has no recent runs, and keep them there.
+    Compares nothing. Returns 20 if a pipeline failed to run, else 0."""
+    log = out / ".prepare-base.log"
+    log.unlink(missing_ok=True)
+    prepared = ready(tree, settings.prepare, log)
+    code = PASS
+    for name in names:
+        p, dest = settings.pipelines[name], out / name
+        try:
+            if not prepared:
+                raise Infra("The project could not be prepared.", log)
+            golden, set_hash = checked_set(p, tree, dest)
+            here = version(tree, p.config, dest / "base.log")
+            why = (
+                "base_max_age_days is 0" if not p.base_max_age_days
+                else "its model has no date" if not dated(tree / p.config)
+                else "its version has no hash" if not here
+                else None
+            )  # fmt: skip
+            if why:
+                print(f"{name}: not cached, {why}")
+                continue
+            reused = reuse(
+                cache / name, here, set_hash, p.base_max_age_days, dest / "base.jsonl"
+            )
+            done = call(
+                [*PYTHON, "-m", "llm_release_gate.runner", "--golden", str(golden), "-k", str(p.k),
+                 "--config", p.config, "--out", str(dest / "base.jsonl")],
+                tree,
+                dest / "base.log",
+            )  # fmt: skip
+            keep(cache / name, dest / "base.jsonl", p.base_max_age_days)
+            if done:
+                raise Infra("The runs did not finish.", dest / "base.log")
+            print(
+                f"{name}: {reused} runs reused, the rest run; version {here[:12]}, set {set_hash[:12]}"
+            )
+        except Infra as e:
+            print(f"{name}: infra error: {e}", file=sys.stderr)
+            if e.log and e.log.is_file():
+                print(e.log.read_text(errors="replace"), file=sys.stderr)
+            code = INFRA_ERROR
+    return code
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(
         prog="llm-release-gate pr", description=__doc__.split("\n\n")[0]
@@ -336,6 +502,16 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument(
         "--list", action="store_true", help="check gate.yaml and print its pipelines"
     )
+    p.add_argument(
+        "--cache",
+        type=Path,
+        help="a directory that keeps runs between jobs; the gate reuses the target branch's recent runs from it",
+    )
+    p.add_argument(
+        "--refresh",
+        action="store_true",
+        help="on the target branch: fill the cache with its version's runs; compares nothing",
+    )
     args = p.parse_args(argv)
     try:
         settings = project.load(args.project)
@@ -345,11 +521,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.list:
         print("\n".join(settings.pipelines))
         return PASS
-    if not (args.base and args.out):
+    if args.refresh and not (args.cache and args.out):
+        p.error("--refresh needs --cache and --out")
+    if not (args.refresh or (args.base and args.out)):
         p.error("give --base and --out")
     if args.pipeline not in (None, *settings.pipelines):
         p.error(f"gate.yaml has no pipeline {args.pipeline!r}")
     candidate, out = args.project.resolve(), args.out.resolve()
+    cache = args.cache.resolve() if args.cache else None
     top = subprocess.run(
         ["git", "-C", str(candidate), "rev-parse", "--show-toplevel"],
         capture_output=True,
@@ -363,6 +542,8 @@ def main(argv: list[str] | None = None) -> int:
     for name in names:
         shutil.rmtree(out / name, ignore_errors=True)
         (out / name).mkdir(parents=True)
+    if args.refresh:
+        return refresh(settings, candidate, out, names, cache)
     tree = out / ".base-tree"
     base = tree / candidate.relative_to(root)
     logs = (
@@ -441,6 +622,7 @@ def main(argv: list[str] | None = None) -> int:
                     prices,
                     dest,
                     same_layout,
+                    cache and cache / name,
                 )
             except Infra as e:
                 write_comment(

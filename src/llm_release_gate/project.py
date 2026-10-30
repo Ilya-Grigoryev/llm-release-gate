@@ -11,7 +11,7 @@ from llm_release_gate import protocol
 FILE = "gate.yaml"
 SCHEMA = json.loads((Path(__file__).parent / "project.schema.json").read_text())
 VALIDATOR = protocol.Validator(SCHEMA)
-SETTINGS = ("k", "delta", "prices", "budgets")
+SETTINGS = ("k", "delta", "prices", "budgets", "base_max_age_days")
 
 
 @dataclass(frozen=True)
@@ -25,6 +25,7 @@ class Pipeline:
     delta: float = 5.0
     prices: str | None = None
     budgets: dict = field(default_factory=dict)
+    base_max_age_days: float = 7.0
 
 
 @dataclass(frozen=True)

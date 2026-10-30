@@ -156,9 +156,23 @@ def record_cost(r: dict, prices: Prices) -> float | None:
 
 
 def cost(arm: Arm, prices: Prices) -> float | None:
-    """USD for the arm's recorded calls; None if a model has no price."""
-    spent = [record_cost(r, prices) for r in arm.records.values()]
+    """USD for the arm's recorded calls, runs reused from an earlier job left out; None if a model has no price."""
+    spent = [
+        record_cost(r, prices) for r in arm.records.values() if not r.get("reused")
+    ]
     return None if None in spent else sum(spent)
+
+
+def reused(base: Arm, candidate: Arm) -> tuple[int, float | None]:
+    """How many base runs came from an earlier job (`pr --cache`), and how many days the oldest ran before the
+    candidate's first run."""
+    old = replace(
+        base, records={k: r for k, r in base.records.items() if r.get("reused")}
+    )
+    first, last = old.times(), candidate.times()
+    if not old.records or not first or not last:
+        return len(old.records), None
+    return len(old.records), max(0.0, (min(last) - min(first)).total_seconds() / 86400)
 
 
 def candidate_budget(
@@ -214,6 +228,16 @@ def markdown(
             f"{candidate.config_hash[:8]} · set {base.set_hash[:8]}"
         ),
     ]
+    runs, days = reused(base, candidate)
+    if runs:
+        lines.append(
+            f"Base: {runs} of {len(base.records)} runs come from earlier jobs"
+            + (
+                f"; the oldest ran {days:.1f} days before the candidate's."
+                if days is not None
+                else "."
+            )
+        )
     aliases = sorted(base.aliases | candidate.aliases)
     if aliases:
         lines.append(
@@ -227,7 +251,7 @@ def markdown(
         b, c = costs
         lines.append(
             f"Cost of this decision ${b + c:.3f}: base ${b:.3f}, candidate ${c:.3f} "
-            "(successful calls, list prices)."
+            f"(successful calls, list prices{'; without the reused base runs' if runs else ''})."
         )
     if spend:
         lines.append(budget_line(spend))
@@ -427,6 +451,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             "prices_hash": canonical_hash(prices) if prices else None,
             "budget": asdict(spend) if spend else None,
             "models_without_date": sorted(base.aliases | candidate.aliases),
+            "base_reused": dict(
+                zip(("runs", "days_before_candidate"), reused(base, candidate))
+            ),
             # the naive gate uses only the first of these
             "runs_per_case": {
                 "base": max(len(b) for b, _ in pairs.values()),
