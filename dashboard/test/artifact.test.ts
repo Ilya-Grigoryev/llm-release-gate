@@ -23,6 +23,9 @@ describe("gateArtifact", () => {
     expect(gateArtifact("release-gate-v2-1")).toEqual({ gate: "v2", attempt: 1 });
     expect(gateArtifact("coverage-1")).toBeNull();
     expect(gateArtifact("release-gate")).toBeNull();
+    // runs the gate shares between jobs, and a refresh: no verdicts
+    expect(gateArtifact("llm-release-gate-runs-support-0123456789abcdef-0123456789abcdef")).toBeNull();
+    expect(gateArtifact("llm-release-gate-base-support-1")).toBeNull();
   });
 });
 

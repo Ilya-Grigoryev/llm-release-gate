@@ -138,3 +138,37 @@ def test_names_fit_a_pipeline_a_version_and_a_set():
         shared.name("demo", "a" * 64, "b" * 64)
         == f"llm-release-gate-runs-demo-{'a' * 16}-{'b' * 16}"
     )
+
+
+def test_only_this_repositorys_small_artifacts_and_safe_paths():
+    big = {**artifact(1), "size_in_bytes": shared.MAX_BYTES + 1}
+    zip_ = zipped({"x/../../evil.jsonl": "{}\n"})
+    answers = {
+        "list": json.dumps({"artifacts": [big, artifact(2)]}).encode(),
+        "zip": zip_,
+    }
+    kept = []
+    line, _ = shared.fetch(
+        "n",
+        lambda p: kept.append(p.name),
+        7,
+        ENV,
+        lambda url, h: answers["zip" if url.endswith("/2/zip") else "list"],
+    )
+    assert kept == ["evil.jsonl"] and "run 102" in line
+    assert (
+        "GITHUB_REPOSITORY_ID"
+        in shared.fetch("n", None, 7, {**ENV, "GITHUB_REPOSITORY_ID": ""}, None)[0]
+    )
+
+
+def test_a_vanished_artifact_or_an_odd_answer_is_no_permission_problem():
+    def gone(url, headers):
+        if "name=" in url:
+            return json.dumps({"artifacts": [artifact(1)]}).encode()
+        raise urllib.error.HTTPError(url, 404, "Not Found", {}, None)
+
+    line, note = shared.fetch("n", lambda p: None, 7, ENV, gone)
+    assert "404" in line and note is None
+    line, note = shared.fetch("n", lambda p: None, 7, ENV, lambda url, h: b"[]")
+    assert "AttributeError" in line and note is None

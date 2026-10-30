@@ -52,8 +52,8 @@ def fetch(
 ) -> tuple[str, str | None]:
     """Hand the runs of the newest artifact ARTIFACT from this repository's own jobs, at most DAYS old, to KEEP.
 
-    Returns a line for the log and, when the job lacks the permission to read artifacts, a note for the comment.
-    Never raises: without earlier runs the base simply runs."""
+    Returns a line for the log and, when the job lacks the permission to list artifacts, a note for the comment.
+    Without earlier runs the base simply runs."""
     if env.get("GITHUB_ACTIONS") != "true":
         return "earlier runs: not a GitHub Actions job", None
     token = env.get("GITHUB_TOKEN") or env.get("GH_TOKEN")
@@ -65,11 +65,28 @@ def fetch(
         "Authorization": f"Bearer {token}",
         "Accept": "application/vnd.github+json",
     }
+    if not env.get("GITHUB_REPOSITORY_ID"):
+        return (
+            "earlier runs: no GITHUB_REPOSITORY_ID to tell this repository's runs from a fork's",
+            None,
+        )
     since = datetime.now(UTC) - timedelta(days=days)
     try:
         listing = json.loads(
             http(f"{repo}?name={urllib.parse.quote(artifact)}&per_page=20", headers)
         )
+    except urllib.error.HTTPError as e:
+        note = (
+            "Base ran again: this job cannot read earlier runs. Give it `actions: read` in the workflow's "
+            "`permissions`."
+        )
+        return (
+            f"earlier runs: GitHub answered {e.code}",
+            note if e.code == 403 else None,
+        )
+    except (urllib.error.URLError, OSError, ValueError) as e:
+        return f"earlier runs: {type(e).__name__}: {e}", None
+    try:
         found = sorted(
             (
                 a
@@ -95,16 +112,6 @@ def fetch(
             for runs in Path(tmp).glob("*.jsonl"):
                 if not runs.name.endswith(".native.jsonl"):
                     keep(runs)
-    except urllib.error.HTTPError as e:
-        if e.code in (403, 404):
-            return (
-                f"earlier runs: GitHub answered {e.code}",
-                (
-                    "Base ran again: this job cannot read earlier runs. Give it `actions: read` in the workflow's "
-                    "`permissions`."
-                ),
-            )
-        return f"earlier runs: GitHub answered {e.code}", None
-    except (urllib.error.URLError, OSError, ValueError, KeyError, TypeError, zipfile.BadZipFile) as e:  # fmt: skip
+    except (urllib.error.URLError, OSError, ValueError, KeyError, TypeError, AttributeError, zipfile.BadZipFile) as e:  # fmt: skip
         return f"earlier runs: {type(e).__name__}: {e}", None
     return f"earlier runs: {artifact} from run {newest['workflow_run'].get('id')}", None

@@ -191,6 +191,10 @@ def test_each_paid_arm_is_shared_under_its_name(tmp_path):
         "${{ steps.shared.outputs.base }}",
         "${{ steps.shared.outputs.candidate }}",
     ]
-    assert all(s["with"]["overwrite"] for s in uploads)
+    assert all(s["with"]["overwrite"] and s.get("continue-on-error") for s in uploads)
+    assert all(".native.jsonl" in s["with"]["path"] for s in uploads)
+    assert all(
+        "inputs.runs-retention-days" in s["with"]["retention-days"] for s in uploads
+    )
     assert "pull_request_target" in _step("shared runs")["if"]
     assert "actions/cache" not in (ROOT / "action.yml").read_text()

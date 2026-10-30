@@ -47,7 +47,12 @@ PYTHON = ["uv", "run", "--quiet", "python"]
 HASH = "import sys; from llm_release_gate.version import version_hash; print(version_hash(sys.argv[1]))"
 WORST = (INFRA_ERROR, QUALITY_FAIL, BUDGET_FAIL, INCONCLUSIVE, PASS)
 TEXT = {".yaml", ".yml", ".json", ".txt", ".md", ".csv"}
-ENV = {k: v for k, v in os.environ.items() if k != "VIRTUAL_ENV"}
+# the pipelines' code gets no token: only the gate reads other jobs' runs (`shared`)
+ENV = {
+    k: v
+    for k, v in os.environ.items()
+    if k not in ("VIRTUAL_ENV", "GITHUB_TOKEN", "GH_TOKEN")
+}
 BUDGETS = {
     "cost_per_run_usd": "--max-cost-per-run",
     "latency_s": "--max-latency",
@@ -290,7 +295,7 @@ def store(
     """Name this job's paid runs for upload and keep them in CACHE; a failure here costs a later reuse, never the
     verdict."""
     try:
-        share(dest, pipeline)
+        share(dest, pipeline, arms)
         for arm in arms:
             keep(cache, dest / arm, days)
     except Exception as e:  # noqa: BLE001 - see `earlier`
@@ -298,11 +303,12 @@ def store(
             f.write(f"runs not kept for later jobs: {type(e).__name__}: {e}\n")
 
 
-def share(dest: Path, pipeline: str) -> None:
-    """Name each arm with runs this job paid for in DEST/shared.txt (`base NAME`), for the CI to upload as an artifact
-    of that name; the candidate only if its version differs from the base's, neither for a model without a date."""
+def share(dest: Path, pipeline: str, arms: tuple[str, ...]) -> None:
+    """Name each of ARMS (`base.jsonl`, `candidate.jsonl`) with runs this job paid for in DEST/shared.txt
+    (`base NAME`), for the CI to upload as an artifact of that name; the candidate only if its version differs from
+    the base's, neither for a model without a date."""
     names = {}
-    for arm in ("base", "candidate"):
+    for arm in (a.removesuffix(".jsonl") for a in arms):
         found = read_records(dest / f"{arm}.jsonl")
         paid = {
             (r.get("config_hash"), r.get("set_hash"))
@@ -371,10 +377,12 @@ def one(
     dest: Path,
     may_skip: bool = True,
     cache: Path | None = None,
+    base_as_usual: bool = False,
 ) -> int:
     """Compare the target branch's version (`base_config` in `base`) with the request's; without one only the candidate
-    runs, for its score and a neutral exit. `may_skip`: an unchanged version may skip the runs. `cache`: reuse the
-    base's recent runs from it and keep both versions' runs there."""
+    runs, for its score and a neutral exit. `may_skip`: an unchanged version may skip the runs. `cache`: keep the runs
+    there and share them. `base_as_usual`: the base is prepared as its own branch prepares it, so its runs may come
+    from other jobs and go to them; a request that changes `prepare` runs its base for itself alone."""
     if not (candidate / p.config).is_file():
         raise Infra(f"There is no {p.config}.")
     if base is None or base_config is None or not (base / base_config).is_file():
@@ -391,6 +399,7 @@ def one(
             return unchanged(p, hashes[0], set_hash, dest)
         if (
             cache
+            and base_as_usual
             and hashes[0]
             and dated(base / base_config)
             and dated(candidate / p.config)
@@ -412,9 +421,10 @@ def one(
         lambda: call([*runs, "--config", p.config, "--out", str(dest / "candidate.jsonl")], candidate, logs[1]),
     )  # fmt: skip
     if cache:  # what was paid for is kept, a failed arm's finished runs too
-        store(
-            cache, dest, ("base.jsonl", "candidate.jsonl"), p.name, p.base_max_age_days
+        arms = (
+            ("base.jsonl", "candidate.jsonl") if base_as_usual else ("candidate.jsonl",)
         )
+        store(cache, dest, arms, p.name, p.base_max_age_days)
     for arm, code, log in zip(("base version", "candidate"), codes, logs, strict=True):
         if code != 0:
             raise Infra(f"The {arm} did not finish its runs.", log)
@@ -728,6 +738,7 @@ def main(argv: list[str] | None = None) -> int:
                     dest,
                     same_layout,
                     cache and cache / name,
+                    rules is not None and rules.prepare == settings.prepare,
                 )
             except Infra as e:
                 write_comment(

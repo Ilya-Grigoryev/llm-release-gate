@@ -16,6 +16,9 @@ inputs:
   cases-retention-days:
     description: Days GitHub keeps that artifact.
     default: "30"
+  runs-retention-days:
+    description: Days GitHub keeps each version's runs for later jobs to reuse; at least base_max_age_days in gate.yaml.
+    default: "14"
 runs:
   using: composite
   steps:
@@ -81,6 +84,7 @@ runs:
     - name: shared runs
       id: shared
       if: ${{ !cancelled() && steps.pipeline.outputs.name != '' && github.event_name != 'pull_request_target' }}
+      continue-on-error: true  # sharing saves money; it never fails a check
       shell: bash
       env:
         OUT: ${{ steps.pipeline.outputs.out }}
@@ -88,20 +92,24 @@ runs:
         [ ! -f "$OUT/shared.txt" ] || while read -r arm name; do echo "$arm=$name" >> "$GITHUB_OUTPUT"; done < "$OUT/shared.txt"
     - uses: actions/upload-artifact@v7
       if: ${{ !cancelled() && steps.shared.outputs.base != '' }}
+      continue-on-error: true
       with:
         name: ${{ steps.shared.outputs.base }}
         path: |
           ${{ steps.pipeline.outputs.out }}/base.jsonl
           ${{ steps.pipeline.outputs.out }}/base.native.jsonl
         overwrite: true
+        retention-days: ${{ inputs.runs-retention-days }}
     - uses: actions/upload-artifact@v7
       if: ${{ !cancelled() && steps.shared.outputs.candidate != '' }}
+      continue-on-error: true
       with:
         name: ${{ steps.shared.outputs.candidate }}
         path: |
           ${{ steps.pipeline.outputs.out }}/candidate.jsonl
           ${{ steps.pipeline.outputs.out }}/candidate.native.jsonl
         overwrite: true
+        retention-days: ${{ inputs.runs-retention-days }}
     - name: comment
       if: ${{ !cancelled() && steps.fork.outputs.fork != 'true' && github.base_ref != '' }}
       shell: bash

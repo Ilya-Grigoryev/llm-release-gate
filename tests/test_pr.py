@@ -581,6 +581,11 @@ def test_refresh_fills_the_cache_on_the_target_branch(repo, capsys):
     cache, out = repo.parent / "cache", repo.parent / "refresh"
     assert pr.main(["--refresh", "--cache", str(cache), "--out", str(out)]) == pr.PASS
     assert "demo: 0 runs reused" in capsys.readouterr().out
+    assert (
+        (out / "demo" / "shared.txt")
+        .read_text()
+        .startswith("base llm-release-gate-runs-demo-")
+    )
     assert pr.main(["--refresh", "--cache", str(cache), "--out", str(out)]) == pr.PASS
     assert "demo: 1 runs reused" in capsys.readouterr().out
     version(repo, "bare")
@@ -835,3 +840,46 @@ def test_a_config_that_is_not_yaml_is_an_infra_error(repo):
     code, out = gate(repo)
     assert code == pr.INFRA_ERROR
     assert "infra error" in (out / "comment.md").read_text()
+
+
+def test_a_request_that_changes_prepare_runs_its_base_for_itself(repo):
+    rules = GATE + "prepare: [sh, -c, 'true']\n"
+    commit_rules(repo, rules)
+    version(repo, "bare", rules)
+    _, out = cached_gate(repo)
+    assert (out / "shared.txt").read_text().split()[0] == "base"
+    version(repo, "bare", GATE + "prepare: [sh, -c, 'exit 0']\n")
+    _, out = cached_gate(repo)
+    assert not any(r.get("reused") for r in records(out / "base.jsonl"))
+    assert (out / "shared.txt").read_text().split()[0] == "candidate"
+
+
+def test_shared_names_only_paid_runs_of_a_dated_model(tmp_path):
+    now = datetime.now(UTC)
+    (tmp_path / "base.jsonl").write_text(
+        lines(
+            record("a", 0, now),
+            record("b", 0, now, error="boom"),
+            record("c", 0, now, reused=True),
+        )
+    )
+    (tmp_path / "candidate.jsonl").write_text(
+        lines(record("a", 0, now))
+    )  # the same version
+    pr.share(tmp_path, "demo", ("base.jsonl", "candidate.jsonl"))
+    assert (
+        tmp_path / "shared.txt"
+    ).read_text() == f"base {pr.shared.name('demo', 'v', 's')}\n"
+    (tmp_path / "base.jsonl").write_text(
+        lines(record("a", 0, now, requested_model="m"))
+    )
+    pr.share(tmp_path, "demo", ("base.jsonl",))
+    assert (tmp_path / "shared.txt").read_text() == ""
+
+
+def test_the_pipelines_get_no_token():
+    code = "import os; os.environ['GITHUB_TOKEN'] = 'x'; from llm_release_gate import pr; print('GITHUB_TOKEN' in pr.ENV)"
+    done = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, check=True
+    )
+    assert done.stdout.strip() == "False"
