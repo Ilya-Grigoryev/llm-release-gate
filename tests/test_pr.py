@@ -487,7 +487,7 @@ def test_a_recent_base_comes_from_the_cache(repo):
     again = records(out / "base.jsonl")
     assert {r["run_id"] for r in again} == first and all(r["reused"] for r in again)
     assert (
-        "Base: 1 of 1 runs come from earlier jobs; the oldest ran 0.0 days before"
+        "Base: 1 of 1 runs come from earlier jobs; the oldest ran less than an hour before"
         in (out / "comment.md").read_text()
     )
     verdict = json.loads((out / "verdict.json").read_text())

@@ -175,6 +175,15 @@ def reused(base: Arm, candidate: Arm) -> tuple[int, float | None]:
     return len(old.records), max(0.0, (min(last) - min(first)).total_seconds() / 86400)
 
 
+def ago(days: float) -> str:
+    hours = round(days * 24)
+    if days >= 1:
+        return f"{days:.1f} days"
+    return (
+        "less than an hour" if hours < 1 else f"{hours} hour{'s' if hours > 1 else ''}"
+    )
+
+
 def candidate_budget(
     arm: Arm, prices: Prices | None, args: argparse.Namespace
 ) -> budget.Budget | None:
@@ -233,7 +242,7 @@ def markdown(
         lines.append(
             f"Base: {runs} of {len(base.records)} runs come from earlier jobs"
             + (
-                f"; the oldest ran {days:.1f} days before the candidate's."
+                f"; the oldest ran {ago(days)} before the candidate's."
                 if days is not None
                 else "."
             )

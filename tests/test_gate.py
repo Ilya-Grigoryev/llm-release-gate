@@ -380,3 +380,12 @@ def test_without_a_base_the_candidate_is_reported_and_passes(tmp_path, monkeypat
 def test_a_base_or_no_base_is_required(args):
     with pytest.raises(SystemExit):
         gate.main(args)
+
+
+def test_the_age_of_reused_runs_reads_as_hours_or_days():
+    assert [gate.ago(d) for d in (0.01, 1 / 24, 5 / 24, 2.04)] == [
+        "less than an hour",
+        "1 hour",
+        "5 hours",
+        "2.0 days",
+    ]
