@@ -29,7 +29,7 @@ between 0.40 and 0.70 by itself.
 
 Equally, a base run that lands low can let a worse candidate pass.
 
-## Today: the naive rule
+## Today: the naive rule and the rule on checks
 
 On every pull request that changes the version, the gate:
 
@@ -41,7 +41,8 @@ On every pull request that changes the version, the gate:
 4. blocks with `quality fail` (exit 10) when the difference is below −`delta`, 5 points by default;
 5. blocks with `quality fail` too when a check passed significantly less often in the candidate's runs than in the
    base's (Fisher's exact test per case and check, one-sided, α 0.025, corrected for the number of checks that could
-   show it). With one run of each version this cannot happen: one broken check needs 4 runs of each. `checks: report`
+   show it). With one run of each version this cannot happen: a single broken check can block from 4 runs of each,
+   several broken at once need more. `checks: report`
    only lists it;
 6. checks the [budgets](#budgets-cost-and-latency), if you set any.
 
@@ -141,7 +142,7 @@ shown over any budget you set. It does not mean:
 
 - **The change is safe on new inputs.** The gate answers only for your cases.
 - **Nothing got worse.** Losses smaller than `delta` pass and can add up, and a mean that holds can hide one check
-  that got worse.
+  that got worse when there are too few runs to show it.
 - **Every change was tested.** Say your booking assistant (a made-up example) may refund up to €30 without approval,
   and your cases ask for €20 and €60. Raise the limit to €40, and no case can tell the two versions apart.
 - **The author meant well.** The gate catches mistakes, not a hostile author.

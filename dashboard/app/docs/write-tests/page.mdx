@@ -126,7 +126,8 @@ makes a new version. No built-in check asks a model for an opinion. Checks share
 result that applies is a full pass: use it when the checks describe one correct outcome, such as an agent's task.
 
 With `all`, each case is worth 100 / N points: with 20 cases, one case that goes from 1 to 0 lowers the mean by exactly
-5 points, which today's rule (block above `delta`, 5 by default) passes.
+5 points, which the rule on the mean (block above `delta`, 5 by default) passes; the rule on checks blocks it from 4 runs
+of each version.
 
 ## Cover the edges
 
@@ -182,7 +183,7 @@ jq -r '[.case, .rep, .score] | @tsv' runs/try.jsonl
 A case should pass on a version you consider correct. If it passes on some runs and fails on others, find out why: a
 check that demands exact wording of free text fails at random. In the author's measurement on a support agent, one
 unchanged version scored a mean of 0.7, 0.6, 0.6, 0.7, 0.5, 0.6, 0.6, 0.4, 0.7, 0.7 and 0.6 over 11 runs of the same 10
-tasks, and today the gate decides on one run per version ([How it decides](/docs/how-it-decides)).
+tasks, and by default (`k: 1`) the gate decides on one run per version ([How it decides](/docs/how-it-decides)).
 
 A prompt tuned until the CI cases pass can end up fitted to them. Keep some cases in a directory that `gate.yaml` does
 not name, list it in `ignore`, and run them rarely.

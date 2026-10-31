@@ -31,7 +31,7 @@ These are drafts.
 
 **1. The tool.** A release gate that a team sets up with a few files: how to run the application, its cases with
 checks, and one `gate.yaml` with the rules. Built today: the runner, traces, 16 kinds of checks, one JSON protocol for
-any program, the naive rule with budgets, and a GitHub Action that comments the verdict. Planned: the statistical
+any program, the naive rule, the rule on checks, budgets, and a GitHub Action that comments the verdict. Planned: the statistical
 rule, adaptive extra runs and an anchor comparison.
 
 **2. Evidence for the decision rules (planned, stage D):** how often each rule blocks a harmless change, misses a
@@ -64,7 +64,7 @@ The decisions below answer the first research question; D-numbers are the thesis
 ## Decisions: deciding under noise
 
 These answer the second research question. Today the gate uses the naive rule with a fixed `delta` (δ), 5 points by
-default; the first decision is built and the last partly, the others are the statistical rule planned for stage C.
+default; the first and the last decisions are built, the others are the statistical rule planned for stage C.
 
 - **Both versions run on the same cases** (D-007, D-018, built), so a case's difficulty cancels out. The base's runs of a
   dated model come from earlier jobs for up to `base_max_age_days` (3 by default), so a shift in the service within
@@ -82,7 +82,7 @@ default; the first decision is built and the last partly, the others are the sta
 - **An anchor against slow creep** (D-012): each pull request is also compared with a fixed earlier version, so losses
   smaller than δ cannot add up unseen.
 - **Checks that break on their own** (D-003, built): a check that passes significantly less often over the runs
-  blocks; one broken check needs 4 runs of each version.
+  blocks; a single broken check can block from 4 runs of each version.
 
 ## Planned experiments
 

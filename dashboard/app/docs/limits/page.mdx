@@ -43,7 +43,7 @@ Say your booking assistant (a made-up example) may refund up to €30 without a 
 refunds of €20 and €60: raising the limit to €40 changes nothing any case sees. Changes outside the version stay unseen
 too ([What it catches](/docs/what-it-catches#what-it-cannot-see)).
 
-<Fig id="limits-1" caption={"A change can change the verdict only if it is part of the version, a case exercises it, and the drop it causes is larger than `delta`. Today, with one run per version, noise can push a drop over or under `delta`."} alt={"Three conditions in a row. First, the change must be part of the version: documentation, CI, gate.yaml, ignored paths and data outside the repository are not. Second, a case must exercise it: raising a refund limit from \u20ac30 to \u20ac40 is invisible when no case asks for an amount between them. Third, the mean score must drop by more than delta: one broken case among 20 lowers the mean by exactly 5 points, which passes at the default delta. Today, with one run per version, run-to-run noise can push a drop over or under delta."} />
+<Fig id="limits-1" caption={"A change can change the verdict only if it is part of the version, a case exercises it, and the drop it causes is larger than `delta` (or, over at least 4 runs of each version, a check breaks). Today, with one run per version, noise can push a drop over or under `delta`."} alt={"Three conditions in a row. First, the change must be part of the version: documentation, CI, gate.yaml, ignored paths and data outside the repository are not. Second, a case must exercise it: raising a refund limit from \u20ac30 to \u20ac40 is invisible when no case asks for an amount between them. Third, with one run per version, the mean score must drop by more than delta: one broken case among 20 lowers the mean by exactly 5 points, which passes at the default delta. Today, with one run per version, run-to-run noise can push a drop over or under delta."} />
 
 ## Today it decides on one run per version
 
@@ -51,7 +51,8 @@ The gate compares each version's mean score over the first run of each case and 
 by more than `delta` points. In the author's measurement on a support agent, one unchanged version on the same 10 tasks
 had a spread of 30 points over 11 runs, and twice the same version, run as base and as candidate in one job, differed by
 10 points. So a block or a pass can be noise. Requests within `base_max_age_days` compare with the same base runs, so
-one noisy base run moves all their verdicts. A loss smaller than `delta` passes, so small losses add up unseen.
+one noisy base run moves all their verdicts. A loss smaller than `delta` passes, so small losses add up unseen. The
+rule on checks reads every run but cannot block on one run per version: a single broken check needs 4 runs of each.
 Planned: several runs per version, an interval around the difference, a "not sure yet" outcome, and an anchor version
 that only a person moves ([How it decides](/docs/how-it-decides#planned-several-runs-and-an-interval)).
 

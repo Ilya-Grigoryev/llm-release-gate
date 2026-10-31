@@ -121,9 +121,11 @@ the case score: `mean` (the default) or `all`. [Write tests](/docs/write-tests) 
 
 ## The decision today
 
-Today the gate decides with the naive rule: it takes the first run of each version and blocks when the candidate's mean
-score is lower than the base's by more than `delta` points (5 by default: 0.05 on a score from 0 to 1). Budgets on cost
-and latency can turn a pass into `budget fail`.
+Today the gate decides with two rules. The naive rule takes the first run of each version and blocks when the
+candidate's mean score is lower than the base's by more than `delta` points (5 by default: 0.05 on a score from 0 to 1).
+The rule on checks reads every run and blocks when a check passes significantly less often in the candidate; with one
+run per version (`k: 1`, the default) it cannot block ([How it decides](/docs/how-it-decides)). Budgets on cost and
+latency can turn a pass into `budget fail`.
 
 In the author's measurement on a support agent, one unchanged version ran 11 times on the same 10 cases. Its mean score was 0.7, 0.6, 0.6, 0.7, 0.5, 0.6, 0.6, 0.4, 0.7, 0.7 and 0.6: two runs differ by 30
 points, six times the default `delta`. [How it decides](/docs/how-it-decides) explains the noise and the

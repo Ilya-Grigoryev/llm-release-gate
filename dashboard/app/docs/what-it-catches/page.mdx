@@ -12,7 +12,8 @@ checks is open: you can add your own.
 count; a request that changes nothing else gets `unchanged`, and nothing runs.
 
 **2. A case looks at it.** Today the gate blocks (`quality fail`) when the candidate's mean score on one run is lower
-than the base's by more than `delta` points, 5 by default ([How it decides](/docs/how-it-decides)). A change that no
+than the base's by more than `delta` points, 5 by default, or when a check passes significantly less often over the runs,
+which takes at least 4 runs of each version ([How it decides](/docs/how-it-decides)). A change that no
 check looks at cannot lower a score.
 
 <Fig id="what-it-catches-1" caption={"A change reaches the verdict only if it is part of the version and a case checks what it affects. If gate.yaml sets budgets, they check the candidate whenever the versions run."} alt={"A change that is not part of the version gets \"unchanged\" and nothing runs. A change that is part of the version runs both versions on the same cases. If no case checks what it affects, the request passes. If a case does, the naive rule compares the mean scores. If gate.yaml sets cost or latency budgets, the gate also checks the candidate against them whenever the versions run."} />
@@ -102,10 +103,10 @@ application reads from the repository are code, except `docs/` at the root and f
 - **A change no case touches.** If your cases have credits of €30, €45 and €60, raising the credit limit from €30 to
   €40 changes nothing for any of them.
 - **One case on a large set.** With 20 cases, one case going from 1 to 0 lowers the mean by exactly 5 points, which is
-  at the limit and passes. Read the comment's list of cases that got worse even on a pass.
+  at the limit and passes; with 4 runs of each version the rule on checks blocks a check that breaks in all of them. Read the comment's list of cases that got worse even on a pass.
 - **Changes outside the version**: untracked files, environment variables, data outside the repository, services your
   tools call, a provider's change behind a model name.
-- **Changes smaller than the noise** of one run per version.
+- **Changes smaller than the noise** of the runs: one per version by default.
 - **Qualities no built-in check expresses**, such as tone, unless code can express them in a `function` check.
 
 To find gaps, break your application on purpose in a branch (delete one rule, change one number) and open a request:
