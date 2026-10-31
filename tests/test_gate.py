@@ -410,7 +410,8 @@ def test_a_check_broken_in_every_run_blocks_while_the_mean_holds(
     assert (unit["check"], unit["base"], unit["candidate"]) == ("total", [4, 4], [0, 4])
     text = comment.read_text()
     assert (
-        "Checks: 1 broke, they block (one-sided Fisher, α 0.025 on 4 + 4 runs" in text
+        "Checks: 1 broke, they block (one-sided Fisher, α 0.025, on 4 + 4 runs, Tarone m = 1)"
+        in text
     )
     assert f"| {CASE.id} | total | 4/4 | 0/4 | 0.014 |" in text
 
@@ -430,9 +431,10 @@ def test_with_one_run_the_comment_says_the_checks_cannot_block(
         gate.main([*args, "--json", str(report), "--markdown", str(comment)])
         == gate.PASS
     )
-    assert json.loads(report.read_text())["checks"]["testable"] == 0
+    checks = json.loads(report.read_text())["checks"]
+    assert (checks["testable"], checks["can_block"]) == (0, False)
     assert (
-        "with 1 + 1 runs no break can be significant; one broken check needs 4 runs of each version"
+        "with 1 + 1 runs no break can be significant; a single broken check can block from 4 runs of each version"
         in comment.read_text()
     )
 
@@ -459,4 +461,34 @@ def test_more_than_five_broken_checks_point_to_the_report():
     assert (
         sum(r.startswith("| c") for r in rows) == 5
         and rows[-1] == "2 more in the JSON report."
+    )
+
+
+def lines_for(base, candidate):
+    return gate.checks_lines(criterion.per_check(base, candidate))[0]
+
+
+def test_the_checks_line_follows_the_run_counts_not_the_data():
+    def full(k, n, cases=1):
+        return {(f"c{i}", "x"): [True] * k + [False] * (n - k) for i in range(cases)}
+
+    assert lines_for(full(8, 8), full(8, 8)).startswith(
+        "Checks: none broke (1 checked, one-sided Fisher, α 0.025, on 8 + 8 runs)"
+    )
+    # two full breaks at 4 + 4: Tarone counts both, and neither reaches 0.025 / 2
+    assert lines_for(full(4, 4, 2), full(0, 4, 2)).startswith(
+        "Checks: none significantly worse; 2 of 2 passed less often (one-sided Fisher, α 0.025, on 4 + 4 runs, "
+        "Tarone m = 2)"
+    )
+    assert "no break can be significant" in lines_for(full(10, 10), full(0, 1))
+    assert lines_for(full(10, 10), full(0, 2)).startswith("Checks: 1 broke")
+
+
+def test_a_check_scored_on_one_side_only_is_counted_even_with_nothing_to_test():
+    v = criterion.per_check(
+        {("a", "x"): [True], ("a", "y"): [None]},
+        {("a", "x"): [None], ("a", "y"): [True]},
+    )
+    assert gate.checks_lines(v)[0] == (
+        "Checks: no check was scored in both versions. 2 checks scored in one version only are left out."
     )

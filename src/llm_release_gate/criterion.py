@@ -34,7 +34,7 @@ class CheckVerdict:
     alpha: float
     sides: int
     m: int  # Tarone's number of tests
-    testable: int  # 0: with these run counts the rule cannot block at all, and the report must say so (D-015)
+    testable: int  # checks whose run counts could reach the corrected threshold; 0 also when nothing changed
     broken: list[Unit]  # worse beyond the corrected threshold, smallest p first
     units: list[Unit]  # every check both versions scored, smallest p first
     one_sided: list[Key]  # checks scored in one version only: left out of the test
@@ -70,12 +70,17 @@ def fisher(x: int, kb: int, y: int, kc: int, sides: int) -> tuple[Fraction, Frac
     return two(y), min(two(i) for i in support)
 
 
-def runs_to_block(alpha: float = 0.025, sides: int = 1) -> int:
-    """The fewest runs per version at which one check that always passed and now always fails can block."""
+def can_block(kb: int, kc: int, alpha: float = 0.025, sides: int = 1) -> bool:
+    """Whether one check that passed in all `kb` base runs and failed in all `kc` candidate runs can block on its own."""
     if not 0 < alpha < 1 or sides not in (1, 2):
         raise ValueError("alpha must lie in (0, 1), sides be 1 or 2")
-    a, k = Fraction(str(alpha)), 1
-    while fisher(k, k, 0, k, sides)[1] > a:
+    return fisher(kb, kb, 0, kc, sides)[1] <= Fraction(str(alpha))
+
+
+def runs_to_block(alpha: float = 0.025, sides: int = 1) -> int:
+    """The fewest runs of each version from which one broken check can block (`can_block` with equal run counts)."""
+    k = 1
+    while not can_block(k, k, alpha, sides):
         k += 1
     return k
 

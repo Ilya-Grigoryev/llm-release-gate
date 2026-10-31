@@ -3,7 +3,7 @@ from fractions import Fraction
 
 import pytest
 
-from llm_release_gate.criterion import fisher, per_check, runs_to_block
+from llm_release_gate.criterion import can_block, fisher, per_check, runs_to_block
 
 
 def runs(k, n):
@@ -159,3 +159,12 @@ def test_runs_to_block_is_the_fewest_runs_a_full_break_needs(alpha, sides, k):
 def test_runs_to_block_refuses_bad_arguments(alpha, sides):
     with pytest.raises(ValueError):
         runs_to_block(alpha, sides)
+
+
+@pytest.mark.parametrize(
+    "kb, kc, alpha, sides, possible",
+    [(3, 3, 0.025, 1, False), (4, 4, 0.025, 1, True), (10, 1, 0.025, 1, False), (10, 2, 0.025, 1, True),
+     (3, 3, 0.05, 1, True), (3, 3, 0.05, 2, False)],
+)  # fmt: skip
+def test_can_block_depends_only_on_the_run_counts(kb, kc, alpha, sides, possible):
+    assert can_block(kb, kc, alpha, sides) is possible

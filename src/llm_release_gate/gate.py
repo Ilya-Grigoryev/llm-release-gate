@@ -151,6 +151,11 @@ def check_runs(
     return base, candidate
 
 
+def run_counts(c: criterion.CheckVerdict) -> tuple[int, int]:
+    """The most runs any check had in the base and in the candidate."""
+    return max(u.base[1] for u in c.units), max(u.candidate[1] for u in c.units)
+
+
 def checks_report(c: criterion.CheckVerdict) -> dict:
     return {
         "outcome": c.outcome,
@@ -159,6 +164,8 @@ def checks_report(c: criterion.CheckVerdict) -> dict:
         "sides": c.sides,
         "m": c.m,
         "testable": c.testable,
+        "can_block": bool(c.units)
+        and criterion.can_block(*run_counts(c), c.alpha, c.sides),
         "runs_to_block": criterion.runs_to_block(c.alpha, c.sides),
         "checked": len(c.units),
         "one_sided": [list(k) for k in c.one_sided],
@@ -168,16 +175,16 @@ def checks_report(c: criterion.CheckVerdict) -> dict:
 
 def checks_lines(c: criterion.CheckVerdict) -> tuple[str, list[str]]:
     """The comment's line on the rule on checks, and its table of broken checks."""
-    if not c.units:
-        return "Checks: no check was scored in both versions.", []
-    test = f"{'one' if c.sides == 1 else 'two'}-sided Fisher, α {c.alpha:g}"
-    kb = max(u.base[1] for u in c.units)
-    kc = max(u.candidate[1] for u in c.units)
     left = (
         f" {len(c.one_sided)} checks scored in one version only are left out."
         if c.one_sided
         else ""
     )
+    if not c.units:
+        return f"Checks: no check was scored in both versions.{left}", []
+    kb, kc = run_counts(c)
+    name = f"{'one' if c.sides == 1 else 'two'}-sided Fisher, α {c.alpha:g}"
+    test = f"{name}, on {kb} + {kc} runs"
     if c.broken:
         verb = (
             "the mode `report` does not block on them"
@@ -191,19 +198,27 @@ def checks_lines(c: criterion.CheckVerdict) -> tuple[str, list[str]]:
         ]
         if len(c.broken) > 5:
             rows += ["", f"{len(c.broken) - 5} more in the JSON report."]
-        line = f"Checks: {len(c.broken)} broke, {verb} ({test} on {kb} + {kc} runs, Tarone m = {c.m}).{left}"
-        return line, rows
-    if not c.testable:
+        return (
+            f"Checks: {len(c.broken)} broke, {verb} ({test}, Tarone m = {c.m}).{left}",
+            rows,
+        )
+    if not criterion.can_block(kb, kc, c.alpha, c.sides):
         need = criterion.runs_to_block(c.alpha, c.sides)
         line = (
-            f"Checks: with {kb} + {kc} runs no break can be significant; one broken check needs {need} runs "
-            f"of each version ({test}).{left}"
+            f"Checks: with {kb} + {kc} runs no break can be significant; a single broken check can block from {need} "
+            f"runs of each version ({name}).{left}"
         )
         return line, []
-    return (
-        f"Checks: none broke ({len(c.units)} checked, {test} on {kb} + {kc} runs, Tarone m = {c.m}).{left}",
-        [],
+    worse = sum(
+        u.candidate[0] * u.base[1] < u.base[0] * u.candidate[1] for u in c.units
     )
+    if worse:
+        line = (
+            f"Checks: none significantly worse; {worse} of {len(c.units)} passed less often ({test}, Tarone m = {c.m})."
+            f"{left}"
+        )
+        return line, []
+    return f"Checks: none broke ({len(c.units)} checked, {test}).{left}", []
 
 
 def record_cost(r: dict, prices: Prices) -> float | None:
