@@ -434,8 +434,8 @@ def test_with_one_run_the_comment_says_the_checks_cannot_block(
     checks = json.loads(report.read_text())["checks"]
     assert (checks["testable"], checks["can_block"]) == (0, False)
     assert (
-        "with 1 + 1 runs no break can be significant; a single broken check can block from 4 runs of each version"
-        in comment.read_text()
+        "with 1 + 1 runs no break can be significant; a single broken check can block from 4 runs of each version "
+        "(one-sided Fisher, α 0.025). 1 of 4 passed less often." in comment.read_text()
     )
 
 
@@ -475,10 +475,19 @@ def test_the_checks_line_follows_the_run_counts_not_the_data():
     assert lines_for(full(8, 8), full(8, 8)).startswith(
         "Checks: none broke (1 checked, one-sided Fisher, α 0.025, on 8 + 8 runs)"
     )
-    # two full breaks at 4 + 4: Tarone counts both, and neither reaches 0.025 / 2
-    assert lines_for(full(4, 4, 2), full(0, 4, 2)).startswith(
-        "Checks: none significantly worse; 2 of 2 passed less often (one-sided Fisher, α 0.025, on 4 + 4 runs, "
-        "Tarone m = 2)"
+    # two full breaks at 4 + 4: Tarone counts both, and neither can reach 0.025 / 2
+    assert lines_for(full(4, 4, 2), full(0, 4, 2)) == (
+        "Checks: with 4 + 4 runs no break can be significant; Tarone counts 2 checks that changed or vary, and a break "
+        "among them can block from 5 runs of each version (one-sided Fisher, α 0.025). 2 of 2 passed less often."
+    )
+    # one break and one check that varies the same in both versions: the varying one counts too
+    unstable = {("v", "x"): [True, True, False, False]}
+    line = lines_for(full(4, 4) | unstable, full(0, 4) | unstable)
+    assert "Tarone counts 2 checks" in line and line.endswith(
+        "1 of 2 passed less often."
+    )
+    assert lines_for(full(8, 8), full(6, 8)).startswith(
+        "Checks: none significantly worse; 1 of 1 passed less often (one-sided Fisher, α 0.025, on 8 + 8 runs"
     )
     assert "no break can be significant" in lines_for(full(10, 10), full(0, 1))
     assert lines_for(full(10, 10), full(0, 2)).startswith("Checks: 1 broke")

@@ -156,6 +156,17 @@ def run_counts(c: criterion.CheckVerdict) -> tuple[int, int]:
     return max(u.base[1] for u in c.units), max(u.candidate[1] for u in c.units)
 
 
+def level(c: criterion.CheckVerdict) -> Fraction:
+    """The threshold Tarone's m leaves for each check."""
+    return Fraction(str(c.alpha)) / c.m
+
+
+def blockable(c: criterion.CheckVerdict) -> bool:
+    """Whether a check broken in every run could block, at its own run counts and the threshold Tarone's m leaves."""
+    counts = {(u.base[1], u.candidate[1]) for u in c.units}
+    return any(criterion.can_block(b, k, level(c), c.sides) for b, k in counts)
+
+
 def checks_report(c: criterion.CheckVerdict) -> dict:
     return {
         "outcome": c.outcome,
@@ -164,9 +175,8 @@ def checks_report(c: criterion.CheckVerdict) -> dict:
         "sides": c.sides,
         "m": c.m,
         "testable": c.testable,
-        "can_block": bool(c.units)
-        and criterion.can_block(*run_counts(c), c.alpha, c.sides),
-        "runs_to_block": criterion.runs_to_block(c.alpha, c.sides),
+        "can_block": bool(c.units) and blockable(c),
+        "runs_to_block": criterion.runs_to_block(level(c), c.sides),
         "checked": len(c.units),
         "one_sided": [list(k) for k in c.one_sided],
         "broken": [asdict(u) for u in c.broken],
@@ -202,16 +212,22 @@ def checks_lines(c: criterion.CheckVerdict) -> tuple[str, list[str]]:
             f"Checks: {len(c.broken)} broke, {verb} ({test}, Tarone m = {c.m}).{left}",
             rows,
         )
-    if not criterion.can_block(kb, kc, c.alpha, c.sides):
-        need = criterion.runs_to_block(c.alpha, c.sides)
-        line = (
-            f"Checks: with {kb} + {kc} runs no break can be significant; a single broken check can block from {need} "
-            f"runs of each version ({name}).{left}"
-        )
-        return line, []
     worse = sum(
         u.candidate[0] * u.base[1] < u.base[0] * u.candidate[1] for u in c.units
     )
+    fewer = f" {worse} of {len(c.units)} passed less often." if worse else ""
+    if not blockable(c):
+        need = criterion.runs_to_block(level(c), c.sides)
+        which = (
+            "a single broken check"
+            if c.m == 1
+            else f"Tarone counts {c.m} checks that changed or vary, and a break among them"
+        )
+        line = (
+            f"Checks: with {kb} + {kc} runs no break can be significant; {which} can block from {need} runs of each "
+            f"version ({name}).{fewer}{left}"
+        )
+        return line, []
     if worse:
         line = (
             f"Checks: none significantly worse; {worse} of {len(c.units)} passed less often ({test}, Tarone m = {c.m})."
