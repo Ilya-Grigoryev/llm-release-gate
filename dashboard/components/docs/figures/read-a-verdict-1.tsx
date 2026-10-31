@@ -11,6 +11,8 @@ Mean score 0.800 → 0.725 (-7.50 points, blocks below -5.00); naive rule: block
 
 20 cases, first run of each version · config 3f9a1c0e → 8b42d7aa · set 51c0e9d2
 
+Checks: with 1 + 1 runs no break can be significant; a single broken check can block from 4 runs of each version (one-sided Fisher, α 0.025). 2 of 40 passed less often.
+
 Cost of this decision $0.142: base $0.071, candidate $0.071 (successful calls, list prices).
 
 Budget of the candidate not shown over its limits · cost $0.0036 per run (limit $0.005) · latency p95 7.10 s (interval 5.90–? s; limit 10 s), 1 of 20 runs needed retries.

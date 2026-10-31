@@ -506,7 +506,7 @@ paid for also go up as `llm-release-gate-runs-NAME-VERSION-SET` (16 characters o
 | `rule` | the rule on the mean, in words; the rule on checks is in `checks` |
 | `cases`, `worse` | the number of cases; those that scored lower, as `[case, base, candidate]`, largest drop first |
 | `threshold_pp`, `relative` | the threshold as given |
-| `checks` | the rule on checks: `outcome` (`pass`, `block`, `report`), `mode`, `alpha`, `sides`, `m` (checks that could show a break), `testable`, `can_block` (whether one broken check could block with these run counts), `runs_to_block` (runs of each version from which one broken check can block), `checked`, `one_sided` (`[case, check]` scored on one side only), `broken` (`case`, `check`, `base` and `candidate` as `[passes, runs]`, `p`, `p_min`); `null` when no run has check results |
+| `checks` | the rule on checks: `outcome` (`pass`, `block`, `report`), `mode`, `alpha`, `sides`, `m` (checks that could show a break), `testable`, `can_block` (whether a check broken in every run could block with these run counts and `m`), `runs_to_block` (runs of each version from which it can, at the same `m`), `checked`, `one_sided` (`[case, check]` scored on one side only), `broken` (`case`, `check`, `base` and `candidate` as `[passes, runs]`, `p`, `p_min`); `null` when no run has check results |
 | `base_config`, `candidate_config`, `set_hash` | the two versions' hashes and the test set's |
 | `scorer_version`, `rescored` | the scorer; whether the saved answers were rescored |
 | `cost_usd`, `prices_hash` | `{base, candidate}` at the gate's prices, runs paid in this job only, and their hash; `null` without prices |

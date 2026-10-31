@@ -133,7 +133,7 @@ runner's scorer is `hits(case, answer, trace=None)` (by default the run's trace,
   its input from every run's `hits` (`check_runs`; a run without results gives None) and turns a pass into `quality fail`
   when it blocks; `checks: report` in `gate.yaml` only lists. `can_block(kb, kc, alpha, sides)` says whether one check that
   broke in every run could block with these run counts, `runs_to_block(alpha, sides)` the fewest equal runs from which
-  it can, 4 at the defaults; the comment names it when no break can be significant. Tarone's correction counts every
+  it can, 4 at the defaults; the comment names it when no break can be significant at α / m. Tarone's correction counts every
   check that could show a break, so several broken at once need more runs than one.
 - **Planned — statistical rules.** A paired test on the mean with a margin δ and three outcomes (pass, block, buy more
   runs and leave it to a human); a second comparison against an

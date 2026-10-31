@@ -107,7 +107,7 @@ export default async function Run(props: PageProps<"/[owner]/[repo]/runs/[id]">)
       <h2 className="mt-8 text-lg font-semibold tracking-tight">Cases</h2>
       <p className="mt-1 text-sm text-ink-2">
         {changed} of {rows.length} changed between the versions; they come first, the most worsened at the top.
-        {reps > 1 && ` Scores average the ${reps} runs of a case; the verdict compares the first run of each.`}
+        {reps > 1 && ` Scores average the ${reps} runs of a case; the verdict's mean reads the first run of each, its rule on checks all of them.`}
       </p>
       {rescored && (
         <p className="mt-2 rounded-md bg-canvas px-3 py-2 text-sm text-ink-2">
