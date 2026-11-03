@@ -39,17 +39,24 @@ EMPTY_ANSWER = {f.name: None for f in fields(Answer)}
 
 
 def read_records(path: Path) -> list[dict]:
-    """Records in file order. Lines that are not JSON objects (e.g. cut off by a crash) are skipped."""
+    """Records in file order. Lines that are not JSON objects (e.g. cut off by a crash) are skipped with a warning."""
     if not path.exists():
         return []
-    records = []
+    records, skipped = [], 0
     for line in path.read_text().splitlines():
         try:
             record = json.loads(line)
         except json.JSONDecodeError:
-            continue
+            record = None
         if isinstance(record, dict):
             records.append(record)
+        elif line.strip():
+            skipped += 1
+    if skipped:
+        print(
+            f"warning: {path}: skipped {skipped} line(s) that are not JSON records",
+            file=sys.stderr,
+        )
     return records
 
 
