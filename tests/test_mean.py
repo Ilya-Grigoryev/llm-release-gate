@@ -135,3 +135,16 @@ def test_the_verdict_counts_differing_runs_and_reports_an_interval_over_cases():
     assert v.nonzero == 2 and v.diff == 0.0
     half = 1.959964 * 0.5 / math.sqrt(3)  # per case: -0.5, 0, +0.5
     assert v.similar_cases == pytest.approx((-half, half))
+
+
+def test_the_bounds_are_those_of_the_look_that_decided():
+    # two clean runs pass 100 cases; later runs lose 15 % but cannot undo the pass, and the bounds must not contradict it
+    b = {f"c{i:03}": [1.0] * 6 for i in range(100)}
+    c = {
+        k: [1.0, 1.0] + [0.0 if (i + r) % 7 == 0 else 1.0 for r in range(4)]
+        for i, k in enumerate(b)
+    }
+    v = mean.decide(b, c, 0.05)
+    assert (v.outcome, v.decided_at) == ("pass", 2)
+    assert v.lower > -0.05 and not v.worse
+    assert v.diff < -0.05  # over all six runs

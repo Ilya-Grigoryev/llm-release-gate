@@ -24,6 +24,19 @@ class Levels:
     @classmethod
     def parse(cls, raw: dict | None) -> "Levels":
         raw = raw or {}
+        if not isinstance(raw, dict) or set(raw) - {"critical", "minor", "cases"}:
+            raise ValueError(
+                "levels take critical, minor (lists of check ids) and cases (case pattern: level)"
+            )
+        for key in ("critical", "minor"):
+            if not isinstance(raw.get(key) or [], list) or not all(
+                isinstance(p, str) for p in raw.get(key) or []
+            ):
+                raise ValueError(
+                    f"levels.{key} must be a list of check ids or patterns"
+                )
+        if not isinstance(raw.get("cases") or {}, dict):
+            raise ValueError("levels.cases must map case patterns to levels")  # noqa: TRY004 - read as a bad setting
         cases = dict(raw.get("cases") or {})
         if bad := sorted(v for v in cases.values() if v not in LEVELS):
             raise ValueError(f"unknown level {bad[0]!r}, known: {', '.join(LEVELS)}")

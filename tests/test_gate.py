@@ -538,7 +538,7 @@ def test_betting_passes_a_silent_candidate_once_it_has_the_runs(
     assert v["mean"]["similar_cases"] is None  # one case: no spread over cases
     text = comment.read_text()
     assert (
-        "decided after run 10 of each version" in text
+        "After run 10 of each version the difference lay in" in text
         and "1 cases, 10 runs of each version" in text
     )
 
@@ -752,4 +752,17 @@ def test_minor_levels_need_the_golden_set(tmp_path, monkeypatch, capsys):
     args, _, _ = levels_args(tmp_path, monkeypatch, Fixed(), {"minor": ["total"]})
     i = args.index("--golden")
     assert gate.main(args[:i] + args[i + 2 :]) == gate.INFRA_ERROR
-    assert "minor levels need --golden" in capsys.readouterr().err
+    assert "need --golden" in capsys.readouterr().err
+
+
+def test_an_undecided_rule_with_enough_runs_says_the_runs_did_not_show_it():
+    b = {f"c{i}": [1.0, 0.0, 1.0, 1.0, 0.0, 1.0, 1.0, 1.0] for i in range(20)}
+    c = {k: [0.0, 1.0, 1.0, 0.0, 1.0, 1.0, 1.0, 0.0] for k in b}
+    mv = gate.mean.decide(b, c, 0.05)
+    assert mv.outcome == "inconclusive" and mv.runs_for_pass < mv.runs
+    [line] = gate.mean_lines(mv, 0.01)
+    assert (
+        f"these {mv.runs} did not show it: the versions differ, or the noise needs more."
+        in line
+    )
+    assert "$" not in line

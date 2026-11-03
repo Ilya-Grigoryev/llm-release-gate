@@ -56,8 +56,8 @@ class Levelled:
     unmatched: list[str]  # patterns that match no check of the set
 
     def warnings(self) -> list[criterion.Unit]:
-        broken = self.reported.broken if self.reported else []
-        return [u for u in broken if self.rules.of(u.case, u.check) == "minor"]
+        """Checks that only report and got significantly worse: minor, and normal under `checks: report` (D-028 B)."""
+        return list(self.reported.broken) if self.reported else []
 
 
 def exact(value: float) -> Fraction:
@@ -191,9 +191,12 @@ def betting(
 
 def mean_lines(mv: mean.MeanVerdict, cost_per_run: float | None) -> list[str]:
     """What the betting rule showed, and what a pass would take."""
-    shown = f"The difference lies in [{100 * mv.lower:+.1f}, {100 * mv.upper:+.1f}] points (95 %)"
+    span = f"[{100 * mv.lower:+.1f}, {100 * mv.upper:+.1f}] points (95 %)"
+    shown = f"The difference lies in {span}"
     if mv.outcome != "inconclusive":
-        out = [f"{shown}; decided after run {mv.decided_at} of each version."]
+        out = [
+            f"After run {mv.decided_at} of each version the difference lay in {span}, which decided."
+        ]
         if mv.worse:
             out.append("⚠️ Shown worse than the base, but by less than δ.")
         return out
@@ -203,17 +206,20 @@ def mean_lines(mv: mean.MeanVerdict, cost_per_run: float | None) -> list[str]:
             f"{shown}; not decided. With this method and {mv.cases} case{'s' if mv.cases != 1 else ''} a pass needs more than 10 000 runs."
         ]
     more = max(0, need - mv.runs)
+    floor = (
+        f"A pass needs at least {need} runs of each version even if nothing changed "
+        f"({mv.cases} case{'s' if mv.cases != 1 else ''}, δ {100 * mv.delta:g} points, α {mv.alpha:g})"
+    )
+    if not more:
+        return [
+            f"{shown}; not decided. {floor}; these {mv.runs} did not show it: the versions differ, or the noise needs more."
+        ]
     price = (
         f", about ${more * cost_per_run:.2f} at this decision's cost per run"
         if cost_per_run and more
         else ""
     )
-    return [
-        (
-            f"{shown}; not decided. A pass needs at least {need} runs of each version even if nothing changed "
-            f"({mv.cases} case{'s' if mv.cases != 1 else ''}, δ {100 * mv.delta:g} points, α {mv.alpha:g}): {more} more{price}."
-        )
-    ]
+    return [f"{shown}; not decided. {floor}: {more} more{price}."]
 
 
 def leveled(
@@ -450,6 +456,7 @@ def markdown(
     checks: criterion.CheckVerdict | None = None,
     mv: mean.MeanVerdict | None = None,
     lv: Levelled | None = None,
+    run_cost: float | None = None,  # both versions, one run, reused base runs included
 ) -> str:
     icon = {
         "pass": "✅",
@@ -466,7 +473,8 @@ def markdown(
     lines = [
         f"**Release gate: {icon} {v.outcome}"
         + (
-            f" · ⚠️ {len(warned)} minor check{'s' if len(warned) != 1 else ''} worse"
+            f" · ⚠️ {len(warned)} {'minor' if all(lv.rules.of(u.case, u.check) == 'minor' for u in warned) else 'reported'}"
+            f" check{'s' if len(warned) != 1 else ''} worse"
             if warned
             else ""
         )
@@ -487,13 +495,7 @@ def markdown(
             + (f", blocks below {-v.limit_pp:+.2f}" if mv is None else "")
             + f"); {v.rule}."
         ),
-        *(
-            mean_lines(
-                mv, sum(costs) / mv.runs if costs and None not in costs else None
-            )
-            if mv
-            else []
-        ),
+        *(mean_lines(mv, run_cost) if mv else []),
         (
             f"{v.cases} cases, {'first run' if mv is None else f'{v.runs} run{"s" if v.runs != 1 else ""}'} of each version · config "
             f"{base.config_hash[:8]} → {candidate.config_hash[:8]} · set {base.set_hash[:8]}"
@@ -738,7 +740,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         rules = levels.Levels.parse(args.levels)
         if (rules.minor or rules.cases) and not args.golden:
             raise ValueError(
-                "minor levels need --golden: a case's score is rebuilt with its own aggregate"
+                "levels with minor checks or case levels need --golden: a case's score is rebuilt with its own aggregate"
             )
         how = (
             {c.id: c.scoring.get("aggregate", "mean") for c in load_cases(args.golden)}
@@ -782,7 +784,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         spend = candidate_budget(candidate, prices, args)
         if v.exit_code == PASS and spend and spend.outcome == "over":
             v = replace(v, outcome=VERDICTS[BUDGET_FAIL], exit_code=BUDGET_FAIL)
-        text = markdown(v, base, candidate, costs, spend, checks, mv, lv)
+        run_cost = None
+        if mv and prices:
+            spent = [
+                record_cost(r, prices)
+                for arm in (base, candidate)
+                for r in arm.records.values()
+            ]
+            runs_each = max(len(b) for b, _ in full.values())
+            run_cost = None if None in spent else sum(spent) / runs_each
+        text = markdown(v, base, candidate, costs, spend, checks, mv, lv, run_cost)
         report = {
             **asdict(v),
             "threshold_pp": args.threshold,
@@ -790,10 +801,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             "mean": None if mv is None else {**asdict(mv), "name": args.mean},
             "checks": checks_report(checks, rules) if checks else None,
             "levels": args.levels,
+            "checks_mode": args.checks,
             "checks_reported": checks_report(lv.reported, rules)
             if lv and lv.reported
             else None,
-            "warnings": [{**asdict(u), "level": "minor"} for u in lv.warnings()]
+            "warnings": [
+                {**asdict(u), "level": rules.of(u.case, u.check)} for u in lv.warnings()
+            ]
             if lv
             else [],
             "minor_cases": minor_cases,
@@ -828,9 +842,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         lv and os.environ.get("GITHUB_ACTIONS") == "true"
     ):  # an annotation on the job; the exit code stays
         for u in lv.warnings():
-            print(
-                f"::warning title=Release gate::Minor check {u.check} got worse in {u.case}: passed "
+            note = (
+                f"{lv.rules.of(u.case, u.check).capitalize()} check {u.check} got worse in {u.case}: passed "
                 f"{u.base[0]}/{u.base[1]} runs before, {u.candidate[0]}/{u.candidate[1]} now (p {u.p:.2g})."
+            )
+            print(
+                "::warning title=Release gate::"
+                + note.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
             )
     return v.exit_code
 

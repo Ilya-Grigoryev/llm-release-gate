@@ -42,7 +42,7 @@ class MeanVerdict:
     runs: int  # runs of each version paired; the rule looks after runs min_runs..runs
     decided_at: int | None  # the look that decided
     diff: float  # mean of candidate - base over the paired runs
-    lower: float  # bounds on the true difference at the last look, 1 - alpha each side
+    lower: float  # bounds on the true difference at the deciding (else last) look, 1 - alpha each side
     upper: float
     worse: bool  # pass, but shown worse than the base: the comment warns (D-004)
     # runs of each version a candidate identical to the base needs to pass; None: never
@@ -205,7 +205,13 @@ def decide(
     method = {"unit": unit, "bet": bet, "c": c}
     name = f"{bet} on {'case runs' if unit == 'case' else 'runs'}, c {c:g}"
     outcome, at = first(capitals(ys, (1 - delta) / 2, alpha, **method), alpha, min_runs)
-    lower, upper = _bound(ys, alpha, +1, **method), _bound(ys, alpha, -1, **method)
+    looked = ys[
+        : at or len(ys)
+    ]  # the bounds of the look that decided: later looks cannot undo it
+    lower, upper = (
+        _bound(looked, alpha, +1, **method),
+        _bound(looked, alpha, -1, **method),
+    )
     need = runs_for_pass(len(base), delta, alpha, **method)
     diff = sum(2 * y - 1 for r in ys for y in r) / sum(len(r) for r in ys)
     per_case = [sum(2 * r[i] - 1 for r in ys) / len(ys) for i in range(len(base))]
