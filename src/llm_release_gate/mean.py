@@ -49,7 +49,7 @@ class MeanVerdict:
     runs_for_pass: int | None
     nonzero: int  # paired case runs whose scores differ
     # 95 % normal interval over cases (Miller): for cases like these, report only
-    similar_cases: tuple[float, float]
+    similar_cases: tuple[float, float] | None  # None with one case
 
 
 def _check(
@@ -213,7 +213,7 @@ def decide(
     se = (
         math.sqrt(sum((d - diff) ** 2 for d in per_case) / (n - 1) / n)
         if n > 1
-        else math.inf
+        else None
     )
     return MeanVerdict(
         outcome,
@@ -229,5 +229,5 @@ def decide(
         outcome == "pass" and upper < 0,
         None if need is None else max(min_runs, need),
         sum(y != 0.5 for r in ys for y in r),
-        (diff - 1.959964 * se, diff + 1.959964 * se),
+        None if se is None else (diff - 1.959964 * se, diff + 1.959964 * se),
     )

@@ -535,6 +535,7 @@ def test_betting_passes_a_silent_candidate_once_it_has_the_runs(
         10,
     )
     assert v["runs_per_case"] == {"base": 10, "candidate": 10}
+    assert v["mean"]["similar_cases"] is None  # one case: no spread over cases
     text = comment.read_text()
     assert (
         "decided after run 10 of each version" in text
