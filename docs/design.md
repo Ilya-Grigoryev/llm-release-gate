@@ -127,8 +127,9 @@ runner's scorer is `hits(case, answer, trace=None)` (by default the run's trace,
 - **Built — betting rule on the mean** (`mean.py`, `mean: betting`). The rule pairs run k of each case with run k of
   the base; D = candidate − base in [−1, 1] and Y = (D + 1) / 2. Two one-sided betting tests (Waudby-Smith and Ramdas,
   arXiv:2010.09686): capital K+ = Π (1 + λ (Y − m)) at m = (1 − δ) / 2 passes once it reaches 1 / α, K− = Π (1 − λ (Y − m))
-  blocks; with independent calls Ville's inequality bounds each error at α = 0.025 over any number of looks, so a
-  request can add runs and run the rule again (experiment E-006: noise shared by a whole run breaks the bound). The bet λ is the paper's predictable plug-in, truncated at c / m and c / (1 − m); it stays fixed for all
+  blocks; with independent calls Ville's inequality bounds each error at α = 0.025 over any number of looks at the same
+  runs, so `run -k` can append runs outside CI and the rule decides again over all of them (experiment E-006: noise shared
+  by a whole run breaks the bound). A new CI job runs the candidate afresh: it is a new test, not another look. The bet λ is the paper's predictable plug-in, truncated at c / m and c / (1 − m); it stays fixed for all
   cases of a run, which keeps the capital a supermartingale although cases have different means (AM–GM over the run).
   The first look is after 2 runs; the first look at which a side reaches 1 / α decides, block on a tie. `decide(base,
   candidate, delta, alpha, unit, bet, c, min_runs) -> MeanVerdict` also gives bounds on the difference at the look that
@@ -140,8 +141,9 @@ runner's scorer is `hits(case, answer, trace=None)` (by default the run's trace,
   case is `minor`; else the check's pattern (`critical` first); else the case's pattern; else `normal`. The checks that
   may block (`critical`, and `normal` under `checks: block`) form one family for `per_check`; those that only report
   (`minor`, and `normal` under `checks: report`) another, each at α. A broken `critical` check leads the comment; a
-  significantly worse `minor` one puts ⚠️ in the title, a `warnings` entry in the JSON and a `::warning` annotation in
-  GitHub Actions, and keeps the exit code. `minor` checks leave the case score (rebuilt from `hits` with the case's own
+  significantly worse check of the second family puts ⚠️ in the title ("minor" when all are minor, else "reported"), a
+  `warnings` entry in the JSON and a `::warning` annotation in GitHub Actions, and keeps the exit code. Without `levels`,
+  `checks: report` keeps its old output, with no ⚠️. `minor` checks leave the case score (rebuilt from `hits` with the case's own
   aggregate, so the scorer version stays), and a case with only `minor` checks leaves the mean. Without `levels`
   everything is `normal` and the gate is unchanged.
 - **Built — the rule on checks.** `per_check(base, candidate, alpha, sides, mode,

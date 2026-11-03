@@ -127,7 +127,8 @@ levels:
   and the comment opens with it: "❌ Critical checks broke: `no-fee-waiver` in cancel-after-deadline."
 - **minor**: the check leaves the case score, so it never moves the mean and never blocks. When it passes significantly
   less often, the comment's title gets "⚠️ 1 minor check worse", the JSON verdict a `warnings` entry and GitHub Actions
-  a warning on the job; the exit code stays.
+  a warning on the job; the exit code stays. Once `levels` is set, a normal check under `checks: report` warns the same
+  way, and the title then says "reported check".
 - **cases**: a pattern of case ids gives a level to that case's checks that have none of their own. A case set to
   `minor` makes all its checks minor, critical ones included, and a case with only minor checks leaves the mean.
 

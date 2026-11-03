@@ -526,7 +526,8 @@ paid for also go up as `llm-release-gate-runs-NAME-VERSION-SET` (16 characters o
 | `checks` | the rule on checks: `outcome` (`pass`, `block`, `report`), `mode`, `alpha`, `sides`, `m` (checks that could show a break), `testable`, `can_block` (whether a check broken in every run could block with these run counts and `m`), `runs_to_block` (runs of each version from which it can, at the same `m`), `checked`, `one_sided` (`[case, check]` scored on one side only), `broken` (`case`, `check`, `level`, `base` and `candidate` as `[passes, runs]`, `p`, `p_min`). With `levels`, only the checks that may block. `null` when no run has check results, or when `levels` leave no check that may block |
 | `levels` | `levels` as given; `null` without them |
 | `checks_reported` | with `levels`, the checks that only report (minor ones, and normal ones under `checks: report`), shaped like `checks`; otherwise `null` |
-| `warnings` | the minor checks that got significantly worse, each like an entry of `broken`; `[]` when none |
+| `checks_mode` | `checks` as set: `block` or `report` (with `levels`, `checks.mode` is that of the family that may block) |
+| `warnings` | with `levels`, the checks that only report and got significantly worse (minor ones, and normal ones under `checks: report`), each like an entry of `broken` with its `level`; `[]` otherwise |
 | `minor_cases` | the cases with only minor checks, left out of the mean |
 | `levels_unmatched` | patterns that match no check of the set, as `critical: PATTERN`, `minor: PATTERN` or `cases: PATTERN` |
 | `base_config`, `candidate_config`, `set_hash` | the two versions' hashes and the test set's |
@@ -539,7 +540,7 @@ paid for also go up as `llm-release-gate-runs-NAME-VERSION-SET` (16 characters o
 
 `unchanged` writes only `outcome`, `exit_code`, the three hashes, and `base_mean`, `candidate_mean` and `diff_pp` as
 `null`. `no base` has no `limit_pp`, `rule`, `cases`, `worse`, `runs`, `threshold_pp`, `relative`, `mean`, `checks`,
-`levels`, `checks_reported`, `warnings`, `minor_cases`, `levels_unmatched` or `rescored`; its
+`levels`, `checks_mode`, `checks_reported`, `warnings`, `minor_cases`, `levels_unmatched` or `rescored`; its
 `base_mean`, `diff_pp`, `base_config` and (with prices) `cost_usd.base` are `null`, `runs_per_case.base` is `0`, and
 it has no `base_reused`.
 

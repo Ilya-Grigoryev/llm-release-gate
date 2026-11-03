@@ -49,9 +49,10 @@ Under `mean: betting` the mean line names the rule, and the next line says what 
 
 | Line | Meaning |
 |---|---|
-| The difference lies in [LOW, HIGH] points (95 %); decided after run N of each version. | With 95 % confidence, the true difference on your cases lies in this range. The rule decided at run N, the first look that showed a side. |
+| After run N of each version the difference lay in [LOW, HIGH] points (95 %), which decided. | The rule decided at run N, the first look that showed a side; the range is that look's. Later runs do not change the decision, so the mean line, which covers every run, can lie outside this range. |
 | ⚠️ Shown worse than the base, but by less than δ. | A pass, but the whole range lies below 0: a real loss smaller than `delta`. Such losses can add up over requests. |
-| …; not decided. A pass needs at least N runs of each version even if nothing changed (…): M more, about $X at this decision's cost per run. | `inconclusive`. N is what a candidate that scores like the base in every run would need, so a noisy one needs more. The cost appears with `prices`. Past 10 000 runs the line says so instead: add cases. |
+| The difference lies in [LOW, HIGH] points (95 %); not decided. A pass needs at least N runs of each version even if nothing changed (…): M more, about $X outside CI (a new CI job runs all N afresh). | `inconclusive`. N is what a candidate that scores like the base in every run would need, so a noisy one needs more. The cost appears with `prices`. Past 10 000 runs the line says so instead: add cases. |
+| …; not decided. A pass needs at least N runs … ; these K did not show it: the versions differ, or the noise needs more. | `inconclusive` with more runs than a candidate identical to the base would need: the runs differ, by a real loss or by noise. |
 
 The line with the configs then says "N runs of each version" instead of "first run of each version".
 
@@ -62,7 +63,7 @@ With `levels` in `gate.yaml` ([Critical and minor checks](/docs/how-it-decides#c
 
 | Line | Meaning |
 |---|---|
-| "· ⚠️ 1 minor check worse" at the end of the title | A minor check passed significantly less often. It does not block; `warnings` in `verdict.json` lists it, and GitHub Actions shows a warning on the job. |
+| "· ⚠️ 1 minor check worse" (or "reported check") at the end of the title | A minor check passed significantly less often. It does not block; `warnings` in `verdict.json` lists it, and GitHub Actions shows a warning on the job. |
 | ❌ Critical checks broke: `no-fee-waiver` in cancel-after-deadline. | Right under the title: a critical check passed significantly less often, which blocks even under `checks: report`. It names up to five. |
 | Checks that only report (minor; normal under `checks: report`): … | The rule on checks for the checks that cannot block, tested apart from the others. Their broken checks get a table of their own at the end. |
 | Minor cases, out of the mean: … | Cases with only minor checks; the mean leaves them out. |
@@ -127,9 +128,9 @@ Two things give `inconclusive` (exit 11):
 
 - **The betting rule could not decide.** The title reads "⚠️ inconclusive", and the
   [line under the mean](#lines-of-the-betting-rule) says how many runs of each version a pass needs and roughly what
-  the missing runs cost. To give the next job more runs, raise `k` in the target branch's `gate.yaml` in a request of its
-  own. Do not rerun a job until it passes: each job runs the candidate afresh and is a new test. Or a maintainer reads the
-  range and merges over the check.
+  the missing runs cost. Raise `k` in the target branch's `gate.yaml` in a request of its own, and later requests get
+  the runs. Rerunning this request's job is a second test of it: two tries can pass a loss of `delta` wrongly in up to
+  about 5 % instead of 2.5 %. Or a maintainer reads the range and merges over the check.
   A check that blocks makes it a quality fail instead.
 - **A request removes or renames a pipeline in `gate.yaml`.** The other pipelines keep their titles, add the ❌ note
   and exit 11 unless something worse happened. If the removal is meant, a maintainer merges over the check; a renamed
