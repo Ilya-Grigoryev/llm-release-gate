@@ -22,6 +22,14 @@ import math
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 
+METHODS = {  # E-006's candidates; `betting` is the gate's default (chosen by E-006)
+    "cases-c0.5": {"unit": "case", "bet": "betting", "c": 0.5},
+    "cases-c0.75": {"unit": "case", "bet": "betting", "c": 0.75},
+    "runs-c0.75": {"unit": "run", "bet": "betting", "c": 0.75},
+    "bernstein-c0.75": {"unit": "case", "bet": "bernstein", "c": 0.75},
+}
+DEFAULT = "cases-c0.5"  # until E-006 decides
+
 
 @dataclass(frozen=True)
 class MeanVerdict:

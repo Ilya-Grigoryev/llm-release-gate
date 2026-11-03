@@ -1,4 +1,5 @@
-"""The gate: the naive rule on the mean (first run per version, a fixed threshold) and the rule on checks (all runs)."""
+"""The gate: a rule on the mean (naive: first run per version, a fixed threshold; or betting over all runs) and the rule
+on checks (all runs)."""
 
 import argparse
 import json
@@ -10,7 +11,7 @@ from dataclasses import asdict, dataclass, replace
 from fractions import Fraction
 from pathlib import Path
 
-from llm_release_gate import budget, criterion
+from llm_release_gate import budget, criterion, mean
 from llm_release_gate.compare import Arm, Mismatch, load_arm, pair
 from llm_release_gate.golden import load_cases, validate
 from llm_release_gate.hashing import canonical_hash
@@ -39,6 +40,7 @@ class Verdict:
     rule: str
     cases: int
     worse: list[tuple[str, float, float]]  # (case, base, candidate), largest drop first
+    runs: int = 1  # runs of each version the rule on the mean read
 
 
 def exact(value: float) -> Fraction:
@@ -135,6 +137,66 @@ def first_run(records: list[dict]) -> float:
     if r.get("score") is None:
         raise Mismatch(f"{r['case']}: no labelled field to score")
     return r["score"]
+
+
+def all_runs(records: list[dict]) -> list[float]:
+    """The scores of every run of a case, lowest repetition first."""
+    return [first_run([r]) for r in records]
+
+
+def betting(
+    pairs: dict[str, tuple[list[dict], list[dict]]], delta_pp: float, method: str
+) -> tuple[Verdict, mean.MeanVerdict]:
+    """The rule on the mean over all runs (D-004 C, D-026 C): pass, block (quality fail) or inconclusive."""
+    base = {k: all_runs(b) for k, (b, _) in pairs.items()}
+    candidate = {k: all_runs(c) for k, (_, c) in pairs.items()}
+    mv = mean.decide(base, candidate, delta_pp / 100, **mean.METHODS[method])
+    code = {"pass": PASS, "block": QUALITY_FAIL, "inconclusive": INCONCLUSIVE}[
+        mv.outcome
+    ]
+    b, c = (
+        {k: sum(v[: mv.runs]) / mv.runs for k, v in arm.items()}
+        for arm in (base, candidate)
+    )
+    worse = sorted(
+        ((k, b[k], c[k]) for k in b if c[k] < b[k]), key=lambda t: t[2] - t[1]
+    )
+    rule = (
+        f"rule on the mean: pass if shown at most {delta_pp:g} points worse, block if shown more "
+        f"({mv.method}, α {mv.alpha:g} each side)"
+    )
+    v = Verdict(
+        VERDICTS[code], code, sum(b.values()) / len(b), sum(c.values()) / len(c), 100 * mv.diff, delta_pp, rule,
+        len(b), worse, mv.runs,
+    )  # fmt: skip
+    return v, mv
+
+
+def mean_lines(mv: mean.MeanVerdict, cost_per_run: float | None) -> list[str]:
+    """What the betting rule showed, and what a pass would take."""
+    shown = f"The difference lies in [{100 * mv.lower:+.1f}, {100 * mv.upper:+.1f}] points (95 %)"
+    if mv.outcome != "inconclusive":
+        out = [f"{shown}; decided after run {mv.decided_at} of each version."]
+        if mv.worse:
+            out.append("⚠️ Shown worse than the base, but by less than δ.")
+        return out
+    need = mv.runs_for_pass
+    if need is None:
+        return [
+            f"{shown}; not decided. With this method and {mv.cases} case{'s' if mv.cases != 1 else ''} a pass needs more than 10 000 runs."
+        ]
+    more = max(0, need - mv.runs)
+    price = (
+        f", about ${more * cost_per_run:.2f} at this decision's cost per run"
+        if cost_per_run and more
+        else ""
+    )
+    return [
+        (
+            f"{shown}; not decided. A pass needs at least {need} runs of each version even if nothing changed "
+            f"({mv.cases} case{'s' if mv.cases != 1 else ''}, δ {100 * mv.delta:g} points, α {mv.alpha:g}): {more} more{price}."
+        )
+    ]
 
 
 def check_runs(
@@ -319,6 +381,7 @@ def markdown(
     costs: tuple[float | None, float | None] | None = None,
     spend: budget.Budget | None = None,
     checks: criterion.CheckVerdict | None = None,
+    mv: mean.MeanVerdict | None = None,
 ) -> str:
     icon = {
         "pass": "✅",
@@ -330,12 +393,20 @@ def markdown(
         f"**Release gate: {icon} {v.outcome}**",
         "",
         (
-            f"Mean score {v.base_mean:.3f} → {v.candidate_mean:.3f} ({v.diff_pp:+.2f} points, "
-            f"blocks below {-v.limit_pp:+.2f}); {v.rule}."
+            f"Mean score {v.base_mean:.3f} → {v.candidate_mean:.3f} ({v.diff_pp:+.2f} points"
+            + (f", blocks below {-v.limit_pp:+.2f}" if mv is None else "")
+            + f"); {v.rule}."
+        ),
+        *(
+            mean_lines(
+                mv, sum(costs) / mv.runs if costs and None not in costs else None
+            )
+            if mv
+            else []
         ),
         (
-            f"{v.cases} cases, first run of each version · config {base.config_hash[:8]} → "
-            f"{candidate.config_hash[:8]} · set {base.set_hash[:8]}"
+            f"{v.cases} cases, {'first run' if mv is None else f'{v.runs} run{"s" if v.runs != 1 else ""}'} of each version · config "
+            f"{base.config_hash[:8]} → {candidate.config_hash[:8]} · set {base.set_hash[:8]}"
         ),
     ]
     line, broken = checks_lines(checks) if checks else (None, [])
@@ -491,6 +562,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="read --threshold as percent of the base mean",
     )
     p.add_argument(
+        "--mean",
+        choices=("naive", "betting", *mean.METHODS),
+        default="naive",
+        help="rule on the mean: naive (first run, block below --threshold) or betting over all runs (pass, block or "
+        "inconclusive at δ = --threshold points); other names pick a betting variant (default naive)",
+    )
+    p.add_argument(
         "--checks",
         choices=("block", "report"),
         default="block",
@@ -546,30 +624,41 @@ def main(argv: Sequence[str] | None = None) -> int:
                 rescored(candidate, args.golden),
             )
         pairs = pair(base, candidate)
-        v = naive(
-            {k: first_run(b) for k, (b, _) in pairs.items()},
-            {k: first_run(c) for k, (_, c) in pairs.items()},
-            args.threshold,
-            args.relative,
-        )
+        mv = None
+        if args.mean == "naive":
+            v = naive(
+                {k: first_run(b) for k, (b, _) in pairs.items()},
+                {k: first_run(c) for k, (_, c) in pairs.items()},
+                args.threshold,
+                args.relative,
+            )
+        elif args.relative:
+            raise ValueError("--relative applies to the naive rule only")
+        else:
+            v, mv = betting(
+                pairs,
+                args.threshold,
+                mean.DEFAULT if args.mean == "betting" else args.mean,
+            )
         base_runs, candidate_runs = check_runs(pairs)
         checks = (
             criterion.per_check(base_runs, candidate_runs, mode=args.checks)
             if base_runs
             else None
         )
-        if v.exit_code == PASS and checks and checks.outcome == "block":
+        if v.exit_code != QUALITY_FAIL and checks and checks.outcome == "block":
             v = replace(v, outcome=VERDICTS[QUALITY_FAIL], exit_code=QUALITY_FAIL)
         prices = load_prices(args.prices) if args.prices else None
         costs = (cost(base, prices), cost(candidate, prices)) if prices else None
         spend = candidate_budget(candidate, prices, args)
         if v.exit_code == PASS and spend and spend.outcome == "over":
             v = replace(v, outcome=VERDICTS[BUDGET_FAIL], exit_code=BUDGET_FAIL)
-        text = markdown(v, base, candidate, costs, spend, checks)
+        text = markdown(v, base, candidate, costs, spend, checks, mv)
         report = {
             **asdict(v),
             "threshold_pp": args.threshold,
             "relative": args.relative,
+            "mean": None if mv is None else {**asdict(mv), "name": args.mean},
             "checks": checks_report(checks) if checks else None,
             "base_config": base.config_hash,
             "candidate_config": candidate.config_hash,
@@ -583,7 +672,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "base_reused": dict(
                 zip(("runs", "days_before_candidate"), reused(base, candidate))
             ),
-            # the naive rule reads only the first of these, the rule on checks all
+            # the naive rule reads only the first of these; betting and the rule on checks all
             "runs_per_case": {
                 "base": max(len(b) for b, _ in pairs.values()),
                 "candidate": max(len(c) for _, c in pairs.values()),

@@ -42,6 +42,9 @@
     "delta": {
       "$ref": "#/$defs/delta"
     },
+    "mean": {
+      "$ref": "#/$defs/mean"
+    },
     "checks": {
       "$ref": "#/$defs/checks"
     },
@@ -90,6 +93,9 @@
         "delta": {
           "$ref": "#/$defs/delta"
         },
+        "mean": {
+          "$ref": "#/$defs/mean"
+        },
         "checks": {
           "$ref": "#/$defs/checks"
         },
@@ -106,14 +112,21 @@
       "additionalProperties": false
     },
     "k": {
-      "description": "Runs per case and version (default 1). The naive rule on the mean reads the first; the rule on checks and budgets use all.",
+      "description": "Runs per case and version (default 1). The naive rule on the mean reads the first; the betting rule, the rule on checks and budgets use all.",
       "type": "integer",
       "minimum": 1
     },
     "delta": {
-      "description": "Block when the candidate's mean score is lower by more than this many points (default 5).",
+      "description": "The loss in points of the mean score that matters (default 5): the naive rule blocks a larger drop; the betting rule passes when the loss is shown to be smaller and blocks when shown to be larger.",
       "type": "number",
       "minimum": 0
+    },
+    "mean": {
+      "description": "Rule on the mean (default naive): naive compares the first run of each version with delta; betting reads all runs and gives pass, block or inconclusive (needs k of at least 2).",
+      "enum": [
+        "naive",
+        "betting"
+      ]
     },
     "checks": {
       "description": "A check that broke over the runs (Fisher's exact test per case and check) blocks, or is only reported (default block).",

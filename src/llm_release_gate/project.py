@@ -11,7 +11,7 @@ from llm_release_gate import protocol
 FILE = "gate.yaml"
 SCHEMA = json.loads((Path(__file__).parent / "project.schema.json").read_text())
 VALIDATOR = protocol.Validator(SCHEMA)
-SETTINGS = ("k", "delta", "checks", "prices", "budgets", "base_max_age_days")
+SETTINGS = ("k", "delta", "mean", "checks", "prices", "budgets", "base_max_age_days")
 
 
 @dataclass(frozen=True)
@@ -23,6 +23,7 @@ class Pipeline:
     inputs_url: str | None = None
     k: int = 1
     delta: float = 5.0
+    mean: str = "naive"  # rule on the mean: naive or betting (D-026)
     checks: str = "block"  # the rule on checks blocks or only reports (D-003)
     prices: str | None = None
     budgets: dict = field(default_factory=dict)

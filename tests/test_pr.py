@@ -893,3 +893,16 @@ def test_the_pipelines_get_no_token():
         [sys.executable, "-c", code], capture_output=True, text=True, check=True
     )
     assert done.stdout.strip() == "False"
+
+
+def test_the_rule_on_the_mean_follows_the_target_branch(repo):
+    (repo / "gate.yaml").write_text(GATE + "mean: betting\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "betting")
+    version(
+        repo, "bare", GATE
+    )  # the request asks for the naive rule again: not before merge
+    code, out = gate(repo)
+    verdict = json.loads((out / "verdict.json").read_text())
+    assert verdict["mean"]["name"] == "betting" and verdict["mean"]["runs"] == 1
+    assert code == pr.INCONCLUSIVE  # k 1: betting cannot decide

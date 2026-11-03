@@ -501,3 +501,106 @@ def test_a_check_scored_on_one_side_only_is_counted_even_with_nothing_to_test():
     assert gate.checks_lines(v)[0] == (
         "Checks: no check was scored in both versions. 2 checks scored in one version only are left out."
     )
+
+
+def betting_args(tmp_path, monkeypatch, base, candidate, k, threshold):
+    b = runs(tmp_path, monkeypatch, "base", 0, base, k=k)
+    c = runs(tmp_path, monkeypatch, "cand", 1, candidate, k=k)
+    report, comment = tmp_path / "v.json", tmp_path / "c.md"
+    args = [
+        "--base",
+        str(b),
+        "--candidate",
+        str(c),
+        "--threshold",
+        str(threshold),
+        "--mean",
+        "cases-c0.5",
+    ]
+    return [*args, "--json", str(report), "--markdown", str(comment)], report, comment
+
+
+def test_betting_passes_a_silent_candidate_once_it_has_the_runs(
+    tmp_path, monkeypatch, capsys
+):
+    # one case, delta 50 points: each silent run multiplies the capital by 1 + (c / m) * (0.5 - m) = 1.5; 10 runs
+    args, report, comment = betting_args(
+        tmp_path, monkeypatch, Fixed(), Fixed(date="01/01/2026 10:00"), 10, 50
+    )
+    assert gate.main(args) == gate.PASS
+    v = json.loads(report.read_text())
+    assert (v["outcome"], v["mean"]["decided_at"], v["mean"]["runs_for_pass"]) == (
+        "pass",
+        10,
+        10,
+    )
+    assert v["runs_per_case"] == {"base": 10, "candidate": 10}
+    text = comment.read_text()
+    assert (
+        "decided after run 10 of each version" in text
+        and "1 cases, 10 runs of each version" in text
+    )
+
+
+def test_betting_blocks_a_broken_candidate(tmp_path, monkeypatch, capsys):
+    wrong = Fixed(company="x", date="x", address="x", total="x")  # score 0 in every run
+    args, report, comment = betting_args(tmp_path, monkeypatch, Fixed(), wrong, 10, 5)
+    assert gate.main(args) == gate.QUALITY_FAIL
+    v = json.loads(report.read_text())
+    assert (v["outcome"], v["diff_pp"], v["mean"]["outcome"]) == (
+        "quality fail",
+        -100.0,
+        "block",
+    )
+    assert v["mean"]["upper"] < -0.05
+    assert "**Release gate: ❌ quality fail**" in comment.read_text()
+
+
+def test_betting_with_too_few_runs_is_inconclusive_and_says_what_a_pass_needs(
+    tmp_path, monkeypatch, capsys
+):
+    args, report, comment = betting_args(tmp_path, monkeypatch, Fixed(), Fixed(), 2, 5)
+    assert (
+        gate.main([*args, "--prices", str(prices_file(tmp_path))]) == gate.INCONCLUSIVE
+    )
+    v = json.loads(report.read_text())
+    assert (v["outcome"], v["mean"]["runs_for_pass"], v["mean"]["decided_at"]) == (
+        "inconclusive",
+        143,
+        None,
+    )
+    text = comment.read_text()
+    assert "**Release gate: ⚠️ inconclusive**" in text
+    assert (
+        "A pass needs at least 143 runs of each version even if nothing changed (1 case, δ 5 points"
+        in text
+    )
+    assert "141 more, about $" in text
+
+
+def test_a_broken_check_still_blocks_an_inconclusive_mean(
+    tmp_path, monkeypatch, capsys
+):
+    args, report, _ = betting_args(
+        tmp_path, monkeypatch, Fixed(), Fixed(total="21.50"), 4, 5
+    )
+    assert gate.main(args) == gate.QUALITY_FAIL
+    v = json.loads(report.read_text())
+    assert (v["mean"]["outcome"], v["checks"]["outcome"]) == ("inconclusive", "block")
+
+
+def test_betting_takes_the_default_method_and_refuses_relative(
+    tmp_path, monkeypatch, capsys
+):
+    args, report, _ = betting_args(tmp_path, monkeypatch, Fixed(), Fixed(), 2, 5)
+    args[args.index("cases-c0.5")] = "betting"
+    assert gate.main(args) == gate.INCONCLUSIVE
+    assert json.loads(report.read_text())["mean"]["name"] == "betting"
+    assert gate.main([*args, "--relative"]) == gate.INFRA_ERROR
+    assert "--relative applies to the naive rule only" in capsys.readouterr().err
+
+
+def prices_file(tmp_path):
+    path = tmp_path / "prices.yaml"
+    path.write_text("gpt-4.1-mini: [0.40, 1.60]\n")
+    return path

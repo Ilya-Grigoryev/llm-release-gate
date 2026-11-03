@@ -122,3 +122,15 @@ def test_the_rule_on_checks_blocks_unless_set_to_report(tmp_path):
     assert d.checks == "block"
     with pytest.raises(ValueError, match="checks"):
         load(tmp_path, "pipelines: {a: {config: c, golden: g}}\nchecks: maybe\n")
+
+
+def test_the_rule_on_the_mean_is_naive_unless_set_to_betting(tmp_path):
+    p = load(
+        tmp_path,
+        "mean: betting\npipelines:\n  a: {config: c, golden: g}\n  b: {config: c, golden: g, mean: naive}\n",
+    )
+    assert (p.pipelines["a"].mean, p.pipelines["b"].mean) == ("betting", "naive")
+    [d] = load(tmp_path, "pipelines: {a: {config: c, golden: g}}\n").pipelines.values()
+    assert d.mean == "naive"
+    with pytest.raises(ValueError, match="mean"):
+        load(tmp_path, "mean: welch\npipelines: {a: {config: c, golden: g}}\n")
