@@ -681,6 +681,12 @@ def test_a_normal_check_under_report_is_listed_not_blocked(
         "Checks that only report (minor; normal under `checks: report`): 1 broke, they only report"
         in (comment.read_text())
     )
+    # D-028 B: a normal check under report warns too
+    assert [(w["check"], w["level"]) for w in v["warnings"]] == [("total", "normal")]
+    assert v["checks_mode"] == "report"
+    assert comment.read_text().startswith(
+        "**Release gate: ✅ pass · ⚠️ 1 reported check worse**"
+    )
 
 
 def test_a_minor_check_leaves_the_score_and_only_warns(tmp_path, monkeypatch, capsys):
@@ -766,3 +772,18 @@ def test_an_undecided_rule_with_enough_runs_says_the_runs_did_not_show_it():
         in line
     )
     assert "$" not in line
+
+
+def test_the_annotation_escapes_what_github_reads_as_commands(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    args, _, _ = levels_args(
+        tmp_path, monkeypatch, Fixed(total="21.50"), {"minor": ["total"]}
+    )
+    unit = gate.criterion.Unit("50%\ncase", "total", (4, 4), (0, 4), 0.014, 0.014)
+    monkeypatch.setattr(gate.Levelled, "warnings", lambda self: [unit])
+    capsys.readouterr()
+    gate.main(args)
+    out = capsys.readouterr().out
+    assert "in 50%25%0Acase: passed" in out and "50%\ncase" not in out

@@ -196,6 +196,11 @@ def mean_lines(mv: mean.MeanVerdict, cost_per_run: float | None) -> list[str]:
     if mv.outcome != "inconclusive":
         out = [
             f"After run {mv.decided_at} of each version the difference lay in {span}, which decided."
+            + (
+                " Later runs do not change it."
+                if mv.runs > (mv.decided_at or 0)
+                else ""
+            )
         ]
         if mv.worse:
             out.append("⚠️ Shown worse than the base, but by less than δ.")
@@ -215,7 +220,7 @@ def mean_lines(mv: mean.MeanVerdict, cost_per_run: float | None) -> list[str]:
             f"{shown}; not decided. {floor}; these {mv.runs} did not show it: the versions differ, or the noise needs more."
         ]
     price = (
-        f", about ${more * cost_per_run:.2f} at this decision's cost per run"
+        f", about ${more * cost_per_run:.2f} outside CI (a new CI job runs all {need} afresh)"
         if cost_per_run and more
         else ""
     )
@@ -785,14 +790,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         if v.exit_code == PASS and spend and spend.outcome == "over":
             v = replace(v, outcome=VERDICTS[BUDGET_FAIL], exit_code=BUDGET_FAIL)
         run_cost = None
-        if mv and prices:
-            spent = [
-                record_cost(r, prices)
-                for arm in (base, candidate)
-                for r in arm.records.values()
-            ]
-            runs_each = max(len(b) for b, _ in full.values())
-            run_cost = None if None in spent else sum(spent) / runs_each
+        if (
+            mv and prices
+        ):  # one run of each version, reused base runs included: continuing pays for both
+            per_arm = []
+            for arm, side in ((base, 0), (candidate, 1)):
+                spent = [record_cost(r, prices) for r in arm.records.values()]
+                runs_each = max(len(rs[side]) for rs in full.values())
+                per_arm.append(None if None in spent else sum(spent) / runs_each)
+            run_cost = None if None in per_arm else sum(per_arm)
         text = markdown(v, base, candidate, costs, spend, checks, mv, lv, run_cost)
         report = {
             **asdict(v),

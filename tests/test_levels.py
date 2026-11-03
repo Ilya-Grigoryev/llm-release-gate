@@ -64,3 +64,17 @@ def test_positional_ids_match_by_pattern():
 )
 def test_the_case_score_leaves_out_minor_checks(hits, how, score):
     assert case_score("book-1", hits, how, RULES) == score
+
+
+@pytest.mark.parametrize(
+    "raw, message",
+    [
+        ({"critical": "total"}, "levels.critical must be a list"),
+        ({"critcal": ["x"]}, "levels take critical, minor"),
+        ({"cases": ["x"]}, "levels.cases must map"),
+        (["x"], "levels take critical, minor"),
+    ],
+)
+def test_malformed_levels_are_refused(raw, message):
+    with pytest.raises(ValueError, match=message):
+        Levels.parse(raw)
