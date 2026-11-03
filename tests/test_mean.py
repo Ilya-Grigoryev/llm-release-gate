@@ -126,3 +126,12 @@ def test_worst_case_regression_rarely_passes(method):
         steps = mean.capitals(ys, (1 - delta) / 2, 0.025, **method)
         passed += mean.first(steps, 0.025)[0] == "pass"
     assert passed <= 400 * 0.025 + 3 * math.sqrt(400 * 0.025 * 0.975)
+
+
+def test_the_verdict_counts_differing_runs_and_reports_an_interval_over_cases():
+    b = {"a": [1.0, 1.0], "b": [1.0, 1.0], "c": [0.0, 1.0]}
+    c = {"a": [1.0, 0.0], "b": [1.0, 1.0], "c": [1.0, 1.0]}
+    v = mean.decide(b, c, 0.05)
+    assert v.nonzero == 2 and v.diff == 0.0
+    half = 1.959964 * 0.5 / math.sqrt(3)  # per case: -0.5, 0, +0.5
+    assert v.similar_cases == pytest.approx((-half, half))

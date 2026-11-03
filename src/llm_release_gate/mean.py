@@ -28,9 +28,8 @@ METHODS = {  # experiment E-006's candidates
     "runs-c0.75": {"unit": "run", "bet": "betting", "c": 0.75},
     "bernstein-c0.75": {"unit": "case", "bet": "bernstein", "c": 0.75},
 }
-DEFAULT = (
-    "cases-c0.75"  # `betting`: E-006 chose it, the fastest of those that held alpha
-)
+# `betting`: E-006 chose it, the fastest of the methods that held alpha
+DEFAULT = "cases-c0.75"
 
 
 @dataclass(frozen=True)
@@ -46,9 +45,11 @@ class MeanVerdict:
     lower: float  # bounds on the true difference at the last look, 1 - alpha each side
     upper: float
     worse: bool  # pass, but shown worse than the base: the comment warns (D-004)
-    runs_for_pass: (
-        int | None
-    )  # runs of each version a candidate identical to the base needs to pass; None: never
+    # runs of each version a candidate identical to the base needs to pass; None: never
+    runs_for_pass: int | None
+    nonzero: int  # paired case runs whose scores differ
+    # 95 % normal interval over cases (Miller): for cases like these, report only
+    similar_cases: tuple[float, float]
 
 
 def _check(
@@ -207,6 +208,13 @@ def decide(
     lower, upper = _bound(ys, alpha, +1, **method), _bound(ys, alpha, -1, **method)
     need = runs_for_pass(len(base), delta, alpha, **method)
     diff = sum(2 * y - 1 for r in ys for y in r) / sum(len(r) for r in ys)
+    per_case = [sum(2 * r[i] - 1 for r in ys) / len(ys) for i in range(len(base))]
+    n = len(per_case)
+    se = (
+        math.sqrt(sum((d - diff) ** 2 for d in per_case) / (n - 1) / n)
+        if n > 1
+        else math.inf
+    )
     return MeanVerdict(
         outcome,
         name,
@@ -220,4 +228,6 @@ def decide(
         upper,
         outcome == "pass" and upper < 0,
         None if need is None else max(min_runs, need),
+        sum(y != 0.5 for r in ys for y in r),
+        (diff - 1.959964 * se, diff + 1.959964 * se),
     )
