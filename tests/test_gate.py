@@ -604,3 +604,146 @@ def prices_file(tmp_path):
     path = tmp_path / "prices.yaml"
     path.write_text("gpt-4.1-mini: [0.40, 1.60]\n")
     return path
+
+
+def levels_args(tmp_path, monkeypatch, candidate, rules, *extra):
+    b = runs(tmp_path, monkeypatch, "base", 0, Fixed(), k=4)
+    c = runs(tmp_path, monkeypatch, "cand", 1, candidate, k=4)
+    report, comment = tmp_path / "v.json", tmp_path / "c.md"
+    args = [
+        "--base",
+        str(b),
+        "--candidate",
+        str(c),
+        "--golden",
+        str(GOLDEN),
+        "--threshold",
+        "30",
+    ]
+    args += [
+        "--levels",
+        json.dumps(rules),
+        "--json",
+        str(report),
+        "--markdown",
+        str(comment),
+        *extra,
+    ]
+    return args, report, comment
+
+
+def test_a_critical_check_blocks_even_when_checks_only_report(
+    tmp_path, monkeypatch, capsys
+):
+    args, report, comment = levels_args(
+        tmp_path,
+        monkeypatch,
+        Fixed(total="21.50"),
+        {"critical": ["total"]},
+        "--checks",
+        "report",
+    )
+    assert gate.main(args) == gate.QUALITY_FAIL
+    lines = comment.read_text().splitlines()
+    assert lines[0] == "**Release gate: ❌ quality fail**"
+    assert lines[2] == f"❌ Critical checks broke: `total` in {CASE.id}."
+    v = json.loads(report.read_text())
+    assert [(u["check"], u["level"]) for u in v["checks"]["broken"]] == [
+        ("total", "critical")
+    ]
+    assert v["warnings"] == [] and v["levels"] == {"critical": ["total"]}
+
+
+def test_a_normal_check_under_report_is_listed_not_blocked(
+    tmp_path, monkeypatch, capsys
+):
+    args, report, comment = levels_args(
+        tmp_path,
+        monkeypatch,
+        Fixed(total="21.50"),
+        {"critical": ["company"]},
+        "--checks",
+        "report",
+    )
+    assert gate.main(args) == gate.PASS
+    v = json.loads(report.read_text())
+    assert (
+        v["checks"]["broken"] == []
+        and v["checks_reported"]["broken"][0]["level"] == "normal"
+    )
+    assert (
+        "Checks that only report (minor; normal under `checks: report`): 1 broke, they only report"
+        in (comment.read_text())
+    )
+
+
+def test_a_minor_check_leaves_the_score_and_only_warns(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    args, report, comment = levels_args(
+        tmp_path, monkeypatch, Fixed(total="21.50"), {"minor": ["total"]}
+    )
+    capsys.readouterr()
+    assert gate.main(args) == gate.PASS
+    v = json.loads(report.read_text())
+    assert (v["base_mean"], v["candidate_mean"]) == (
+        1.0,
+        1.0,
+    )  # the three other fields are right
+    assert [(w["check"], w["level"], w["candidate"]) for w in v["warnings"]] == [
+        ("total", "minor", [0, 4])
+    ]
+    assert comment.read_text().startswith(
+        "**Release gate: ✅ pass · ⚠️ 1 minor check worse**"
+    )
+    out = capsys.readouterr().out
+    assert (
+        f"::warning title=Release gate::Minor check total got worse in {CASE.id}: passed 4/4 runs before, 0/4 now"
+        in out
+    )
+
+
+def test_without_github_actions_there_is_no_annotation(tmp_path, monkeypatch, capsys):
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    args, _, _ = levels_args(
+        tmp_path, monkeypatch, Fixed(total="21.50"), {"minor": ["total"]}
+    )
+    capsys.readouterr()
+    assert gate.main(args) == gate.PASS
+    assert "::warning" not in capsys.readouterr().out
+
+
+def test_a_minor_case_leaves_the_mean_and_every_case_minor_is_refused(
+    tmp_path, monkeypatch, capsys
+):
+    args, _, _ = levels_args(
+        tmp_path, monkeypatch, Fixed(), {"cases": {"synth-*": "minor"}}
+    )
+    assert gate.main(args) == gate.INFRA_ERROR
+    assert "every case is minor" in capsys.readouterr().err
+    arm = [{"case": "a", "rep": 0, "hits": {"x": True}, "score": 1.0}]
+    pairs = {"a": (arm, arm), "b": (arm, arm)}
+    kept, minor = gate.leveled(
+        pairs,
+        gate.levels.Levels.parse({"cases": {"b": "minor"}}),
+        {"a": "all", "b": "all"},
+    )
+    assert (list(kept), minor) == (["a"], ["b"])
+
+
+def test_levels_that_match_nothing_are_named(tmp_path, monkeypatch, capsys):
+    args, report, comment = levels_args(
+        tmp_path, monkeypatch, Fixed(), {"critical": ["credit-*"]}
+    )
+    assert gate.main(args) == gate.PASS
+    assert (
+        "⚠️ Levels that match no check of this set: critical: credit-*."
+        in comment.read_text()
+    )
+    assert json.loads(report.read_text())["levels_unmatched"] == ["critical: credit-*"]
+
+
+def test_minor_levels_need_the_golden_set(tmp_path, monkeypatch, capsys):
+    args, _, _ = levels_args(tmp_path, monkeypatch, Fixed(), {"minor": ["total"]})
+    i = args.index("--golden")
+    assert gate.main(args[:i] + args[i + 2 :]) == gate.INFRA_ERROR
+    assert "minor levels need --golden" in capsys.readouterr().err

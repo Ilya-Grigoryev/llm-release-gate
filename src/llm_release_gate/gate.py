@@ -4,6 +4,7 @@ on checks (all runs)."""
 import argparse
 import json
 import math
+import os
 import sys
 import traceback
 from collections.abc import Sequence
@@ -11,7 +12,7 @@ from dataclasses import asdict, dataclass, replace
 from fractions import Fraction
 from pathlib import Path
 
-from llm_release_gate import budget, criterion, mean
+from llm_release_gate import budget, criterion, levels, mean
 from llm_release_gate.compare import Arm, Mismatch, load_arm, pair
 from llm_release_gate.golden import load_cases, validate
 from llm_release_gate.hashing import canonical_hash
@@ -41,6 +42,22 @@ class Verdict:
     cases: int
     worse: list[tuple[str, float, float]]  # (case, base, candidate), largest drop first
     runs: int = 1  # runs of each version the rule on the mean read
+
+
+@dataclass(frozen=True)
+class Levelled:
+    """What the levels (D-028) add to a verdict."""
+
+    rules: levels.Levels
+    reported: (
+        criterion.CheckVerdict | None
+    )  # minor checks, and normal ones under `checks: report`
+    minor_cases: list[str]  # only minor checks: out of the mean
+    unmatched: list[str]  # patterns that match no check of the set
+
+    def warnings(self) -> list[criterion.Unit]:
+        broken = self.reported.broken if self.reported else []
+        return [u for u in broken if self.rules.of(u.case, u.check) == "minor"]
 
 
 def exact(value: float) -> Fraction:
@@ -199,6 +216,47 @@ def mean_lines(mv: mean.MeanVerdict, cost_per_run: float | None) -> list[str]:
     ]
 
 
+def leveled(
+    pairs: dict[str, tuple[list[dict], list[dict]]],
+    rules: levels.Levels,
+    how: dict[str, str],
+) -> tuple[dict[str, tuple[list[dict], list[dict]]], list[str]]:
+    """Every run's score without its `minor` checks (D-028), by the case's aggregate in `how`; a case with only `minor`
+    checks leaves the mean."""
+    if not (rules.minor or rules.cases):
+        return pairs, []
+    out, minor = {}, []
+    for case, arms in pairs.items():
+        checks = {k for rs in arms for r in rs for k in r.get("hits") or {}}
+        if checks and all(rules.of(case, k) == "minor" for k in checks):
+            minor.append(case)
+            continue
+        out[case] = tuple(
+            [r if r.get("hits") is None else {**r, "score": levels.case_score(case, r["hits"], how[case], rules)} for r in rs]
+            for rs in arms
+        )  # fmt: skip
+    if not out:
+        raise ValueError("every case is minor: nothing is left for the mean")
+    return out, minor
+
+
+def families(
+    runs: tuple[dict[criterion.Key, list], dict[criterion.Key, list]],
+    rules: levels.Levels,
+    mode: str,
+) -> tuple[tuple[dict, dict], tuple[dict, dict]]:
+    """The checks that may block (critical; normal under `checks: block`) and those that only report (minor; normal under
+    `checks: report`): two families, each with its own alpha (D-028 B)."""
+
+    def blocks(key: criterion.Key) -> bool:
+        level = rules.of(*key)
+        return level == "critical" or (level == "normal" and mode == "block")
+
+    return tuple(
+        tuple({k: v for k, v in side.items() if blocks(k) == want} for side in runs) for want in (True, False)
+    )  # fmt: skip
+
+
 def check_runs(
     pairs: dict[str, tuple[list[dict], list[dict]]],
 ) -> tuple[dict[criterion.Key, list], dict[criterion.Key, list]]:
@@ -229,7 +287,10 @@ def blockable(c: criterion.CheckVerdict) -> bool:
     return any(criterion.can_block(b, k, level(c), c.sides) for b, k in counts)
 
 
-def checks_report(c: criterion.CheckVerdict) -> dict:
+def checks_report(
+    c: criterion.CheckVerdict, rules: levels.Levels | None = None
+) -> dict:
+    rules = rules or levels.Levels()
     return {
         "outcome": c.outcome,
         "mode": c.mode,
@@ -241,11 +302,13 @@ def checks_report(c: criterion.CheckVerdict) -> dict:
         "runs_to_block": criterion.runs_to_block(level(c), c.sides),
         "checked": len(c.units),
         "one_sided": [list(k) for k in c.one_sided],
-        "broken": [asdict(u) for u in c.broken],
+        "broken": [{**asdict(u), "level": rules.of(u.case, u.check)} for u in c.broken],
     }
 
 
-def checks_lines(c: criterion.CheckVerdict) -> tuple[str, list[str]]:
+def checks_lines(
+    c: criterion.CheckVerdict, label: str = "Checks"
+) -> tuple[str, list[str]]:
     """The comment's line on the rule on checks, and its table of broken checks."""
     left = (
         f" {len(c.one_sided)} checks scored in one version only are left out."
@@ -253,13 +316,17 @@ def checks_lines(c: criterion.CheckVerdict) -> tuple[str, list[str]]:
         else ""
     )
     if not c.units:
-        return f"Checks: no check was scored in both versions.{left}", []
+        return f"{label}: no check was scored in both versions.{left}", []
     kb, kc = run_counts(c)
     name = f"{'one' if c.sides == 1 else 'two'}-sided Fisher, α {c.alpha:g}"
     test = f"{name}, on {kb} + {kc} runs"
     if c.broken:
         verb = (
-            "the mode `report` does not block on them"
+            (
+                "the mode `report` does not block on them"
+                if label == "Checks"
+                else "they only report"
+            )
             if c.outcome == "report"
             else "they block"
         )
@@ -271,7 +338,7 @@ def checks_lines(c: criterion.CheckVerdict) -> tuple[str, list[str]]:
         if len(c.broken) > 5:
             rows += ["", f"{len(c.broken) - 5} more in the JSON report."]
         return (
-            f"Checks: {len(c.broken)} broke, {verb} ({test}, Tarone m = {c.m}).{left}",
+            f"{label}: {len(c.broken)} broke, {verb} ({test}, Tarone m = {c.m}).{left}",
             rows,
         )
     worse = sum(
@@ -286,17 +353,17 @@ def checks_lines(c: criterion.CheckVerdict) -> tuple[str, list[str]]:
             else f"Tarone counts {c.m} checks that changed or vary, and a break among them"
         )
         line = (
-            f"Checks: with {kb} + {kc} runs no break can be significant; {which} can block from {need} runs of each "
+            f"{label}: with {kb} + {kc} runs no break can be significant; {which} can block from {need} runs of each "
             f"version ({name}).{fewer}{left}"
         )
         return line, []
     if worse:
         line = (
-            f"Checks: none significantly worse; {worse} of {len(c.units)} passed less often ({test}, Tarone m = {c.m})."
+            f"{label}: none significantly worse; {worse} of {len(c.units)} passed less often ({test}, Tarone m = {c.m})."
             f"{left}"
         )
         return line, []
-    return f"Checks: none broke ({len(c.units)} checked, {test}).{left}", []
+    return f"{label}: none broke ({len(c.units)} checked, {test}).{left}", []
 
 
 def record_cost(r: dict, prices: Prices) -> float | None:
@@ -382,6 +449,7 @@ def markdown(
     spend: budget.Budget | None = None,
     checks: criterion.CheckVerdict | None = None,
     mv: mean.MeanVerdict | None = None,
+    lv: Levelled | None = None,
 ) -> str:
     icon = {
         "pass": "✅",
@@ -389,9 +457,31 @@ def markdown(
         "inconclusive": "⚠️",
         "budget fail": "❌",
     }[v.outcome]
+    warned = lv.warnings() if lv else []
+    critical = [
+        u
+        for u in (checks.broken if checks and lv else [])
+        if lv.rules.of(u.case, u.check) == "critical"
+    ]
     lines = [
-        f"**Release gate: {icon} {v.outcome}**",
+        f"**Release gate: {icon} {v.outcome}"
+        + (
+            f" · ⚠️ {len(warned)} minor check{'s' if len(warned) != 1 else ''} worse"
+            if warned
+            else ""
+        )
+        + "**",
         "",
+        *(
+            [
+                "❌ Critical checks broke: "
+                + ", ".join(f"`{u.check}` in {u.case}" for u in critical[:5])
+                + (f" and {len(critical) - 5} more" if len(critical) > 5 else "")
+                + "."
+            ]
+            if critical
+            else []
+        ),
         (
             f"Mean score {v.base_mean:.3f} → {v.candidate_mean:.3f} ({v.diff_pp:+.2f} points"
             + (f", blocks below {-v.limit_pp:+.2f}" if mv is None else "")
@@ -412,6 +502,22 @@ def markdown(
     line, broken = checks_lines(checks) if checks else (None, [])
     if line:
         lines.append(line)
+    if lv and lv.reported:
+        line, more = checks_lines(
+            lv.reported,
+            "Checks that only report (minor; normal under `checks: report`)",
+        )
+        lines.append(line)
+        broken = [*broken, *more]
+    if lv and lv.minor_cases:
+        names = ", ".join(lv.minor_cases[:5]) + (
+            f" and {len(lv.minor_cases) - 5} more" if len(lv.minor_cases) > 5 else ""
+        )
+        lines.append(f"Minor cases, out of the mean: {names}.")
+    if lv and lv.unmatched:
+        lines.append(
+            f"⚠️ Levels that match no check of this set: {', '.join(lv.unmatched)}."
+        )
     runs, days = reused(base, candidate)
     if runs:
         lines.append(
@@ -569,6 +675,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         "inconclusive at δ = --threshold points); other names pick a betting variant (default naive)",
     )
     p.add_argument(
+        "--levels",
+        type=json.loads,
+        help='importance of checks as JSON, e.g. \'{"critical": ["state"], "minor": ["steps"], "cases": {"probe-*": "minor"}}\'',
+    )
+    p.add_argument(
         "--checks",
         choices=("block", "report"),
         default="block",
@@ -623,7 +734,18 @@ def main(argv: Sequence[str] | None = None) -> int:
                 rescored(base, args.golden),
                 rescored(candidate, args.golden),
             )
-        pairs = pair(base, candidate)
+        full = pair(base, candidate)
+        rules = levels.Levels.parse(args.levels)
+        if (rules.minor or rules.cases) and not args.golden:
+            raise ValueError(
+                "minor levels need --golden: a case's score is rebuilt with its own aggregate"
+            )
+        how = (
+            {c.id: c.scoring.get("aggregate", "mean") for c in load_cases(args.golden)}
+            if args.golden
+            else {}
+        )
+        pairs, minor_cases = leveled(full, rules, how)
         mv = None
         if args.mean == "naive":
             v = naive(
@@ -640,12 +762,19 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.threshold,
                 mean.DEFAULT if args.mean == "betting" else args.mean,
             )
-        base_runs, candidate_runs = check_runs(pairs)
-        checks = (
-            criterion.per_check(base_runs, candidate_runs, mode=args.checks)
-            if base_runs
-            else None
-        )
+        runs = check_runs(full)  # minor cases too: their checks warn
+        lv = None
+        if rules:
+            (blocking, reporting) = families(runs, rules, args.checks)
+            checks = (
+                criterion.per_check(*blocking, mode="block") if blocking[0] else None
+            )
+            reported = (
+                criterion.per_check(*reporting, mode="report") if reporting[0] else None
+            )
+            lv = Levelled(rules, reported, minor_cases, rules.unmatched(runs[0]))
+        else:
+            checks = criterion.per_check(*runs, mode=args.checks) if runs[0] else None
         if v.exit_code != QUALITY_FAIL and checks and checks.outcome == "block":
             v = replace(v, outcome=VERDICTS[QUALITY_FAIL], exit_code=QUALITY_FAIL)
         prices = load_prices(args.prices) if args.prices else None
@@ -653,13 +782,22 @@ def main(argv: Sequence[str] | None = None) -> int:
         spend = candidate_budget(candidate, prices, args)
         if v.exit_code == PASS and spend and spend.outcome == "over":
             v = replace(v, outcome=VERDICTS[BUDGET_FAIL], exit_code=BUDGET_FAIL)
-        text = markdown(v, base, candidate, costs, spend, checks, mv)
+        text = markdown(v, base, candidate, costs, spend, checks, mv, lv)
         report = {
             **asdict(v),
             "threshold_pp": args.threshold,
             "relative": args.relative,
             "mean": None if mv is None else {**asdict(mv), "name": args.mean},
-            "checks": checks_report(checks) if checks else None,
+            "checks": checks_report(checks, rules) if checks else None,
+            "levels": args.levels,
+            "checks_reported": checks_report(lv.reported, rules)
+            if lv and lv.reported
+            else None,
+            "warnings": [{**asdict(u), "level": "minor"} for u in lv.warnings()]
+            if lv
+            else [],
+            "minor_cases": minor_cases,
+            "levels_unmatched": lv.unmatched if lv else [],
             "base_config": base.config_hash,
             "candidate_config": candidate.config_hash,
             "set_hash": base.set_hash,
@@ -686,6 +824,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         traceback.print_exc()
         return INFRA_ERROR
     print(text, end="")
+    if (
+        lv and os.environ.get("GITHUB_ACTIONS") == "true"
+    ):  # an annotation on the job; the exit code stays
+        for u in lv.warnings():
+            print(
+                f"::warning title=Release gate::Minor check {u.check} got worse in {u.case}: passed "
+                f"{u.base[0]}/{u.base[1]} runs before, {u.candidate[0]}/{u.candidate[1]} now (p {u.p:.2g})."
+            )
     return v.exit_code
 
 

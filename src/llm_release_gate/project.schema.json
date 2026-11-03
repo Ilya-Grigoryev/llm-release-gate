@@ -48,6 +48,9 @@
     "checks": {
       "$ref": "#/$defs/checks"
     },
+    "levels": {
+      "$ref": "#/$defs/levels"
+    },
     "prices": {
       "$ref": "#/$defs/prices"
     },
@@ -99,6 +102,9 @@
         "checks": {
           "$ref": "#/$defs/checks"
         },
+        "levels": {
+          "$ref": "#/$defs/levels"
+        },
         "prices": {
           "$ref": "#/$defs/prices"
         },
@@ -134,6 +140,40 @@
         "block",
         "report"
       ]
+    },
+    "levels": {
+      "description": "Importance of checks (default: every check normal). critical: blocks even under checks: report and leads the comment; minor: left out of the case's score, warns only when significantly worse. Shell-style patterns of check ids; cases maps case-id patterns to a level, and a minor case leaves the mean.",
+      "type": "object",
+      "properties": {
+        "critical": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Check ids or patterns that block under either mode of checks."
+        },
+        "minor": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Check ids or patterns left out of the case's score; they only warn."
+        },
+        "cases": {
+          "type": "object",
+          "description": "Case-id pattern to level, for checks without their own; the first match wins.",
+          "additionalProperties": {
+            "enum": [
+              "critical",
+              "normal",
+              "minor"
+            ]
+          }
+        }
+      },
+      "additionalProperties": false
     },
     "prices": {
       "description": "A price file, relative to the project: model: [input, output] or [input, output, cached input], USD per 1M tokens.",

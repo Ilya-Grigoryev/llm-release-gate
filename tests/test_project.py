@@ -134,3 +134,24 @@ def test_the_rule_on_the_mean_is_naive_unless_set_to_betting(tmp_path):
     assert d.mean == "naive"
     with pytest.raises(ValueError, match="mean"):
         load(tmp_path, "mean: welch\npipelines: {a: {config: c, golden: g}}\n")
+
+
+def test_levels_are_a_rule_of_the_project(tmp_path):
+    p = load(
+        tmp_path,
+        "levels: {critical: [state], minor: ['assert-*'], cases: {'probe-*': minor}}\n"
+        "pipelines:\n  a: {config: c, golden: g}\n  b: {config: c, golden: g, levels: {}}\n",
+    )
+    assert p.pipelines["a"].levels == {
+        "critical": ["state"],
+        "minor": ["assert-*"],
+        "cases": {"probe-*": "minor"},
+    }
+    assert p.pipelines["b"].levels == {}
+    with pytest.raises(ValueError, match="levels"):
+        load(
+            tmp_path,
+            "levels: {cases: {a: low}}\npipelines: {a: {config: c, golden: g}}\n",
+        )
+    with pytest.raises(ValueError, match="levels"):
+        load(tmp_path, "levels: {major: [x]}\npipelines: {a: {config: c, golden: g}}\n")

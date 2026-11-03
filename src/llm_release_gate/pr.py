@@ -432,6 +432,7 @@ def one(
         *PYTHON, "-m", "llm_release_gate.gate",
         *(["--base", str(dest / "base.jsonl")] if base else ["--no-base"]), "--candidate", str(dest / "candidate.jsonl"),
         "--golden", str(golden), "--threshold", str(p.delta), "--mean", p.mean, "--checks", p.checks,
+        *(["--levels", json.dumps(p.levels)] if p.levels else []),
         "--markdown", str(dest / "comment.md"), "--json", str(dest / "verdict.json"),
         *(["--prices", prices] if prices else []),
         *(a for k, flag in BUDGETS.items() if k in p.budgets for a in (flag, str(p.budgets[k]))),
