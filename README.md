@@ -196,7 +196,7 @@ apply to every pipeline, and a pipeline's own win:
 | `pipelines.NAME.inputs-url` | where the dashboard finds the set's other files (images): a URL with `{path}` or `{name}` |
 | `k` | runs per case and version, default 1; the naive rule reads the first run, the betting rule, the rule on checks and budgets all |
 | `delta` | points of mean score the candidate may lose, default 5 |
-| `mean` | `naive` (default): block when the first run's mean drops by more than `delta`; `betting`: pass when the runs show the loss is under `delta`, block when they show it is over, otherwise inconclusive with the number of runs a pass needs (from 2 runs; with δ 5 and 50 cases an unchanged version passes after 2) |
+| `mean` | `naive` (default): block when the first run's mean drops by more than `delta`; `betting`: pass when the runs show the loss is under `delta`, block when they show it is over, otherwise inconclusive with the number of runs a pass needs (from 2 runs; with δ 5 and 50 cases, a candidate that never differs from the base passes after 2, and noise needs more) |
 | `checks` | `block` (default): a check that got significantly worse over the runs blocks; `report`: it is only listed |
 | `levels` | `critical: [ids]` block even under `checks: report` and lead the comment; `minor: [ids]` stay out of the case score and only warn (⚠️ in the title, a CI annotation) when significantly worse; `cases: {pattern: level}` for a case's checks, and a `minor` case leaves the mean. Ids take shell patterns (`assert-*`); a pattern that matches no check is named in the comment |
 | `prices` | YAML of `model: [input, output]` USD per 1M tokens, for costs and the cost budget |

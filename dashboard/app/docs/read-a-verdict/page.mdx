@@ -127,8 +127,9 @@ Two things give `inconclusive` (exit 11):
 
 - **The betting rule could not decide.** The title reads "⚠️ inconclusive", and the
   [line under the mean](#lines-of-the-betting-rule) says how many runs of each version a pass needs and roughly what
-  the missing runs cost. To add runs, raise `k` in the target branch's `gate.yaml` in a request of its own, then run
-  the job again; the rule is valid at any number of runs. Or a maintainer reads the range and merges over the check.
+  the missing runs cost. To give the next job more runs, raise `k` in the target branch's `gate.yaml` in a request of its
+  own. Do not rerun a job until it passes: each job runs the candidate afresh and is a new test. Or a maintainer reads the
+  range and merges over the check.
   A check that blocks makes it a quality fail instead.
 - **A request removes or renames a pipeline in `gate.yaml`.** The other pipelines keep their titles, add the ❌ note
   and exit 11 unless something worse happened. If the removal is meant, a maintainer merges over the check; a renamed

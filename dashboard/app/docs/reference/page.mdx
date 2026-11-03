@@ -81,7 +81,8 @@ What the schema does not say:
 - **`delta`**: points out of 100; under the naive rule a drop of exactly `delta` passes. Only `gate --relative` makes it
   relative, and only for the naive rule.
 - **`mean`**: `betting` takes its first look after 2 runs of each version, so with `k: 1` it can only answer
-  `inconclusive` ([How it decides](/docs/how-it-decides#the-betting-rule-every-run-three-answers)).
+  `inconclusive` ([How it decides](/docs/how-it-decides#the-betting-rule-every-run-three-answers)). It needs `delta`
+  above 0 and below 100; otherwise every job ends in `infra error`, as it does when every case is `minor`.
 - **`levels`**: a check's level in a case is, first match wins: `minor` when the case's pattern says `minor`; `critical`
   when a `critical` pattern matches the check; `minor` when a `minor` pattern does; the level of the case's first
   matching pattern; else `normal`. Patterns are shell-style (`*`, `?`, `[ab]`). Where check ids are positions, such as
@@ -521,7 +522,7 @@ paid for also go up as `llm-release-gate-runs-NAME-VERSION-SET` (16 characters o
 | `cases`, `worse` | the number of cases; those that scored lower, as `[case, base, candidate]`, largest drop first |
 | `runs` | runs of each version the rule on the mean read: 1 under the naive rule |
 | `threshold_pp`, `relative` | the threshold as given |
-| `mean` | the betting rule's verdict, `null` under the naive rule: `name` (as given to `--mean`), `method`, `outcome` (`pass`, `block`, `inconclusive`), `delta`, `alpha` (per side), `cases`, `runs`, `decided_at` (the run of each version at which it decided; `null` if it did not), `diff`, `lower` and `upper` (the 95 % range), `worse` (a pass shown worse than the base), `runs_for_pass` (runs of each version a candidate that never differs from the base needs; `null` above 10 000). `delta`, `diff`, `lower` and `upper` are shares of the score: 0.05 is 5 points |
+| `mean` | the betting rule's verdict, `null` under the naive rule: `name` (as given to `--mean`), `method`, `outcome` (`pass`, `block`, `inconclusive`), `delta`, `alpha` (per side), `cases`, `runs`, `decided_at` (the run of each version at which it decided; `null` if it did not), `diff`, `lower` and `upper` (the 95 % range), `worse` (a pass shown worse than the base), `runs_for_pass` (runs of each version a candidate that never differs from the base needs; `null` above 10 000), `nonzero` (paired case runs whose scores differ), `similar_cases` (a 95 % normal range over cases, for cases like these; report only, `null` with one case). `lower` and `upper` are taken at the run that decided, or at the last run. `delta`, `diff`, `lower`, `upper` and `similar_cases` are shares of the score: 0.05 is 5 points |
 | `checks` | the rule on checks: `outcome` (`pass`, `block`, `report`), `mode`, `alpha`, `sides`, `m` (checks that could show a break), `testable`, `can_block` (whether a check broken in every run could block with these run counts and `m`), `runs_to_block` (runs of each version from which it can, at the same `m`), `checked`, `one_sided` (`[case, check]` scored on one side only), `broken` (`case`, `check`, `level`, `base` and `candidate` as `[passes, runs]`, `p`, `p_min`). With `levels`, only the checks that may block. `null` when no run has check results, or when `levels` leave no check that may block |
 | `levels` | `levels` as given; `null` without them |
 | `checks_reported` | with `levels`, the checks that only report (minor ones, and normal ones under `checks: report`), shaped like `checks`; otherwise `null` |

@@ -131,7 +131,8 @@ runner's scorer is `hits(case, answer, trace=None)` (by default the run's trace,
   request can add runs and run the rule again (experiment E-006: noise shared by a whole run breaks the bound). The bet λ is the paper's predictable plug-in, truncated at c / m and c / (1 − m); it stays fixed for all
   cases of a run, which keeps the capital a supermartingale although cases have different means (AM–GM over the run).
   The first look is after 2 runs; the first look at which a side reaches 1 / α decides, block on a tie. `decide(base,
-  candidate, delta, alpha, unit, bet, c, min_runs) -> MeanVerdict` also gives bounds on the difference at the last look,
+  candidate, delta, alpha, unit, bet, c, min_runs) -> MeanVerdict` also gives bounds on the difference at the look that
+  decided (else the last), the number of paired case runs that differ, a 95 % normal range over cases for the report,
   `worse` (a pass shown worse than the base: the comment warns) and `runs_for_pass`, the runs of each version a
   candidate identical to the base needs; the comment turns the runs still missing into dollars at this decision's cost per
   run. Variants (`--mean NAME`): bets on whole runs and an empirical-Bernstein process, for the experiments.

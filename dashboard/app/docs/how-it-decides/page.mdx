@@ -81,11 +81,12 @@ The rule pairs run 1 of a case in the candidate with run 1 of the same case in t
 so a hard case is hard on both sides. It takes its first look after 2 runs of each version, so with `k: 1` it can only
 answer `inconclusive`. Then it looks again after every run, and the first look that shows a side decides.
 
-However many looks the rule takes, the chance of a wrong pass, where the candidate in truth loses more than `delta` on
-these cases, stays at most 2.5 % (α 0.025); the same holds for a wrong block. So you can add runs to an inconclusive
-request and run the rule again. The promise needs runs that go wrong independently of each other. When a whole run goes
-bad at once, say the provider changes something for an hour, the errors grow, and the gate cannot tell. The comment gives a 95 % range for the
-difference and the run at which the rule decided ([Read a verdict](/docs/read-a-verdict#lines-of-the-betting-rule)).
+However many looks the rule takes over the same runs, the chance of a wrong pass, where the candidate in truth loses
+more than `delta` on these cases, stays at most 2.5 % (α 0.025); the same holds for a wrong block. The promise needs runs
+that go wrong independently of each other, and base runs reused from an earlier job that still behave like today's. When
+a whole run goes bad at once, say the provider changes something for an hour, the errors grow, and the gate cannot tell.
+The comment gives a 95 % range for the difference at the run that decided, and that run
+([Read a verdict](/docs/read-a-verdict#lines-of-the-betting-rule)).
 
 The method is a betting confidence sequence (Waudby-Smith and Ramdas,
 [arXiv:2010.09686](https://arxiv.org/abs/2010.09686)). For each side the gate bets on the paired differences, run after
@@ -93,9 +94,11 @@ run, and the side whose stake grows 40-fold (1 / α) decides. The bet stays fixe
 guarantee when cases differ in difficulty.
 
 The runs a pass needs depend on the number of cases and on `delta`, and few cases need many. The comment states the
-number for your set: what a candidate that scores like the base in every run would need. Noise adds more. To add runs
-in CI, raise `k` in the target branch's `gate.yaml`, in a request of its own, then run the job again. Outside CI, a
-second `run` with a larger `-k` appends only the missing runs, and `gate` decides again
+number for your set: what a candidate that scores like the base in every run would need. Noise adds more. Outside CI,
+a second `run` with a larger `-k` appends only the missing runs, and `gate` decides again over all of them: that keeps
+the 2.5 %. A new CI job is different: it runs the candidate again from the start, so it is a new test, and running jobs
+until one passes makes a wrong pass more likely than 2.5 %. To use more runs in CI, raise `k` in the target branch's
+`gate.yaml`, in a request of its own, before the job. Continuing a request with the runs it already paid for is planned
 ([Reference](/docs/reference#gate)).
 
 <Fig id="how-it-decides-3" caption={"The betting rule: pass, block or not sure yet, which the gate reports as `inconclusive`. Today you add the runs yourself; running more on its own, up to a limit, is planned. Until then, a person decides."} alt={"The gate's betting rule; only the loop that runs more on its own is planned. The gate puts an interval around the difference between the two versions and compares it with −δ. If the whole interval lies above −δ, the request passes, with a warning when a smaller loss is shown. If the whole interval lies below −δ, the request is blocked. If the interval reaches across −δ, the answer is 'not sure yet': more runs narrow the interval, up to a maximum number of runs. If it is still not sure then, the check stays red until a person approves the merge."} />
