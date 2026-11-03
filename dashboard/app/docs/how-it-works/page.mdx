@@ -26,11 +26,11 @@ rewrites the cancellation rule in its system prompt.
    [reuses those runs](/docs/how-it-decides#where-the-bases-runs-come-from).
 5. **Checks score every run.** The case's [checks](#checks) read the answer and the [trace](/docs/connect#traces) of
    steps that produced it, and give the run a score from 0 to 1.
-6. **The gate decides and answers.** It applies [today's rule](#the-decision-today), posts the [verdict](#verdicts)
+6. **The gate decides and answers.** It applies [its rules](#the-decision), posts the [verdict](#verdicts)
    as a comment, and the job passes or fails with it. It only advises until you make it a required check. The
    [dashboard](/docs/dashboard) reads the runs from the build artifacts.
 
-<Fig id="how-it-works-1" caption={"One pull request through the gate. Both versions run on the same cases, each with its own code; the gate compares them and answers in the request. Example numbers."} alt={"Two versions of the application, the one on the target branch and the one in the request, are checked out side by side. If their version hashes are equal, the gate stops and reports \"unchanged\". Otherwise both run on the same 20 cases and checks score each run. In this example two cases get worse, the mean score falls from 0.800 to 0.725, a drop of 7.5 points against an allowed 5, and the gate blocks. The result is a comment for this pipeline on the pull request: pass or block today; \"not sure yet\" is planned."} />
+<Fig id="how-it-works-1" caption={"One pull request through the gate. Both versions run on the same cases, each with its own code; the gate compares them and answers in the request. Example numbers."} alt={"Two versions of the application, the one on the target branch and the one in the request, are checked out side by side. If their version hashes are equal, the gate stops and reports \"unchanged\". Otherwise both run on the same 20 cases and checks score each run. In this example two cases get worse, the mean score falls from 0.800 to 0.725, a drop of 7.5 points against an allowed 5, and the gate blocks. The result is a comment for this pipeline on the pull request: pass or block under the naive rule; the betting rule can also answer \"not sure yet\" (inconclusive)."} />
 
 ## What a version is
 
@@ -78,7 +78,8 @@ ignore:
 
 ## Whose rules apply
 
-The rules come from the target branch's `gate.yaml`: `delta`, `k`, `budgets`, `prices` and `base_max_age_days`. What is tested comes from
+The rules come from the target branch's `gate.yaml`: `delta`, `k`, `mean`, `checks`, `levels`, `budgets`, `prices` and
+`base_max_age_days`. What is tested comes from
 the request: the candidate's config, the test set, its manifest and `prepare`. A request therefore cannot loosen its own
 gate: a raised `delta` applies after merge. If the target branch has no `gate.yaml`, or a broken one, the request's
 rules hold.
@@ -119,17 +120,20 @@ A check looks at one thing in a run: answer checks read the output, trace checks
 check calls your own code. None of the built-in checks asks a model for an opinion. `aggregate` turns the results into
 the case score: `mean` (the default) or `all`. [Write tests](/docs/write-tests) has examples of each check.
 
-## The decision today
+## The decision
 
-Today the gate decides with two rules. The naive rule takes the first run of each version and blocks when the
-candidate's mean score is lower than the base's by more than `delta` points (5 by default: 0.05 on a score from 0 to 1).
-The rule on checks reads every run and blocks when a check passes significantly less often in the candidate; with one
-run per version (`k: 1`, the default) it cannot block ([How it decides](/docs/how-it-decides)). Budgets on cost and
-latency can turn a pass into `budget fail`.
+The gate decides with a rule on the mean and the rule on checks. The naive rule, the default, takes the first run of
+each version and blocks when the candidate's mean score is lower than the base's by more than `delta` points (5 by
+default: 0.05 on a score from 0 to 1). The betting rule (`mean: betting`) reads every run: it passes when the runs show
+a loss smaller than `delta`, blocks when they show a larger one, and otherwise answers `inconclusive`. The rule on
+checks reads every run and blocks when a check passes significantly less often in the candidate; with one run per
+version (`k: 1`, the default) it cannot block. `levels` mark checks as critical, which block even when the others only
+report, or minor, which only warn ([How it decides](/docs/how-it-decides)). Budgets on cost and latency can turn a pass
+into `budget fail`.
 
 In the author's measurement on a support agent, one unchanged version ran 11 times on the same 10 cases. Its mean score was 0.7, 0.6, 0.6, 0.7, 0.5, 0.6, 0.6, 0.4, 0.7, 0.7 and 0.6: two runs differ by 30
 points, six times the default `delta`. [How it decides](/docs/how-it-decides) explains the noise and the
-[planned](/docs/how-it-decides#planned-several-runs-and-an-interval) statistical rule.
+[betting rule](/docs/how-it-decides#the-betting-rule-every-run-three-answers).
 
 ## Verdicts
 

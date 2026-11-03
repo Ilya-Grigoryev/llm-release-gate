@@ -14,9 +14,11 @@ match this list.
 
 1. **Pipeline and outcome.** Later runs edit this comment.
 2. **Mean scores**, base → candidate, and the difference in points. "blocks below -5.00" marks −`delta`; a drop of
-   exactly 5.00 passes. The mean follows the naive rule.
-3. **What was compared.** The mean reads the first run of each case, even when `k` asks for more; the line on checks
-   after it reads all runs and names the checks that broke, or how many runs one would need to show. Each `config` hash covers the whole
+   exactly 5.00 passes. The line ends with the rule on the mean, here the naive rule, the default. Under
+   `mean: betting` the line has no "blocks below", and the next one gives a range
+   ([Lines of the betting rule](#lines-of-the-betting-rule)).
+3. **What was compared.** The naive rule reads the first run of each case, even when `k` asks for more; the betting
+   rule reads them all. The line on checks after it reads all runs and names the checks that broke, or how many runs one would need to show. Each `config` hash covers the whole
    version; `set` is the test set's hash. When the base's runs came from earlier jobs, a line follows, for example
    "Base: 20 of 20 runs come from earlier jobs; the oldest ran 5 hours before the candidate's"
    ([where from](/docs/how-it-decides#where-the-bases-runs-come-from)).
@@ -41,6 +43,31 @@ was clearly exceeded. "over: …" names the broken limit and turns a pass into `
 fail stays a quality fail whatever the budget says
 ([How it decides](/docs/how-it-decides#budgets-cost-and-latency)).
 
+## Lines of the betting rule
+
+Under `mean: betting` the mean line names the rule, and the next line says what the runs showed:
+
+| Line | Meaning |
+|---|---|
+| The difference lies in [LOW, HIGH] points (95 %); decided after run N of each version. | With 95 % confidence, the true difference on your cases lies in this range. The rule decided at run N, the first look that showed a side. |
+| ⚠️ Shown worse than the base, but by less than δ. | A pass, but the whole range lies below 0: a real loss smaller than `delta`. Such losses can add up over requests. |
+| …; not decided. A pass needs at least N runs of each version even if nothing changed (…): M more, about $X at this decision's cost per run. | `inconclusive`. N is what a candidate that scores like the base in every run would need, so a noisy one needs more. The cost appears with `prices`. Past 10 000 runs the line says so instead: add cases. |
+
+The line with the configs then says "N runs of each version" instead of "first run of each version".
+
+## Lines of levels
+
+With `levels` in `gate.yaml` ([Critical and minor checks](/docs/how-it-decides#critical-and-minor-checks)), the line
+"Checks: …" covers only the checks that may block, and the comment can add:
+
+| Line | Meaning |
+|---|---|
+| "· ⚠️ 1 minor check worse" at the end of the title | A minor check passed significantly less often. It does not block; `warnings` in `verdict.json` lists it, and GitHub Actions shows a warning on the job. |
+| ❌ Critical checks broke: `no-fee-waiver` in cancel-after-deadline. | Right under the title: a critical check passed significantly less often, which blocks even under `checks: report`. It names up to five. |
+| Checks that only report (minor; normal under `checks: report`): … | The rule on checks for the checks that cannot block, tested apart from the others. Their broken checks get a table of their own at the end. |
+| Minor cases, out of the mean: … | Cases with only minor checks; the mean leaves them out. |
+| ⚠️ Levels that match no check of this set: critical: credit-*. | A pattern that matches nothing, often a typo; the checks it was meant for stay normal. |
+
 ## Notes under the comment
 
 | Note | What to do |
@@ -59,7 +86,7 @@ fail stays a quality fail whatever the budget says
 |---|---|
 | ✅ pass, ⏭ unchanged, 🆕 no base version | 0 |
 | ❌ quality fail | 10 |
-| inconclusive: a ❌ note under another title | 11 |
+| ⚠️ inconclusive, or a ❌ note under another title | 11 |
 | ❌ budget fail | 12 |
 | ⚠️ infra error | 20 |
 | not checked: no comment | the step exits 1 |
@@ -69,19 +96,21 @@ Any code other than 0 fails the job, which blocks the merge only once it is a re
 
 ### Pass
 
-The mean of the candidate's first runs was no more than `delta` points below the base's, no check got significantly
-worse over the runs, and the candidate was not shown over a budget. Read the cases that got worse anyway: a mean can hold while single cases drop
+The rule on the mean passed: under the naive rule, the mean of the candidate's first runs was no more than `delta`
+points below the base's; under the betting rule, the runs showed a loss smaller than `delta`. No check that may block
+got significantly worse over the runs, and the candidate was not shown over a budget. Read the cases that got worse and
+any ⚠️ line anyway: a mean can hold while single cases drop
 ([What a pass means](/docs/how-it-decides#what-a-pass-means)).
 
-<Fig id="read-a-verdict-2" caption={"An example pass, case by case, in a documentation view, not the dashboard's page. Two cases lost half their score and one gained, so the mean held. The comment lists only the two losses; the case table shows all three and the checks behind them."} alt={"An example pass of the booking assistant with 20 cases, shown in a documentation view. Three cases changed. cancel-on-arrival fell from 1.00 to 0.50 because its no-fee-waiver check failed. move-to-full-day fell from 1.00 to 0.50 because its looked-up check failed. refund-60 rose from 0.00 to 1.00 because both of its checks now pass. The other 17 cases scored the same on both sides. With three runs per case, the loss on cancel-on-arrival repeats in all three runs, while the loss on move-to-full-day appears only in the first run (rep 0), the one today's rule reads."} />
+<Fig id="read-a-verdict-2" caption={"An example pass, case by case, in a documentation view, not the dashboard's page. Two cases lost half their score and one gained, so the mean held. The comment lists only the two losses; the case table shows all three and the checks behind them."} alt={"An example pass of the booking assistant with 20 cases, shown in a documentation view. Three cases changed. cancel-on-arrival fell from 1.00 to 0.50 because its no-fee-waiver check failed. move-to-full-day fell from 1.00 to 0.50 because its looked-up check failed. refund-60 rose from 0.00 to 1.00 because both of its checks now pass. The other 17 cases scored the same on both sides. With three runs per case, the loss on cancel-on-arrival repeats in all three runs, while the loss on move-to-full-day appears only in the first run (rep 0), the one the naive rule reads."} />
 
 ### Quality fail
 
-The candidate's mean dropped by more than `delta` points, or a check got significantly worse over the runs (a table
-names it). Open the cases in the table in the
+The rule on the mean blocked, or a check that may block got significantly worse over the runs (a table names it; a
+critical one also opens the comment). Open the cases in the table in the
 [dashboard](#the-dashboard) or [artifact](#the-artifacts) and look for a check that flips: in the example,
-`cancel-after-deadline` fails `no-fee-waiver` because the agent called `waive_fee`. With `k: 1`, one run of each version decides
-the mean, and scores move with no change: in the author's measurement, one unchanged version of a support agent scored
+`cancel-after-deadline` fails `no-fee-waiver` because the agent called `waive_fee`. Under the naive rule with `k: 1`,
+one run of each version decides the mean, and scores move with no change: in the author's measurement, one unchanged version of a support agent scored
 between 0.40 and 0.70 over 11 runs on the same 10 tasks, 30 points, six times the default `delta`. A block is more
 likely real when the failing checks match your change. Fix it and push, or merge a new `delta` first in its own
 request; re-running until it passes defeats the gate.
@@ -94,9 +123,16 @@ in a request of its own.
 
 ### Inconclusive
 
-Today only a request that removes or renames a pipeline in `gate.yaml` gives `inconclusive` (exit 11). The other
-pipelines keep their titles, add the ❌ note and exit 11 unless something worse happened. If the removal is meant, a
-maintainer merges over the check; a renamed pipeline gets `no base version` under its new name.
+Two things give `inconclusive` (exit 11):
+
+- **The betting rule could not decide.** The title reads "⚠️ inconclusive", and the
+  [line under the mean](#lines-of-the-betting-rule) says how many runs of each version a pass needs and roughly what
+  the missing runs cost. To add runs, raise `k` in the target branch's `gate.yaml` in a request of its own, then run
+  the job again; the rule is valid at any number of runs. Or a maintainer reads the range and merges over the check.
+  A check that blocks makes it a quality fail instead.
+- **A request removes or renames a pipeline in `gate.yaml`.** The other pipelines keep their titles, add the ❌ note
+  and exit 11 unless something worse happened. If the removal is meant, a maintainer merges over the check; a renamed
+  pipeline gets `no base version` under its new name.
 
 ### Infra error
 

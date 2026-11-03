@@ -50,7 +50,7 @@ export default function Method2() {
         {RULES.map((r) => (
           <span key={r}>
             {r}
-            {r === "Three outcomes" && <span className="block font-normal text-ink-2">planned</span>}
+            {r === "Three outcomes" && <span className="block font-normal text-ink-2">the betting rule</span>}
           </span>
         ))}
       </div>
@@ -70,7 +70,7 @@ export default function Method2() {
                 <li key={k} className="min-w-0 sm:py-3">
                   <span className="block min-h-8 text-xs text-ink-2 sm:sr-only">
                     {RULES[k]}
-                    {k === 2 && " (planned)"}:
+                    {k === 2 && " (the betting rule)"}:
                   </span>
                   <span className="flex items-start gap-1.5 text-sm leading-snug">
                     <LampDot lamp={a.lamp} className="mt-1 size-2.5" />

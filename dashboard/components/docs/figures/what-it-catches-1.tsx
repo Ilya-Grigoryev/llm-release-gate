@@ -90,7 +90,7 @@ export default function WhatItCatches1({}: { alt: string }) {
 
         <div className="flex flex-col @3xl:col-start-9 @3xl:row-start-1">
           <span className="hidden flex-1 @3xl:block" />
-          <Node title="The barrier: the naive rule">
+          <Node title="The barrier: the rule on the mean">
             compares the mean scores
             <span className="mt-1.5 block">
               Credit limit <M>€30</M> → <M>€75</M>: case <M>late-cancel-45</M> breaks.

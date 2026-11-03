@@ -42,7 +42,7 @@ function Switch<T extends string | number | boolean>({ label, value, options, on
   );
 }
 
-/** The planned rule, simulated: more runs narrow the interval until it lies on one side of −δ. */
+/** An interval rule, simulated: more runs narrow the interval until it lies on one side of −δ. */
 export default function HowItDecides4() {
   const [step, setStep] = useState(STEPS.indexOf(10));
   const [breaking, setBreaking] = useState(false);
@@ -57,7 +57,7 @@ export default function HowItDecides4() {
 
   return (
     <div>
-      <FigureHead tag="Simulation of the planned rule, not the gate's output" />
+      <FigureHead tag="Simulation of a simpler interval, not the gate's output" />
       <div className="flex flex-wrap items-center gap-3">
         <Switch label="Change" value={breaking} onChange={setBreaking} options={[{ value: false, label: "harmless change" }, { value: true, label: "breaking change" }]} />
         <Switch label="Cases" value={copies} onChange={setCopies} options={[{ value: 1, label: "10 cases" }, { value: 4, label: "40 cases" }]} />
@@ -84,7 +84,7 @@ export default function HowItDecides4() {
         </output>
         <p aria-live="polite" className="ml-auto inline-flex items-center gap-2 font-bold" style={{ color: INK[d.outcome] }}>
           <LampDot lamp={LAMP[d.outcome]} />
-          {d.half === null ? `${d.outcome} (today's naive rule)` : d.outcome}
+          {d.half === null ? `${d.outcome} (naive rule)` : d.outcome}
         </p>
       </div>
 
@@ -124,14 +124,14 @@ export default function HowItDecides4() {
           {d.half !== null && ` · interval ±${d.half.toFixed(1)}`} · model runs for this decision, if both versions run K times: 2 × {k} × {cases} = {d.runs}
         </p>
         {k === 1 ? (
-          <p>One run per version cannot measure noise. The planned rule needs at least two runs per case of the new version.</p>
+          <p>One run per version cannot measure noise. The gate&apos;s betting rule takes its first look after 2 runs of each version.</p>
         ) : (
           k <= 3 && <p>With {k} runs per case the spread is estimated from very few runs, so a single draw can look much narrower than it should.</p>
         )}
         <p>
           δ = 5 points: today&apos;s default, used here for illustration. {copies === 4 && "40 cases: the ten cases repeated. "}
-          Assumes both versions run K times; requests within the age limit share the base&apos;s runs. The planned rule will use an
-          interval that stays valid when runs are added; it will be somewhat wider than this one.
+          Assumes both versions run K times; requests within the age limit share the base&apos;s runs. The gate&apos;s betting rule
+          uses a range that stays valid when runs are added; it is wider than this one, so it needs more runs.
         </p>
       </div>
     </div>

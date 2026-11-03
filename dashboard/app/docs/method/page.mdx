@@ -31,8 +31,8 @@ These are drafts.
 
 **1. The tool.** A release gate that a team sets up with a few files: how to run the application, its cases with
 checks, and one `gate.yaml` with the rules. Built today: the runner, traces, 16 kinds of checks, one JSON protocol for
-any program, the naive rule, the rule on checks, budgets, and a GitHub Action that comments the verdict. Planned: the statistical
-rule, adaptive extra runs and an anchor comparison.
+any program, the naive rule and a betting rule on the mean, the rule on checks with critical and minor checks, budgets,
+and a GitHub Action that comments the verdict. Planned: adaptive extra runs and an anchor comparison.
 
 **2. Evidence for the decision rules (planned, stage D):** how often each rule blocks a harmless change, misses a
 regression or leaves the decision open, and what one decision costs, on recorded runs of real applications, not on
@@ -63,26 +63,30 @@ The decisions below answer the first research question; D-numbers are the thesis
 
 ## Decisions: deciding under noise
 
-These answer the second research question. Today the gate uses the naive rule with a fixed `delta` (δ), 5 points by
-default, and the rule on checks; the first and the last decisions are built, the others are the statistical rule planned for stage C.
+These answer the second research question. By default the gate uses the naive rule with a fixed `delta` (δ), 5 points
+by default, and the rule on checks; `mean: betting` turns on the statistical rule. The anchor and running more on its
+own are planned; the rest is built.
 
 - **Both versions run on the same cases** (D-007, D-018, built), so a case's difficulty cancels out. The base's runs of a
   dated model come from earlier jobs for up to `base_max_age_days` (3 by default), so a shift in the service within
   that window counts as an effect and the requests in it share one base sample; `0` runs both versions together. A
   model without a date always runs together
   ([Where the base's runs come from](/docs/how-it-decides#where-the-bases-runs-come-from)).
-- **A pass speaks for these cases** (D-004), as a test suite does, not for inputs like these.
-- **δ is the loss you accept** (D-004), specified in advance and not tuned to the noise.
-- **Three outcomes** (D-004): pass, block, or "not sure yet" and run more, as the figure below shows.
+- **A pass speaks for these cases** (D-004, built), as a test suite does, not for inputs like these.
+- **δ is the loss you accept** (D-004, built), specified in advance and not tuned to the noise.
+- **Three outcomes** (D-004, D-026, built): pass, block, or "not sure yet" (`inconclusive`) with the runs and the money
+  a pass needs, as the figure below shows. Running more on its own, up to a money limit, is planned.
 
-<Fig id="method-2" caption={"With few runs the interval is wide. A rule that must prove harm then passes, a rule that must prove harmlessness blocks, and neither says it is guessing. The planned rule says \"not sure yet\" and runs more."} alt={"Four example intervals against the margin \u2212\u03b4. A narrow interval around 0, above \u2212\u03b4: all three rules pass. A narrow interval below \u2212\u03b4: all three block. A wide interval across \u2212\u03b4: 'prove harm' passes, 'prove harmlessness' blocks, the planned rule answers 'not sure yet' and runs more. A narrow interval between \u2212\u03b4 and 0: all pass; the planned rule adds a warning."} />
+<Fig id="method-2" caption={"With few runs the interval is wide. A rule that must prove harm then passes, a rule that must prove harmlessness blocks, and neither says it is guessing. The betting rule says \"not sure yet\"; more runs narrow the interval."} alt={"Four example intervals against the margin \u2212\u03b4. A narrow interval around 0, above \u2212\u03b4: all three rules pass. A narrow interval below \u2212\u03b4: all three block. A wide interval across \u2212\u03b4: 'prove harm' passes, 'prove harmlessness' blocks, the betting rule answers 'not sure yet', and more runs would narrow the interval. A narrow interval between \u2212\u03b4 and 0: all pass; the betting rule adds a warning."} />
 
-- **Intervals that stay valid when runs are added** (D-011): from the spread of runs within each case, by a method a
-  simulation will choose.
+- **Intervals that stay valid when runs are added** (D-011, built): betting confidence sequences (Waudby-Smith and
+  Ramdas, arXiv:2010.09686), with run k of a case paired with run k of the base. An experiment compares variants of
+  the bet.
 - **An anchor against slow creep** (D-012): each pull request is also compared with a fixed earlier version, so losses
   smaller than δ cannot add up unseen.
 - **Checks that break on their own** (D-003, built): a check that passes significantly less often over the runs
-  blocks; a single broken check can block from 4 runs of each version.
+  blocks; a single broken check can block from 4 runs of each version. Critical checks block even when the others
+  only report, minor ones only warn (D-028, built).
 
 ## Planned experiments
 
@@ -91,7 +95,7 @@ Planned for stage D; no results yet.
 - **Where the truth comes from.** The same version against itself (A/A), where any block is a false block; mutants,
   small deliberate breaks caught only if the gate blocks them; and real, harmless edits, whose right answer is not
   decided yet.
-- **Rules compared.** The naive rule, the statistical rule with and without adaptive extra runs, and the rules of
+- **Rules compared.** The naive rule, the betting rule with and without adaptive extra runs, and the rules of
   existing tools.
 - **Data.** Recorded runs (K runs of each of N cases) from a single call to an agent in a chat, resampled by a
   simulator without model calls. A held-out pool from a different calendar week confirms the main results.

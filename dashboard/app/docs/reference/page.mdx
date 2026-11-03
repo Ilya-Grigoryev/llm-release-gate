@@ -5,10 +5,8 @@ export const metadata = { title: "Reference" };
 # Reference
 
 The exact names of what you write for the gate and what it writes back, for release `v0.1.0-dev.12`. Tables labelled
-"from … .schema.json" are built from the JSON Schemas the gate validates against. Today the gate decides with the naive
-rule on the mean and the rule on checks ([How it decides](/docs/how-it-decides)); the
-[planned statistical rule](/docs/how-it-decides#planned-several-runs-and-an-interval) uses every run, can answer "not
-sure yet" (exit 11) and adds its interval and seed to the verdict.
+"from … .schema.json" are built from the JSON Schemas the gate validates against. The gate decides with a rule on the
+mean, naive by default or betting, and the rule on checks ([How it decides](/docs/how-it-decides)).
 
 ## Terms
 
@@ -28,8 +26,8 @@ sure yet" (exit 11) and adds its interval and seed to the verdict.
 
 It lives in the project's directory: the repository's root, or the one you pass as `--project` (`project-dir` in the
 action). Top-level
-settings apply to every pipeline; a pipeline's own setting replaces them. The rules (`k`, `delta`, `checks`, `prices`,
-`budgets`, `base_max_age_days`) come from the target branch, so a request that edits them runs under the old ones, unless
+settings apply to every pipeline; a pipeline's own setting replaces them. The rules (`k`, `delta`, `mean`, `checks`,
+`levels`, `prices`, `budgets`, `base_max_age_days`) come from the target branch, so a request that edits them runs under the old ones, unless
 the target branch has none or a broken one ([Whose rules apply](/docs/how-it-works#whose-rules-apply)).
 
 ```yaml
@@ -43,6 +41,8 @@ pipelines:
     config: configs/booking.yaml
     golden: golden/booking
     k: 3                                  # this pipeline's own setting wins
+    mean: betting                         # reads all 3 runs; can answer inconclusive
+    levels: {critical: [no-fee-waiver], minor: [steps]}
     budgets: {cost_per_run_usd: 0.02, latency_s: 30}  # replaces the top-level budgets as a whole
 k: 1
 delta: 5
@@ -57,15 +57,19 @@ ignore: [web/, "**/*.ipynb", "!docs/kb/"]
 
 ### Top-level fields
 
-<SchemaTable schema={project} label="Top-level fields of gate.yaml" describe={false} source="project.schema.json" links={{ "#/$defs/pipeline": "#fields-of-one-pipeline-pipelines-name", "#/$defs/budgets": "#budgets" }} />
+<SchemaTable schema={project} label="Top-level fields of gate.yaml" describe={false} source="project.schema.json" links={{ "#/$defs/pipeline": "#fields-of-one-pipeline-pipelines-name", "#/$defs/budgets": "#budgets", "#/$defs/levels": "#levels" }} />
 
 ### Fields of one pipeline (`pipelines.NAME`)
 
-<SchemaTable schema={project} at="#/$defs/pipeline" label="Fields of one pipeline" describe={false} source="project.schema.json" links={{ "#/$defs/budgets": "#budgets" }} />
+<SchemaTable schema={project} at="#/$defs/pipeline" label="Fields of one pipeline" describe={false} source="project.schema.json" links={{ "#/$defs/budgets": "#budgets", "#/$defs/levels": "#levels" }} />
 
 ### `budgets`
 
 <SchemaTable schema={project} at="#/$defs/budgets" label="Fields of budgets" source="project.schema.json" />
+
+### `levels`
+
+<SchemaTable schema={project} at="#/$defs/levels" label="Fields of levels" source="project.schema.json" />
 
 What the schema does not say:
 
@@ -74,7 +78,15 @@ What the schema does not say:
 - **`base_max_age_days`**: comes from the target branch, like `delta`. The gate never reuses runs when either version's model has no date, when the request changes `prepare`,
   or when the target branch has no valid `gate.yaml`.
   ([Why](/docs/how-it-decides#where-the-bases-runs-come-from))
-- **`delta`**: points out of 100; a drop of exactly `delta` passes. Only `gate --relative` makes it relative.
+- **`delta`**: points out of 100; under the naive rule a drop of exactly `delta` passes. Only `gate --relative` makes it
+  relative, and only for the naive rule.
+- **`mean`**: `betting` takes its first look after 2 runs of each version, so with `k: 1` it can only answer
+  `inconclusive` ([How it decides](/docs/how-it-decides#the-betting-rule-every-run-three-answers)).
+- **`levels`**: a check's level in a case is, first match wins: `minor` when the case's pattern says `minor`; `critical`
+  when a `critical` pattern matches the check; `minor` when a `minor` pattern does; the level of the case's first
+  matching pattern; else `normal`. Patterns are shell-style (`*`, `?`, `[ab]`). Where check ids are positions, such as
+  `assert-N` for the N-th assertion of each task, a pattern names a position, not one rule. The comment names patterns
+  that match no check ([How it decides](/docs/how-it-decides#critical-and-minor-checks)).
 - **`prices`**: commit the price file; the gate copies the target branch's before `prepare` runs. `pr` passes it to the
   comparison only, so the records have `prices_hash: null`.
 - **`prepare`** is followed by `uv sync --locked` in each tree.
@@ -371,7 +383,7 @@ uv run --env-file .env llm-release-gate run --config configs/invoice.yaml --gold
 
 ### gate
 
-Compares two files of runs case by case with the naive rule and the rule on checks. It gives `infra error` for different set hashes, cases on
+Compares two files of runs case by case with a rule on the mean and the rule on checks. It gives `infra error` for different set hashes, cases on
 one side only, different scorer versions (unless `--golden` rescores both) and, for a model name without a date, a
 pause over an hour or, when both asked for it, different reported models ([why](/docs/how-it-decides#where-the-bases-runs-come-from)).
 
@@ -380,9 +392,11 @@ pause over an hour or, when both asked for it, different reported models ([why](
 | `--base FILE` | the base version's runs; this or `--no-base` is required |
 | `--no-base` | no base version yet: report the candidate alone and exit 0 |
 | `--candidate FILE` | the candidate version's runs; required |
-| `--threshold PP` | block when the mean score drops by more than this many points; default 5 |
-| `--relative` | read `--threshold` as a percentage of the base mean |
-| `--checks MODE` | `block` (default): a check that got significantly worse blocks; `report`: it is only listed |
+| `--threshold PP` | `delta` in points: the naive rule blocks a larger drop, the betting rule tests the loss against it; default 5 |
+| `--relative` | read `--threshold` as a percentage of the base mean; naive rule only, `infra error` with another |
+| `--mean RULE` | `naive` (default): the first run of each case; `betting`: every run, with pass, block or `inconclusive`; the other names `--help` lists are variants of the betting rule, for experiments |
+| `--checks MODE` | `block` (default): a check that got significantly worse blocks; `report`: it is only listed, unless it is critical |
+| `--levels JSON` | critical and minor checks, with the keys of `levels` in `gate.yaml`, e.g. `'{"critical": ["no-*"], "minor": ["steps"]}'`; `minor` and `cases` need `--golden` |
 | `--golden DIR` | rescore both versions' saved answers with the current scorer, without calling the model |
 | `--prices FILE` | add the cost of the decision |
 | `--max-cost-per-run USD` | budget: the candidate's mean cost per run; needs `--prices` |
@@ -456,16 +470,16 @@ a cached directory.
 
 ## Exit codes
 
-`gate` and `pr` exit with the verdict's code; the job fails on any code but 0. Today the `outcome` in `verdict.json` is
-never `inconclusive` or `infra error`.
+`gate` and `pr` exit with the verdict's code; the job fails on any code but 0. The `outcome` in `verdict.json` is
+`inconclusive` only from the betting rule, and never `infra error`.
 
 | Code | Outcome | When |
 |---|---|---|
-| 0 | `pass` | the mean score did not drop by more than `delta`, no check got significantly worse, and no budget is exceeded |
+| 0 | `pass` | the rule on the mean passed, no check that may block got significantly worse, and no budget is exceeded |
 | 0 | `unchanged` | `pr` only: equal version hashes and none of the [changes that run every pipeline](#gate-yaml); nothing ran |
 | 0 | no base version (`outcome: "no base"`) | the target branch has no version of this pipeline: the candidate runs alone and does not block |
-| 10 | `quality fail` | the mean score dropped by more than `delta`, or a check got significantly worse (`checks: block`) |
-| 11 | `inconclusive` | today only when a request removes or renames a pipeline: each `pr` step that would exit 0 exits 11, and the comments get a note. The naive rule never gives it |
+| 10 | `quality fail` | the rule on the mean blocked, or a check that may block got significantly worse: a normal or critical one under `checks: block`, a critical one under `checks: report` |
+| 11 | `inconclusive` | the betting rule could not decide with these runs and no check blocked; or a request removes or renames a pipeline: each `pr` step that would exit 0 exits 11, and the comments get a note. The naive rule never gives it |
 | 12 | `budget fail` | quality passed; a cost or latency limit did not |
 | 20 | `infra error` | the runs cannot be compared, a step could not run, or the gate failed |
 | 1, 2 | — | a Python crash or a usage error, never read as a verdict |
@@ -501,12 +515,19 @@ paid for also go up as `llm-release-gate-runs-NAME-VERSION-SET` (16 characters o
 | Field | Meaning |
 |---|---|
 | `outcome`, `exit_code` | the outcome and its code |
-| `base_mean`, `candidate_mean` | the mean score over each case's first run, 0 to 1; `null` for a side that did not run |
-| `diff_pp`, `limit_pp` | candidate minus base, in points; the largest passing drop |
+| `base_mean`, `candidate_mean` | the mean score, 0 to 1, over each case's first run (naive rule) or over the paired runs (betting rule); `null` for a side that did not run |
+| `diff_pp`, `limit_pp` | candidate minus base, in points; the naive rule's largest passing drop, or `delta` under the betting rule |
 | `rule` | the rule on the mean, in words; the rule on checks is in `checks` |
 | `cases`, `worse` | the number of cases; those that scored lower, as `[case, base, candidate]`, largest drop first |
+| `runs` | runs of each version the rule on the mean read: 1 under the naive rule |
 | `threshold_pp`, `relative` | the threshold as given |
-| `checks` | the rule on checks: `outcome` (`pass`, `block`, `report`), `mode`, `alpha`, `sides`, `m` (checks that could show a break), `testable`, `can_block` (whether a check broken in every run could block with these run counts and `m`), `runs_to_block` (runs of each version from which it can, at the same `m`), `checked`, `one_sided` (`[case, check]` scored on one side only), `broken` (`case`, `check`, `base` and `candidate` as `[passes, runs]`, `p`, `p_min`); `null` when no run has check results |
+| `mean` | the betting rule's verdict, `null` under the naive rule: `name` (as given to `--mean`), `method`, `outcome` (`pass`, `block`, `inconclusive`), `delta`, `alpha` (per side), `cases`, `runs`, `decided_at` (the run of each version at which it decided; `null` if it did not), `diff`, `lower` and `upper` (the 95 % range), `worse` (a pass shown worse than the base), `runs_for_pass` (runs of each version a candidate that never differs from the base needs; `null` above 10 000). `delta`, `diff`, `lower` and `upper` are shares of the score: 0.05 is 5 points |
+| `checks` | the rule on checks: `outcome` (`pass`, `block`, `report`), `mode`, `alpha`, `sides`, `m` (checks that could show a break), `testable`, `can_block` (whether a check broken in every run could block with these run counts and `m`), `runs_to_block` (runs of each version from which it can, at the same `m`), `checked`, `one_sided` (`[case, check]` scored on one side only), `broken` (`case`, `check`, `level`, `base` and `candidate` as `[passes, runs]`, `p`, `p_min`). With `levels`, only the checks that may block. `null` when no run has check results, or when `levels` leave no check that may block |
+| `levels` | `levels` as given; `null` without them |
+| `checks_reported` | with `levels`, the checks that only report (minor ones, and normal ones under `checks: report`), shaped like `checks`; otherwise `null` |
+| `warnings` | the minor checks that got significantly worse, each like an entry of `broken`; `[]` when none |
+| `minor_cases` | the cases with only minor checks, left out of the mean |
+| `levels_unmatched` | patterns that match no check of the set, as `critical: PATTERN`, `minor: PATTERN` or `cases: PATTERN` |
 | `base_config`, `candidate_config`, `set_hash` | the two versions' hashes and the test set's |
 | `scorer_version`, `rescored` | the scorer; whether the saved answers were rescored |
 | `cost_usd`, `prices_hash` | `{base, candidate}` at the gate's prices, runs paid in this job only, and their hash; `null` without prices |
@@ -516,7 +537,8 @@ paid for also go up as `llm-release-gate-runs-NAME-VERSION-SET` (16 characters o
 | `base_reused` | `{runs, days_before_candidate}`: base runs that came from earlier jobs, and how much earlier the oldest ran; `{0, null}` when none |
 
 `unchanged` writes only `outcome`, `exit_code`, the three hashes, and `base_mean`, `candidate_mean` and `diff_pp` as
-`null`. `no base` has no `limit_pp`, `rule`, `cases`, `worse`, `threshold_pp`, `relative`, `checks` or `rescored`; its
+`null`. `no base` has no `limit_pp`, `rule`, `cases`, `worse`, `runs`, `threshold_pp`, `relative`, `mean`, `checks`,
+`levels`, `checks_reported`, `warnings`, `minor_cases`, `levels_unmatched` or `rescored`; its
 `base_mean`, `diff_pp`, `base_config` and (with prices) `cost_usd.base` are `null`, `runs_per_case.base` is `0`, and
 it has no `base_reused`.
 

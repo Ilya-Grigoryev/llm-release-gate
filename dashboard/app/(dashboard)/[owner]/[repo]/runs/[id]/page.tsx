@@ -68,7 +68,14 @@ export default async function Run(props: PageProps<"/[owner]/[repo]/runs/[id]">)
               </Fact>
               <Fact label="Difference, points">
                 <span className={v.diff_pp < 0 ? "text-bad" : ""}>{points(v.diff_pp)}</span>
-                {v.limit_pp != null && <span className="text-ink-3"> (blocks below −{v.limit_pp.toFixed(1)})</span>}
+                {v.mean ? (
+                  <span className="text-ink-3">
+                    {" "}
+                    (range {points(100 * v.mean.lower)} to {points(100 * v.mean.upper)}, δ {(100 * v.mean.delta).toFixed(1)})
+                  </span>
+                ) : (
+                  v.limit_pp != null && <span className="text-ink-3"> (blocks below −{v.limit_pp.toFixed(1)})</span>
+                )}
               </Fact>
               <Fact label="Cases × runs per version">
                 {v.cases} × {v.runs_per_case?.candidate ?? 1}

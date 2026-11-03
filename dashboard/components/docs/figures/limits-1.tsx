@@ -72,8 +72,9 @@ export default function Limits1({}: { alt: string }) {
             one broken case among <M>20</M> (exactly <M>5</M> points).
           </Out>
           <p className="rounded-md border border-line px-2 py-1.5">
-            <span className="font-bold text-ink">Today:</span> one run per version, so noise can push a drop over or under{" "}
-            <M>delta</M>. <span className="font-bold text-ink">Planned:</span> repeated runs and an interval.
+            <span className="font-bold text-ink">Naive rule, the default:</span> one run per version, so noise can push a drop
+            over or under <M>delta</M>. <span className="font-bold text-ink">Betting rule:</span> every run and a range; it can
+            answer “not sure yet”.
           </p>
         </Stop>
       </ol>

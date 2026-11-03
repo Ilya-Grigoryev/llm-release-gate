@@ -16,10 +16,10 @@ function sane(rows: Row[]) {
 
 describe("schemaView", () => {
   it("reads gate.yaml: links object definitions, inlines small ones", () => {
-    const view = schemaView(project as Schema, "#", { "#/$defs/pipeline": "#pipeline", "#/$defs/budgets": "#budgets" });
+    const view = schemaView(project as Schema, "#", { "#/$defs/pipeline": "#pipeline", "#/$defs/budgets": "#budgets", "#/$defs/levels": "#levels" });
     const rows = byPath(view.rows);
     expect(view.title).toBe("gate.yaml");
-    expect(Object.keys(rows)).toEqual(["prepare", "ignore", "pipelines", "k", "delta", "checks", "prices", "budgets", "base_max_age_days"]);
+    expect(Object.keys(rows)).toEqual(["prepare", "ignore", "pipelines", "k", "delta", "mean", "checks", "levels", "prices", "budgets", "base_max_age_days"]);
     expect(rows.checks.rules.join(" ")).toMatch(/one of .*block.*report/);
     expect(rows.pipelines.required).toBe(true);
     expect(text(rows.pipelines.type)).toBe("map of name to [pipeline](#pipeline)");
@@ -37,6 +37,10 @@ describe("schemaView", () => {
     expect(Object.keys(pipeline)).toContain("inputs-url");
     const budgets = byPath(schemaView(project as Schema, "#/$defs/budgets").rows);
     expect(budgets.latency_quantile.rules).toEqual(["> 0 and < 1"]);
+    expect(text(rows.levels.type)).toBe("[levels](#levels)");
+    const levels = schemaView(project as Schema, "#/$defs/levels").rows;
+    sane(levels);
+    expect(text(byPath(levels).cases.type)).toBe("map of name to string");
   });
 
   it("reads a case: maps, enums and nested arrays of objects", () => {

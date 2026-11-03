@@ -266,7 +266,7 @@ function Track({ arm, uid }: { arm: Arm; uid: string }) {
   );
 }
 
-/** The two barriers, open, and the signal head at the join: stop, not sure yet (planned, so never lit), go. */
+/** The two barriers, open, and the signal head at the join: stop, not sure yet (never lit: the examples use the naive rule), go. */
 function Barriers({ uid }: { uid: string }) {
   return (
     <g>
@@ -561,7 +561,7 @@ export default function Home1() {
                 <span className="text-cand-ink">request {shown[2].toFixed(2)}</span>
               </span>
             ) : ran ? (
-              "Each lamp is one case, filled to its score as the train passes. Point at a column to read it. The signal's middle lamp, not sure yet, is planned."
+              "Each lamp is one case, filled to its score as the train passes. Point at a column to read it. The signal's middle lamp, not sure yet, stays dark under the naive rule these examples use."
             ) : (
               "Nothing ran: both branches hold the same version of the app."
             )}

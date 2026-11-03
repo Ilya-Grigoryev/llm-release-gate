@@ -70,6 +70,7 @@ export type Verdict = {
   cost_usd?: { base: number | null; candidate: number | null };
   models_without_date?: string[];
   runs_per_case?: { base: number; candidate: number };
+  mean?: { lower: number; upper: number; delta: number; decided_at: number | null } | null;
 };
 
 export type Parsed = { verdict: Verdict | null; comment: string | null; base: Rec[]; candidate: Rec[] };

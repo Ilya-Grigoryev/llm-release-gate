@@ -16,19 +16,19 @@ const ANSWERS: { lamp: Lamp; name: string; today: ReactNode; planned: ReactNode 
     lamp: "go",
     name: "Pass",
     today: "The mean score is at most δ points below the base's, on one run per version.",
-    planned: "Several runs show a loss of no more than δ.",
+    planned: "Several runs show a loss smaller than δ.",
   },
   {
     lamp: "stop",
     name: "Block",
     today: "The mean score drops by more than δ points, on one run per version.",
-    planned: "Several runs show a loss of more than δ.",
+    planned: "Several runs show a loss larger than δ.",
   },
   {
     lamp: "wait",
     name: "Not sure yet",
     today: null,
-    planned: "The gate cannot tell a loss of more than δ from noise, runs more, and if still unsure, leaves the decision to a person.",
+    planned: "The runs cannot tell a loss of δ from noise yet. The comment says how many runs a pass needs; buying them on its own is planned.",
   },
 ];
 
@@ -144,8 +144,10 @@ export default function Home() {
             <div className="mt-8 overflow-hidden rounded-lg border border-line bg-panel">
               <div className="hidden grid-cols-[13rem_1fr_1fr] gap-x-8 border-b border-line px-6 py-2.5 text-sm text-ink-2 md:grid">
                 <span>Answer</span>
-                <span>Today</span>
-                <span>Planned</span>
+                <span>Naive rule (default)</span>
+                <span>
+                  Betting rule (<Code>mean: betting</Code>)
+                </span>
               </div>
               {ANSWERS.map(({ lamp, name, today, planned }) => (
                 <div key={name} className="grid gap-x-8 gap-y-2 border-line px-5 py-5 not-last:border-b sm:px-6 md:grid-cols-[13rem_1fr_1fr]">
@@ -156,11 +158,11 @@ export default function Home() {
                     <span className="font-display text-xl font-bold">{name}</span>
                   </div>
                   <p className={today ? "" : "text-ink-3"}>
-                    <span className="mr-1.5 text-sm text-ink-2 md:hidden">Today:</span>
-                    {today ?? "Not yet."}
+                    <span className="mr-1.5 text-sm text-ink-2 md:hidden">Naive rule:</span>
+                    {today ?? "Never: one run decides."}
                   </p>
                   <p className="text-ink-2">
-                    <span className="mr-1.5 text-sm md:hidden">Planned:</span>
+                    <span className="mr-1.5 text-sm md:hidden">Betting rule:</span>
                     {planned}
                   </p>
                 </div>
@@ -169,7 +171,8 @@ export default function Home() {
           </LampsReveal>
           <p className="mt-6 max-w-[68ch]">
             <strong>δ</strong> (delta) is the loss you accept, 5 points by default, set in <Code>gate.yaml</Code> on the target
-            branch. Today&apos;s rule runs each version once, so noise alone can block a request, as in the support chat example;{" "}
+            branch. The default rule runs each version once, so noise alone can block a request, as in the support chat example;
+            the betting rule runs both versions several times and decides only on proof.{" "}
             <A href="/docs/how-it-decides">How it decides</A> shows the author&apos;s measurement.
           </p>
         </section>

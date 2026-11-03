@@ -44,9 +44,9 @@ export default function Method3({}: { alt: string }) {
         <Node title="Simulator">resamples cases with their runs; no model calls</Node>
         <Next />
         <div className="grid gap-2 @md:grid-cols-2 @3xl:grid-cols-1">
-          <Node title="Naive rule (today)" />
-          <Node title="Statistical rule" />
-          <Node title="Statistical rule + extra runs" />
+          <Node title="Naive rule (default)" />
+          <Node title="Betting rule" />
+          <Node title="Betting rule + extra runs" />
           <Node title="Other tools' rules, as documented" />
         </div>
         <Next>scored on</Next>

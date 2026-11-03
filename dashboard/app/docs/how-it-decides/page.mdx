@@ -27,14 +27,15 @@ between 0.40 and 0.70 by itself.
 
 <Fig id="how-it-decides-2" caption={"A pull request that only fixed typos scored 10 points lower and was blocked. The unchanged agent alone covered 30 points, so one run of each version cannot say whether the drop is real."} alt={"The base scored 0.70 and the typo fix 0.60, a drop of 10 points; the naive rule blocks drops of more than 5 points, so it blocked. Both scores lie inside the range 0.40 to 0.70 that the same agent covered on its own, with nothing in it changed."} />
 
-Equally, a base run that lands low can let a worse candidate pass.
+Equally, a base run that lands low can let a worse candidate pass. The [betting rule](#the-betting-rule-every-run-three-answers)
+reads every run instead.
 
-## Today: the naive rule and the rule on checks
+## The default: the naive rule and the rule on checks
 
 On every pull request that changes the version, the gate:
 
 1. has both versions' runs on the request's test set, `k` per case (default 1), the base's from an earlier job when
-   they are recent, and uses the first run of each case for the mean, every run for checks;
+   they are recent; the naive rule reads the first run of each case, the rule on checks every run;
 2. returns `infra error` (exit 20) unless both sides have the same set hash, the same scorer and a result for every
    case;
 3. takes each version's mean score and computes the difference in points: 100 × (candidate mean − base mean);
@@ -42,8 +43,8 @@ On every pull request that changes the version, the gate:
 5. blocks with `quality fail` too when a check passed significantly less often in the candidate's runs than in the
    base's (Fisher's exact test per case and check, one-sided, α 0.025, corrected for the number of checks that could
    show it). With one run of each version this cannot happen: a single broken check can block from 4 runs of each,
-   several broken at once need more. `checks: report`
-   only lists it;
+   several broken at once need more. `checks: report` only lists it, and [levels](#critical-and-minor-checks) set
+   which checks may block;
 6. checks the [budgets](#budgets-cost-and-latency), if you set any.
 
 ```yaml
@@ -59,26 +60,82 @@ The rules come from the target branch's `gate.yaml`, so raising `delta` in a pul
 ([Whose rules apply](/docs/how-it-works#whose-rules-apply)). Outside CI, the `gate` command
 ([Reference](/docs/reference)) gives the same verdict from two files of runs.
 
-## Planned: several runs and an interval
+## The betting rule: every run, three answers
 
-> **Planned.** None of this is in the gate yet (stages C and D).
+With `mean: betting` the gate reads every run of both versions, and `delta` (δ in the figures) becomes the loss you
+accept, set before you see any results. The rule answers one of three things:
 
-The new version runs K times on each case, at least twice, and the gate reports the difference with an interval: the
-range in which the true difference on these cases plausibly lies, given the run-to-run noise. `delta` (δ in the
-figures) becomes the loss you accept, stated before you see any results. The interval is compared with −`delta`:
+- **pass**: the runs show that the candidate loses less than `delta`. When they also show it is worse than the base,
+  the comment warns.
+- **block** (`quality fail`, exit 10): the runs show that it loses more than `delta`.
+- **inconclusive** (exit 11): the runs show neither. The comment says how many runs of each version a pass needs and
+  roughly what the missing runs cost.
 
-- **pass**: the candidate is shown not worse by more than `delta`, with a warning when a smaller loss is shown.
-- **block**: it is shown worse by more than `delta`.
-- **not sure yet**: the interval reaches across −`delta`. The gate runs more, up to a maximum; if still not sure, the
-  check stays red until a person approves the merge. This will use exit code 11 (`inconclusive`).
+```yaml
+k: 5            # runs per case and version, at least 2; the betting rule reads them all
+delta: 5        # the loss you accept, in points
+mean: betting   # the default is naive
+```
 
-<Fig id="how-it-decides-3" caption={"The planned rule: pass, block or not sure yet. When it is not sure, it runs more; at the limit, a person decides."} alt={"Planned, not in the gate yet. The gate puts an interval around the difference between the two versions and compares it with \u2212\u03b4. If the whole interval lies above \u2212\u03b4, the request passes, with a warning when a smaller loss is shown. If the whole interval lies below \u2212\u03b4, the request is blocked. If the interval reaches across \u2212\u03b4, the answer is 'not sure yet': the gate runs more and computes the interval again, up to a maximum number of runs. If it is still not sure then, the check stays red until a person approves the merge."} />
+The rule pairs run 1 of a case in the candidate with run 1 of the same case in the base, run 2 with run 2, and so on,
+so a hard case is hard on both sides. It takes its first look after 2 runs of each version, so with `k: 1` it can only
+answer `inconclusive`. Then it looks again after every run, and the first look that shows a side decides.
 
-<Fig id="how-it-decides-4" caption={"Simulation. Each step of the slider is what the planned rule does on its own when it is not sure yet: buy more runs. A noisy application with few cases needs many runs before it can say \"pass\"; more cases help as much as more runs."} alt={"A simulation of the planned rule on a support agent modelled from the author's measurement, with \u03b4 = 5 points and both versions running K times per case. With 10 cases, the 95 % interval around the difference is about 26 points either side at 2 runs per version, 12 at 10 runs and 5 at 50 runs. A change that breaks two always-passing cases (\u221220 points) is blocked once the whole interval lies below \u22125, at around 10 runs. A harmless change is still on the edge at 50 runs, because the interval is about as wide as \u03b4. With 40 cases the widths halve: the breaking change is blocked from about 3 runs and the harmless change passes at around 20."} />
+However many looks the rule takes, the chance of a wrong pass, where the candidate in truth loses more than `delta` on
+these cases, stays at most 2.5 % (α 0.025); the same holds for a wrong block. So you can add runs to an inconclusive
+request and run the rule again. The promise needs runs that go wrong independently of each other. When a whole run goes
+bad at once, say the provider changes something for an hour, the errors grow, and the gate cannot tell. The comment gives a 95 % range for the
+difference and the run at which the rule decided ([Read a verdict](/docs/read-a-verdict#lines-of-the-betting-rule)).
 
-Not decided yet: how many runs to add, and the interval method. A second comparison against an anchor, a fixed
-earlier version that only a person moves, is planned so that small losses cannot pile up.
-Until experiments measure the rule, this site states no error rates.
+The method is a betting confidence sequence (Waudby-Smith and Ramdas,
+[arXiv:2010.09686](https://arxiv.org/abs/2010.09686)). For each side the gate bets on the paired differences, run after
+run, and the side whose stake grows 40-fold (1 / α) decides. The bet stays fixed within a run, which keeps the
+guarantee when cases differ in difficulty.
+
+The runs a pass needs depend on the number of cases and on `delta`, and few cases need many. The comment states the
+number for your set: what a candidate that scores like the base in every run would need. Noise adds more. To add runs
+in CI, raise `k` in the target branch's `gate.yaml`, in a request of its own, then run the job again. Outside CI, a
+second `run` with a larger `-k` appends only the missing runs, and `gate` decides again
+([Reference](/docs/reference#gate)).
+
+<Fig id="how-it-decides-3" caption={"The betting rule: pass, block or not sure yet, which the gate reports as `inconclusive`. Today you add the runs yourself; running more on its own, up to a limit, is planned. Until then, a person decides."} alt={"The gate's betting rule; only the loop that runs more on its own is planned. The gate puts an interval around the difference between the two versions and compares it with −δ. If the whole interval lies above −δ, the request passes, with a warning when a smaller loss is shown. If the whole interval lies below −δ, the request is blocked. If the interval reaches across −δ, the answer is 'not sure yet': more runs narrow the interval, up to a maximum number of runs. If it is still not sure then, the check stays red until a person approves the merge."} />
+
+<Fig id="how-it-decides-4" caption={"Simulation with a simpler interval than the gate's. Each step of the slider adds runs, as you would after `inconclusive`. A noisy application with few cases needs many runs before it can say \"pass\"; more cases help as much as more runs."} alt={"A simulation of an interval rule, simpler than the gate's betting rule, on a support agent modelled from the author's measurement, with δ = 5 points and both versions running K times per case. With 10 cases, the 95 % interval around the difference is about 26 points either side at 2 runs per version, 12 at 10 runs and 5 at 50 runs. A change that breaks two always-passing cases (−20 points) is blocked once the whole interval lies below −5, at around 10 runs. A harmless change is still on the edge at 50 runs, because the interval is about as wide as δ. With 40 cases the widths halve: the breaking change is blocked from about 3 runs and the harmless change passes at around 20. The gate's own range is wider, so it needs more runs."} />
+
+Planned: when the answer is `inconclusive`, the gate buys the missing runs itself, up to a money limit you set, and
+continues in the same request. Also planned: a second comparison against an anchor, a fixed earlier version that only a
+person moves, so that small losses cannot pile up. Until experiments measure the rules on recorded runs, this site
+states no measured error rates.
+
+## Critical and minor checks
+
+By default every check counts the same. `levels` in `gate.yaml` marks some checks as critical and some as minor; the
+rest stay normal:
+
+```yaml
+levels:
+  critical: ["no-*", cancelled]   # block even under checks: report
+  minor: [steps]                  # out of the case score; only warns
+  cases:
+    "smalltalk-*": minor          # every check of these cases
+```
+
+- **critical**: a check that passes significantly less often blocks under `checks: block` and `checks: report` alike,
+  and the comment opens with it: "❌ Critical checks broke: `no-fee-waiver` in cancel-after-deadline."
+- **minor**: the check leaves the case score, so it never moves the mean and never blocks. When it passes significantly
+  less often, the comment's title gets "⚠️ 1 minor check worse", the JSON verdict a `warnings` entry and GitHub Actions
+  a warning on the job; the exit code stays.
+- **cases**: a pattern of case ids gives a level to that case's checks that have none of their own. A case set to
+  `minor` makes all its checks minor, critical ones included, and a case with only minor checks leaves the mean.
+
+Patterns are shell-style: `no-*` matches every check id that starts with `no-`. The comment names a pattern that
+matches no check of the set, so a typo cannot leave checks normal unnoticed. Where ids are positions, a pattern names a
+position: in the author's telecom-support app, `assert-N` is the N-th assertion of each task, so `assert-1` is a
+different rule in each case.
+
+The rule on checks tests two families apart, each at α 0.025 with its own correction: the checks that may block
+(critical ones, and normal ones under `checks: block`) and the checks that only report (minor ones, and normal ones
+under `checks: report`). Without `levels` nothing changes.
 
 ## Where the base's runs come from
 
@@ -136,13 +193,14 @@ A budget only turns a quality pass into `budget fail` (exit 12).
 
 ## What a pass means
 
-Today a pass means: on your cases, the candidate's first run had a mean score no more than `delta` points below the
-base's, no check got significantly worse over the runs, under the target branch's rules, and the candidate was not
-shown over any budget you set. It does not mean:
+A pass means, on your cases and under the target branch's rules: the rule on the mean passed, no check that may block
+got significantly worse over the runs, and the candidate was not shown over any budget you set. Under the naive rule,
+the candidate's first run had a mean score no more than `delta` points below the base's; under the betting rule, the
+runs showed a loss smaller than `delta`. It does not mean:
 
 - **The change is safe on new inputs.** The gate answers only for your cases.
-- **Nothing got worse.** Losses smaller than `delta` pass and can add up, and a mean that holds can hide one check
-  that got worse when there are too few runs to show it.
+- **Nothing got worse.** Losses smaller than `delta` pass and can add up, a minor check only warns, and a mean that
+  holds can hide one check that got worse when there are too few runs to show it.
 - **Every change was tested.** Say your booking assistant (a made-up example) may refund up to €30 without approval,
   and your cases ask for €20 and €60. Raise the limit to €40, and no case can tell the two versions apart.
 - **The author meant well.** The gate catches mistakes, not a hostile author.

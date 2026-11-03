@@ -17,15 +17,15 @@ times on the same 10 cases, and its mean score ranged from 0.4 to 0.7.
 
 **A gate run.** The verdict and its rule, both mean scores, the difference and the limit, each side's cost and the
 hashes. Below, every case, the changed ones first, with the checks that changed. With `k` above 1, the table averages a
-case's runs; the verdict's mean reads only the first, its rule on checks all of them.
+case's runs; the naive rule reads only the first, the betting rule and the rule on checks all of them.
 
 **A case.** Its input and expected answer, then both versions side by side, run by run: score, model, tokens,
 time, retries and errors, the answer, every check, the steps and the final state.
 
 <Fig id="dashboard-1" caption={"A case on the dashboard: the same case run by both versions. The candidate waived the late-cancellation fee, so two checks fail and the case scores 0. Example data."} alt={"Mock of a dashboard case page for the example case cancel-after-deadline. The base version looked the booking up and cancelled it; all five checks pass and the score is 1.00. The candidate looked it up, waived the fee, then cancelled; its state change has the waived fee as well, so the checks cancelled and no-fee-waiver fail and the score is 0.00."} />
 
-Planned: the statistical rule's interval and "not sure yet", noise by check, and the config and prompt difference
-between the two versions ([How it decides](/docs/how-it-decides#planned-several-runs-and-an-interval)).
+Planned: the betting rule's range and the levels of checks on a gate run's page, noise by check, and the config and
+prompt difference between the two versions ([How it decides](/docs/how-it-decides#the-betting-rule-every-run-three-answers)).
 
 ## How gate runs get there
 

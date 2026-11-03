@@ -183,7 +183,7 @@ export default function ReadAVerdict2({}: { alt: string }) {
                       <tr key={rep} className="text-ink-2">
                         <td className="py-1 pr-4 pl-7 text-xs">
                           <span className="font-mono">rep {rep}</span>
-                          {rep === 0 && <span className="block">today&apos;s rule reads this run</span>}
+                          {rep === 0 && <span className="block">the naive rule reads this run</span>}
                         </td>
                         <Scores base={c.base[rep]} cand={c.cand[rep]} changed={c.base[rep] !== c.cand[rep]} />
                         <td />
@@ -199,7 +199,7 @@ export default function ReadAVerdict2({}: { alt: string }) {
       {k === 3 && (
         <p className="mt-3 text-ink-2">
           The loss on cancel-on-arrival repeats in every run; the loss on move-to-full-day shows in rep 0 only, and double-booking
-          moves with no change at all. Today&apos;s rule sees rep 0, the first run. The planned rule will use all runs.
+          moves with no change at all. The naive rule sees rep 0, the first run; the betting rule and the rule on checks read all runs.
         </p>
       )}
     </>

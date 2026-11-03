@@ -68,7 +68,7 @@ function CaseLamp({ arm, score, worse }: { arm: Arm; score: number; worse: boole
   );
 }
 
-/** A lamp of the barrier: lit, off (a ring in its colour), or dimmed because it is planned. */
+/** A lamp of the barrier: lit, off (a ring in its colour), or dimmed because this rule cannot give it. */
 function BarrierLamp({ lamp, on, label, note }: { lamp: "go" | "stop" | "wait"; on: boolean; label: string; note?: string }) {
   return (
     <li className={`flex items-center gap-2 ${note ? "opacity-55" : ""}`}>
@@ -193,7 +193,7 @@ export default function HowItWorks1() {
           <ul aria-label="Barrier lamps" className="space-y-1.5 border-t border-line pt-3 sm:border-t-0 sm:border-l sm:pt-0 sm:pl-5">
             <BarrierLamp lamp="go" on={false} label="pass" />
             <BarrierLamp lamp="stop" on label="block" />
-            <BarrierLamp lamp="wait" on={false} label="not sure yet" note="planned" />
+            <BarrierLamp lamp="wait" on={false} label="not sure yet" note="betting rule only" />
           </ul>
         </div>
       </div>

@@ -17,7 +17,7 @@ target architecture.
 | Scoring | `metrics.py`, `checks.py` | turns an answer and its trace into per-check results and a case score | built |
 | Prices | `prices.py` | list prices per model prefix, cached input included | built |
 | Comparison | `compare.py` | pairs the records of two versions case by case, refuses what cannot be compared | built |
-| Criterion | `gate.py`, `criterion.py` | the verdict and its exit code | built (naive rule; the rule on checks in the verdict); planned (the statistical rule on the mean, inconclusive) |
+| Criterion | `gate.py`, `criterion.py` | the verdict and its exit code | built (naive rule; betting rule on the mean with inconclusive; the rule on checks with levels) |
 | Budget | `budget.py`, `gate.py` | cost of the decision; cost and latency limits | built |
 | Report and comment | `gate.py`, `comment.py` | Markdown and JSON verdict; one comment on the pull or merge request, edited on later pushes | built |
 | CI adapter | `action.yml`, `setup/action.yml`, `project.py` (`gate.yaml`), `pr.py`, `comment.py`, `cli.py` | runs both versions of each changed pipeline of a request and posts the verdict | built (a GitHub Action; `llm-release-gate` for any CI) |
@@ -123,7 +123,26 @@ runner's scorer is `hits(case, answer, trace=None)` (by default the run's trace,
   base's by more than the threshold (absolute or relative; the CLI's default is 5 points). Means are compared as exact fractions. `Verdict` holds
   `outcome`, `exit_code`, `base_mean`, `candidate_mean`, `diff_pp`, `limit_pp`, `rule`, `cases` and the cases that got
   worse. It gives `pass` (0) or `quality fail` (10); a budget can turn a pass into `budget fail` (12); `inconclusive` (11)
-  is reserved for the planned rules; `infra error` (20) is any failure to compare.
+  comes from the betting rule; `infra error` (20) is any failure to compare.
+- **Built — betting rule on the mean** (`mean.py`, `mean: betting`). The rule pairs run k of each case with run k of
+  the base; D = candidate − base in [−1, 1] and Y = (D + 1) / 2. Two one-sided betting tests (Waudby-Smith and Ramdas,
+  arXiv:2010.09686): capital K+ = Π (1 + λ (Y − m)) at m = (1 − δ) / 2 passes once it reaches 1 / α, K− = Π (1 − λ (Y − m))
+  blocks; with independent calls Ville's inequality bounds each error at α = 0.025 over any number of looks, so a
+  request can add runs and run the rule again (experiment E-006: noise shared by a whole run breaks the bound). The bet λ is the paper's predictable plug-in, truncated at c / m and c / (1 − m); it stays fixed for all
+  cases of a run, which keeps the capital a supermartingale although cases have different means (AM–GM over the run).
+  The first look is after 2 runs; the first look at which a side reaches 1 / α decides, block on a tie. `decide(base,
+  candidate, delta, alpha, unit, bet, c, min_runs) -> MeanVerdict` also gives bounds on the difference at the last look,
+  `worse` (a pass shown worse than the base: the comment warns) and `runs_for_pass`, the runs of each version a
+  candidate identical to the base needs; the comment turns the runs still missing into dollars at this decision's cost per
+  run. Variants (`--mean NAME`): bets on whole runs and an empirical-Bernstein process, for the experiments.
+- **Built — levels** (`levels.py`, `levels:` in `gate.yaml`). Each (case, check) is `critical`, `normal` or `minor`: the
+  case is `minor`; else the check's pattern (`critical` first); else the case's pattern; else `normal`. The checks that
+  may block (`critical`, and `normal` under `checks: block`) form one family for `per_check`; those that only report
+  (`minor`, and `normal` under `checks: report`) another, each at α. A broken `critical` check leads the comment; a
+  significantly worse `minor` one puts ⚠️ in the title, a `warnings` entry in the JSON and a `::warning` annotation in
+  GitHub Actions, and keeps the exit code. `minor` checks leave the case score (rebuilt from `hits` with the case's own
+  aggregate, so the scorer version stays), and a case with only `minor` checks leaves the mean. Without `levels`
+  everything is `normal` and the gate is unchanged.
 - **Built — the rule on checks.** `per_check(base, candidate, alpha, sides, mode,
   threshold) -> CheckVerdict`, a pure function over the results of each (case, check) per repetition: Fisher's exact test
   on k of K passes in each version, computed in exact fractions; Tarone's correction (only checks that could reach
@@ -135,8 +154,7 @@ runner's scorer is `hits(case, answer, trace=None)` (by default the run's trace,
   broke in every run could block with these run counts, `runs_to_block(alpha, sides)` the fewest equal runs from which
   it can, 4 at the defaults; the comment names it when no break can be significant at α / m. Tarone's correction counts every
   check that could show a break, so several broken at once need more runs than one.
-- **Planned — statistical rules.** A paired test on the mean with a margin δ and three outcomes (pass, block, buy more
-  runs and leave it to a human); a second comparison against an
+- **Planned.** Buying more runs up to a money limit and continuing in the request; a second comparison against an
   anchor version, so that many small losses cannot add up unseen;
   an adaptive runner that pays for repeated runs only where the versions disagree. Each takes a seed as an argument and
   reports it in the verdict.
@@ -151,7 +169,8 @@ runner's scorer is `hits(case, answer, trace=None)` (by default the run's trace,
   got worse; the JSON report holds the verdict's fields plus the threshold, both config hashes, the set hash, the scorer
   version, whether it rescored, the cost, the hash of the price table, the budget, `models_without_date`, the runs per
   case and `base_reused`. `cost` leaves out runs marked `reused`: the cost counts what this job paid. CLI: `python -m
-  llm_release_gate.gate (--base FILE | --no-base) --candidate FILE [--threshold PP] [--relative] [--golden DIR] [--prices FILE]
+  llm_release_gate.gate (--base FILE | --no-base) --candidate FILE [--threshold PP] [--relative] [--mean RULE] [--checks MODE]
+  [--levels JSON] [--golden DIR] [--prices FILE]
   [--max-cost-per-run USD] [--max-latency S] [--latency-quantile Q] [--markdown FILE] [--json FILE]`; the exit code is
   the verdict's. `comment.py` posts the Markdown as one comment on a GitHub pull request or GitLab merge request, edits it on
   later pushes, and posts an infra-error comment when the job stopped before a verdict. CLI: `python -m

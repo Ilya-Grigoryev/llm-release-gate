@@ -12,8 +12,8 @@ The gate runs the request's code, workflow file and lock file, with the model pr
 in. A request can change any of these, so the gate catches mistakes, not an author who wants to get past it. It
 does stop a request loosening its own rules:
 
-- `delta`, `k`, `budgets`, `prices` and `base_max_age_days` come from the target branch's `gate.yaml`; a new value
-  applies after merge.
+- `delta`, `k`, `mean`, `checks`, `levels`, `budgets`, `prices` and `base_max_age_days` come from the target branch's
+  `gate.yaml`; a new value applies after merge.
 - A request that changes `ignore`, or which files belong to which pipeline, runs every pipeline.
 - A request that removes or renames a pipeline fails as `inconclusive` (exit 11).
 
@@ -43,18 +43,21 @@ Say your booking assistant (a made-up example) may refund up to €30 without a 
 refunds of €20 and €60: raising the limit to €40 changes nothing any case sees. Changes outside the version stay unseen
 too ([What it catches](/docs/what-it-catches#what-it-cannot-see)).
 
-<Fig id="limits-1" caption={"A change can change the verdict only if it is part of the version, a case exercises it, and the drop it causes is larger than `delta` (or, over at least 4 runs of each version, a check breaks). Today, with one run per version, noise can push a drop over or under `delta`."} alt={"Three conditions in a row. First, the change must be part of the version: documentation, CI, gate.yaml, ignored paths and data outside the repository are not. Second, a case must exercise it: raising a refund limit from \u20ac30 to \u20ac40 is invisible when no case asks for an amount between them. Third, with one run per version, the mean score must drop by more than delta: one broken case among 20 lowers the mean by exactly 5 points, which passes at the default delta. Today, with one run per version, run-to-run noise can push a drop over or under delta."} />
+<Fig id="limits-1" caption={"A change can change the verdict only if it is part of the version, a case exercises it, and the drop it causes is larger than `delta` (or, over at least 4 runs of each version, a check breaks). With the default naive rule and one run per version, noise can push a drop over or under `delta`."} alt={"Three conditions in a row. First, the change must be part of the version: documentation, CI, gate.yaml, ignored paths and data outside the repository are not. Second, a case must exercise it: raising a refund limit from \u20ac30 to \u20ac40 is invisible when no case asks for an amount between them. Third, with one run per version, the mean score must drop by more than delta: one broken case among 20 lowers the mean by exactly 5 points, which passes at the default delta. With the default naive rule and one run per version, run-to-run noise can push a drop over or under delta."} />
 
-## Today it decides on one run per version
+## By default it decides on one run per version
 
-The gate compares each version's mean score over the first run of each case and blocks when the candidate's is lower
-by more than `delta` points. In the author's measurement on a support agent, one unchanged version on the same 10 tasks
+The default naive rule compares each version's mean score over the first run of each case and blocks when the
+candidate's is lower by more than `delta` points. In the author's measurement on a support agent, one unchanged version on the same 10 tasks
 had a spread of 30 points over 11 runs, and twice the same version, run as base and as candidate in one job, differed by
 10 points. So a block or a pass can be noise. Requests within `base_max_age_days` compare with the same base runs, so
 one noisy base run moves all their verdicts. A loss smaller than `delta` passes, so small losses add up unseen. The
 rule on checks reads every run but cannot block on one run per version: a single broken check needs 4 runs of each.
-Planned: several runs per version, an interval around the difference, a "not sure yet" outcome, and an anchor version
-that only a person moves ([How it decides](/docs/how-it-decides#planned-several-runs-and-an-interval)).
+
+`mean: betting` reads every run and answers `inconclusive` when the runs show neither a pass nor a block. The comment
+then says how many runs a pass needs at least. With few cases that number is large, noise adds more, and every run
+costs model calls. Planned: the gate buys the missing runs itself, up to a money limit, and an anchor version that only a person
+moves ([How it decides](/docs/how-it-decides#the-betting-rule-every-run-three-answers)).
 
 ## How it differs from other tools
 
@@ -68,8 +71,8 @@ The table compares only how each tool decides that a new version is worse, as do
 
 | Tools | What their documentation describes | Compared with this gate |
 |---|---|---|
-| Evaluation frameworks: promptfoo, Braintrust, Inspect AI, LangSmith | writing and running evaluations with repeated runs; some compare against a baseline | none describes a built-in rule that separates a drop from noise; this gate's rule does not either yet |
-| Small statistical gates (2026): statgate, assay-evals, pytest-probability, flipcheck | a statistical test or interval around the difference, paired case by case; some add a margin of loss, a "not sure" outcome or more runs where unclear | they have a statistical rule today, this gate's is planned. Their base is an earlier report, a last passing run or the workflow's choice; this gate runs the target branch's version itself, or reuses its runs from the last few days |
+| Evaluation frameworks: promptfoo, Braintrust, Inspect AI, LangSmith | writing and running evaluations with repeated runs; some compare against a baseline | none describes a built-in rule that separates a drop from noise; this gate's default does not either, `mean: betting` does |
+| Small statistical gates (2026): statgate, assay-evals, pytest-probability, flipcheck | a statistical test or interval around the difference, paired case by case; some add a margin of loss, a "not sure" outcome or more runs where unclear | this gate has one too, `mean: betting`, but not as its default. Their base is an earlier report, a last passing run or the workflow's choice; this gate runs the target branch's version itself, or reuses its runs from the last few days |
 | ease.ml/ci (Renggli et al., MLSys 2019) | a CI system accepting a new model only when a statistical condition against the old one holds | statistical gates predate LLMs; LLMs add that one version answers differently from run to run |
 
 statgate, assay-evals and flipcheck report checks of their decisions on synthetic or simulated data. This gate has no

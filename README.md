@@ -10,7 +10,7 @@ The gate runs each case several times and compares the two versions case by case
 
 ## Status
 
-Work in progress. Built: the naive gate (one run per version against a fixed threshold) and the rule on checks over all runs, with a comment on every pull or merge request, cost and latency budgets, traces of agent runs, checks over the answer and the trace, any program as a pipeline, and a [dashboard](#dashboard) of the runs. The statistical rule on the mean comes next. Three projects use the gate, each in its own repository: [receipt-intake](https://github.com/Ilya-Grigoryev/receipt-intake) reads seller, date, address and total from receipt scans for a bookkeeping team (test receipts from [SROIE](https://rrc.cvc.uab.es/?ch=13), ICDAR 2019), from the OCR text or from the scan; [workbench-support](https://github.com/Ilya-Grigoryev/workbench-support) is the support agent of a coworking space, with tools on its booking system and its own test cases, alone on a ticket or in a chat with a simulated user; [telecom-support](https://github.com/Ilya-Grigoryev/telecom-support) is a mobile carrier's support agent built on the telecom domain of [tau2-bench](https://github.com/sierra-research/tau2-bench): tau2's agent, tools, tasks and evaluator, unchanged.
+Work in progress. Built: two rules on the mean, the naive one (one run per version against a fixed threshold, the default) and a betting rule over all runs that passes, blocks or stays inconclusive and says how many runs a pass would need; the rule on checks over all runs, with critical and minor checks; a comment on every pull or merge request, cost and latency budgets, traces of agent runs, checks over the answer and the trace, any program as a pipeline, and a [dashboard](#dashboard) of the runs. Three projects use the gate, each in its own repository: [receipt-intake](https://github.com/Ilya-Grigoryev/receipt-intake) reads seller, date, address and total from receipt scans for a bookkeeping team (test receipts from [SROIE](https://rrc.cvc.uab.es/?ch=13), ICDAR 2019), from the OCR text or from the scan; [workbench-support](https://github.com/Ilya-Grigoryev/workbench-support) is the support agent of a coworking space, with tools on its booking system and its own test cases, alone on a ticket or in a chat with a simulated user; [telecom-support](https://github.com/Ilya-Grigoryev/telecom-support) is a mobile carrier's support agent built on the telecom domain of [tau2-bench](https://github.com/sierra-research/tau2-bench): tau2's agent, tools, tasks and evaluator, unchanged.
 
 [`docs/design.md`](docs/design.md) describes the parts, the flow of a merge request and the record of a run.
 
@@ -110,7 +110,7 @@ uv run llm-release-gate gate --base data/runs/base.jsonl --candidate data/runs/c
 |---|---|
 | 0 | pass |
 | 10 | quality fail |
-| 11 | inconclusive: a request that removes a pipeline from `gate.yaml` (the naive rule itself never gives it) |
+| 11 | inconclusive: the betting rule on the mean could not decide with these runs, or a request removes a pipeline from `gate.yaml` |
 | 12 | budget fail: quality passed, a cost or latency limit did not |
 | 20 | infra error: the runs cannot be compared, or the tool failed |
 
@@ -194,9 +194,11 @@ apply to every pipeline, and a pipeline's own win:
 | `pipelines.NAME.config`, `.golden` | the version's config and the test set's directory, relative to the project |
 | `pipelines.NAME.manifest` | ids and hash the set must match, for a set built or fetched outside git |
 | `pipelines.NAME.inputs-url` | where the dashboard finds the set's other files (images): a URL with `{path}` or `{name}` |
-| `k` | runs per case and version, default 1; the naive rule reads the first run, the rule on checks and budgets all |
+| `k` | runs per case and version, default 1; the naive rule reads the first run, the betting rule, the rule on checks and budgets all |
 | `delta` | points of mean score the candidate may lose, default 5 |
+| `mean` | `naive` (default): block when the first run's mean drops by more than `delta`; `betting`: pass when the runs show the loss is under `delta`, block when they show it is over, otherwise inconclusive with the number of runs a pass needs (from 2 runs; with δ 5 and 50 cases an unchanged version passes after 2) |
 | `checks` | `block` (default): a check that got significantly worse over the runs blocks; `report`: it is only listed |
+| `levels` | `critical: [ids]` block even under `checks: report` and lead the comment; `minor: [ids]` stay out of the case score and only warn (⚠️ in the title, a CI annotation) when significantly worse; `cases: {pattern: level}` for a case's checks, and a `minor` case leaves the mean. Ids take shell patterns (`assert-*`); a pattern that matches no check is named in the comment |
 | `prices` | YAML of `model: [input, output]` USD per 1M tokens, for costs and the cost budget |
 | `budgets` | `cost_per_run_usd` (needs `prices`), `latency_s` and `latency_quantile` (default 0.95) |
 | `base_max_age_days` | the gate reuses the target branch's runs from earlier jobs up to this many days old, default 3; `0` runs both versions in every job |

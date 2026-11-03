@@ -38,7 +38,7 @@ const centre = "@lg:col-[1/4] @lg:mx-auto @lg:w-full @lg:max-w-sm";
 export default function HowItDecides3({}: { alt: string }) {
   return (
     <div className="@container">
-      <FigureHead tag="Planned, not in the gate yet" />
+      <FigureHead tag="The betting rule; running more on its own is planned" />
       <div className="grid @lg:grid-cols-[repeat(3,minmax(0,1fr))_6.5rem] @lg:gap-x-3">
         <Node title="Runs of both versions on the same cases" className={`${centre} @lg:row-start-1`} />
         <div className="@lg:col-[1/4] @lg:row-start-2">
