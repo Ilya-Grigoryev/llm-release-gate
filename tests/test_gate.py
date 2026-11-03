@@ -595,7 +595,12 @@ def test_betting_takes_the_default_method_and_refuses_relative(
     args, report, _ = betting_args(tmp_path, monkeypatch, Fixed(), Fixed(), 2, 5)
     args[args.index("cases-c0.5")] = "betting"
     assert gate.main(args) == gate.INCONCLUSIVE
-    assert json.loads(report.read_text())["mean"]["name"] == "betting"
+    v = json.loads(report.read_text())["mean"]
+    assert (v["name"], v["method"], v["runs_for_pass"]) == (
+        "betting",
+        "betting on case runs, c 0.75",
+        96,
+    )  # E-006
     assert gate.main([*args, "--relative"]) == gate.INFRA_ERROR
     assert "--relative applies to the naive rule only" in capsys.readouterr().err
 

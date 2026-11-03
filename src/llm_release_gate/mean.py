@@ -22,13 +22,15 @@ import math
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 
-METHODS = {  # E-006's candidates; `betting` is the gate's default (chosen by E-006)
+METHODS = {  # experiment E-006's candidates
     "cases-c0.5": {"unit": "case", "bet": "betting", "c": 0.5},
     "cases-c0.75": {"unit": "case", "bet": "betting", "c": 0.75},
     "runs-c0.75": {"unit": "run", "bet": "betting", "c": 0.75},
     "bernstein-c0.75": {"unit": "case", "bet": "bernstein", "c": 0.75},
 }
-DEFAULT = "cases-c0.5"  # until E-006 decides
+DEFAULT = (
+    "cases-c0.75"  # `betting`: E-006 chose it, the fastest of those that held alpha
+)
 
 
 @dataclass(frozen=True)
@@ -124,7 +126,7 @@ def capitals(
     alpha: float,
     unit: str = "case",
     bet: str = "betting",
-    c: float = 0.5,
+    c: float = 0.75,
 ) -> list[tuple[float, float]]:
     """log K+ and log K- at threshold m after each whole run.
 
@@ -161,7 +163,7 @@ def runs_for_pass(
     alpha: float,
     unit: str = "case",
     bet: str = "betting",
-    c: float = 0.5,
+    c: float = 0.75,
     cap: int = 10_000,
 ) -> int | None:
     """Runs of each version a candidate that never differs from the base needs to pass; None if more than `cap`."""
@@ -192,7 +194,7 @@ def decide(
     alpha: float = 0.025,
     unit: str = "case",
     bet: str = "betting",
-    c: float = 0.5,
+    c: float = 0.75,
     min_runs: int = 2,
 ) -> MeanVerdict:
     """The rule on the scores of each case over the runs of both versions (`first` decides)."""
