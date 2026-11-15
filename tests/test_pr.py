@@ -508,7 +508,10 @@ def test_a_recent_base_comes_from_the_cache(repo):
 def test_an_old_base_runs_again(repo):
     version(repo, "bare")
     cached_gate(repo)
-    age(repo.parent / "cache", 8)  # the default limit is 7 days
+    age(repo.parent / "cache", 6)  # the default limit is 7 days
+    _, out = cached_gate(repo)
+    assert all(r.get("reused") for r in records(out / "base.jsonl"))
+    age(repo.parent / "cache", 8)
     _, out = cached_gate(repo)
     assert not any(r.get("reused") for r in records(out / "base.jsonl"))
     assert "Base:" not in (out / "comment.md").read_text()

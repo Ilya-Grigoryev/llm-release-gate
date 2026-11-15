@@ -221,7 +221,7 @@ artifact `llm-release-gate-runs-NAME-VERSION16-SET16` of this repository's own r
 downloads it (the redirect to storage gets no token) and adds its runs to the directory; `pr` names the versions this
 job paid for in `OUT/NAME/shared.txt`, and the action uploads them under that name. A merged request's candidate is the
 target branch's new version when the merge keeps the tree, so the next request usually finds its base run. Reuse never
-fails a check: any error there runs the base, and a malformed cached record is skipped. The gate skips reuse when the
+fails a check: any error there runs the base, and a cached record with malformed ids or model names is skipped. The gate skips reuse when the
 request changes `prepare` and when the target branch has no valid `gate.yaml` (a model without a date is cached too,
 D-029); it needs `actions:
 read`, and without it the comment says so. The verdict counts the cost

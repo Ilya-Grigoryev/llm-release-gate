@@ -163,7 +163,8 @@ The gate never reuses runs when the request changes `prepare` or when the target
 takes one model name for one model, with or without a date: Anthropic's ids from Claude 4.6 on are fixed snapshots, while
 other providers' names without a date may move to a newer snapshot. Prefer a dated snapshot there. For a model without a
 date the comment warns, and the gate refuses to compare (`infra error`) runs the provider reported as different models
-when both versions asked for the same one.
+when both versions asked for the same one. If the provider moves the name to another model, requests get that error until
+the target branch's cached runs are older than `base_max_age_days`; set it to `0` on the target branch until then.
 Reuse needs `actions: read` in the job's `permissions`; without it the base runs again and the comment says why.
 
 ## Budgets: cost and latency

@@ -41,7 +41,9 @@ Prefer a dated snapshot. The gate takes one model name for one model, with or wi
 Claude 4.6 on are fixed snapshots; other providers' names without a date, such as OpenAI's `gpt-4.1-mini`, may move to a
 newer snapshot). For a name without a date every record keeps the requested model next to the one the provider reports,
 the gate's comment warns, and the gate refuses to compare two versions that asked for the same model and got different
-ones from the provider (or runs that do not say which one they got: report `model`).
+ones from the provider (or runs that do not say which one they got: report `model`). If the provider moves such a name to
+another model, requests get `infra error` until the target branch's cached runs are older than `base_max_age_days`; set
+it to `0` on the target branch until then.
 
 The gate imports no application code, only the module of a `function` check. [receipt-intake](https://github.com/Ilya-Grigoryev/receipt-intake) is a whole project set up this way.
 
