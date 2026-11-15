@@ -257,7 +257,7 @@ budgets:
   latency_s: 20
 ```
 
-Top-level `k`, `delta`, `mean`, `checks`, `levels`, `prices` and `budgets` apply to every pipeline unless it sets its own; a pipeline's `budgets`
+Top-level `k`, `delta`, `alpha`, `mean`, `checks`, `levels`, `prices` and `budgets` apply to every pipeline unless it sets its own; a pipeline's `budgets`
 replaces the top-level one whole, so `booking` has no latency limit. Code belongs to every pipeline: a change to
 `chat/gate.js` runs all three. On GitHub Actions, gate one pipeline per step with `pipeline:` and add
 `if: ${{ !cancelled() }}` to all steps but the first ([GitHub Actions](/docs/reference#github-actions)). A new

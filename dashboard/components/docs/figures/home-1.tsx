@@ -37,6 +37,7 @@ const EXAMPLES: Example[] = [
 
 Mean score 0.925 → 0.900 (-2.50 points, blocks below -5.00); naive rule: block if the mean drops by more than 5 points.
 10 cases, first run of each version · config 1f4a8c02 → 9e6b3d75 · set c4d17a90
+False blocks: at most α 0.025 for the rule on checks; the naive rule on the mean has no such bound.
 Checks: with 1 + 1 runs no break can be significant; a single broken check can block from 4 runs of each version (one-sided Fisher, α 0.025). 1 of 40 passed less often.
 Cost of this decision $0.031: base $0.015, candidate $0.016 (successful calls, list prices).
 
@@ -61,6 +62,7 @@ Cost of this decision $0.031: base $0.015, candidate $0.016 (successful calls, l
 
 Mean score 0.800 → 0.500 (-30.00 points, blocks below -5.00); naive rule: block if the mean drops by more than 5 points.
 10 cases, first run of each version · config 7d2e91c4 → b03f6a18 · set 52c8e0d7
+False blocks: at most α 0.025 for the rule on checks; the naive rule on the mean has no such bound.
 Checks: with 1 + 1 runs no break can be significant; a single broken check can block from 4 runs of each version (one-sided Fisher, α 0.025). 3 of 30 passed less often.
 Cost of this decision $0.127: base $0.068, candidate $0.059 (successful calls, list prices).
 
@@ -106,6 +108,7 @@ This request does not change \`booking\`: its config, prompts and code hash the 
 
 Mean score 0.700 → 0.600 (-10.00 points, blocks below -5.00); naive rule: block if the mean drops by more than 5 points.
 10 cases, first run of each version · config 4c1d9e07 → 8a3f2b65 · set 0e7b5d93
+False blocks: at most α 0.025 for the rule on checks; the naive rule on the mean has no such bound.
 Checks: with 1 + 1 runs no break can be significant; a single broken check can block from 4 runs of each version (one-sided Fisher, α 0.025). 2 of 20 passed less often.
 Cost of this decision $0.191: base $0.094, candidate $0.097 (successful calls, list prices).
 

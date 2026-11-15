@@ -12,7 +12,7 @@ checks is open: you can add your own.
 count; a request that changes nothing else gets `unchanged`, and nothing runs.
 
 **2. A case looks at it.** The gate blocks (`quality fail`) when the rule on the mean blocks, or when a check passes
-significantly less often over the runs, which takes at least 4 runs of each version. The default naive rule blocks when
+significantly less often over the runs, which takes at least 4 runs of each version at the default `alpha`. The default naive rule blocks when
 the candidate's mean score on one run is lower than the base's by more than `delta` points, 5 by default; `mean: betting`
 blocks when all runs together show a loss of more than `delta` ([How it decides](/docs/how-it-decides)). A change that
 no check looks at cannot lower a score.
@@ -104,7 +104,7 @@ application reads from the repository are code, except `docs/` at the root and f
 - **A change no case touches.** If your cases have credits of €30, €45 and €60, raising the credit limit from €30 to
   €40 changes nothing for any of them.
 - **One case on a large set.** With 20 cases, one case going from 1 to 0 lowers the mean by exactly 5 points, which is
-  at the naive rule's limit and passes; the rule on checks blocks one check broken in every run from 4 runs of each version,
+  at the naive rule's limit and passes; the rule on checks blocks one check broken in every run from 4 runs of each version (default `alpha`),
   several broken at once later. Read the comment's list of cases that got worse even on a pass.
 - **Changes outside the version**: untracked files, environment variables, data outside the repository, services your
   tools call, a provider's change behind a model name.

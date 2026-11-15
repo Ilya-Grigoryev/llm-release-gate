@@ -127,7 +127,7 @@ result that applies is a full pass: use it when the checks describe one correct 
 
 With `all`, each case is worth 100 / N points: with 20 cases, one case that goes from 1 to 0 lowers the mean by exactly
 5 points, which the naive rule (block above `delta`, 5 by default) passes; the rule on checks blocks it from 4 runs
-of each version if one check broke, later if several did.
+of each version (default `alpha`) if one check broke, later if several did.
 
 `levels` in `gate.yaml` names checks by id: a minor check leaves the case score and only warns when it gets worse, a
 critical one blocks even under `checks: report`

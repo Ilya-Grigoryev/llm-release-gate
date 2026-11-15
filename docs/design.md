@@ -126,7 +126,8 @@ runner's scorer is `hits(case, answer, trace=None)` (by default the run's trace,
 - **Built — betting rule on the mean** (`mean.py`, `mean: betting`). The rule pairs run k of each case with run k of
   the base; D = candidate − base in [−1, 1] and Y = (D + 1) / 2. Two one-sided betting tests (Waudby-Smith and Ramdas,
   arXiv:2010.09686): capital K+ = Π (1 + λ (Y − m)) at m = (1 − δ) / 2 passes once it reaches 1 / α, K− = Π (1 − λ (Y − m))
-  blocks; with independent calls Ville's inequality bounds each error at α = 0.025 over any number of looks at the same
+  blocks; with independent calls Ville's inequality bounds each error at α (the rule's share of `alpha`: 0.025 by
+  default, 0.05 when no check can block) over any number of looks at the same
   runs, so `run -k` can append runs outside CI and the rule decides again over all of them (experiment E-006: noise shared
   by a whole run breaks the bound). A new CI job runs the candidate afresh: it is a new test, not another look. The bet λ is the paper's predictable plug-in, truncated at c / m and c / (1 − m); it stays fixed for all
   cases of a run, which keeps the capital a supermartingale although cases have different means (AM–GM over the run).
@@ -139,7 +140,8 @@ runner's scorer is `hits(case, answer, trace=None)` (by default the run's trace,
 - **Built — levels** (`levels.py`, `levels:` in `gate.yaml`). Each (case, check) is `critical`, `normal` or `minor`: the
   case is `minor`; else the check's pattern (`critical` first); else the case's pattern; else `normal`. The checks that
   may block (`critical`, and `normal` under `checks: block`) form one family for `per_check`; those that only report
-  (`minor`, and `normal` under `checks: report`) another, each at α. A broken `critical` check leads the comment; a
+  (`minor`, and `normal` under `checks: report`) another, each at half of `alpha`; the second never blocks and spends
+  none of the gate's bound. A broken `critical` check leads the comment; a
   significantly worse check of the second family puts ⚠️ in the title ("minor" when all are minor, else "reported"), a
   `warnings` entry in the JSON and a `::warning` annotation in GitHub Actions, and keeps the exit code. Without `levels`,
   `checks: report` keeps its old output, with no ⚠️. `minor` checks leave the case score (rebuilt from `hits` with the case's own
@@ -150,12 +152,19 @@ runner's scorer is `hits(case, answer, trace=None)` (by default the run's trace,
   on k of K passes in each version, computed in exact fractions; Tarone's correction (only checks that could reach
   significance count, m the smallest number with at most m of them) and Bonferroni over those; a two-sided test blocks
   only a check that got worse; a share passes at `threshold`, None is left out; `block` or `report` mode. Defaults —
-  one-sided, alpha 0.025 — wait on D-003's open choice (M-12); the list by a discrete BH is not built. The gate builds
+  one-sided, alpha 0.025 (the gate passes half its `alpha`) — wait on D-003's open choice (M-12); the list by a discrete BH is not built. The gate builds
   its input from every run's `hits` (`check_runs`; a run without results gives None) and turns a pass into `quality fail`
   when it blocks; `checks: report` in `gate.yaml` only lists. `can_block(kb, kc, alpha, sides)` says whether one check that
   broke in every run could block with these run counts, `runs_to_block(alpha, sides)` the fewest equal runs from which
   it can, 4 at the defaults; the comment names it when no break can be significant at α / m. Tarone's correction counts every
   check that could show a break, so several broken at once need more runs than one.
+- **Built — one `alpha` for the gate** (`split`, `alpha:` in `gate.yaml`, `--alpha`). Either rule can block on its
+  own, so the bound on a false block of the gate is the sum of theirs. `alpha` (default 0.05) is that sum: half to the
+  betting rule, half to the rule on checks; all to the betting rule when the set has no check that may block. The
+  settings and the set decide which checks may block, the results never do, so the split keeps the bound. The
+  naive rule has no bound; under it `alpha` covers the rule on checks. The betting rule's share also bounds its wrong
+  pass. The comment states the split (`alpha_line`); `pr` warns before the runs when `k` is below `runs_to_block` at
+  the checks' share.
 - **Planned.** Buying more runs up to a money limit and continuing in the request; a second comparison against an
   anchor version, so that many small losses cannot add up unseen;
   an adaptive runner that pays for repeated runs only where the versions disagree. Each takes a seed as an argument and
@@ -189,7 +198,7 @@ runner's scorer is `hits(case, answer, trace=None)` (by default the run's trace,
 ### CI adapter (built)
 
 A project says what to gate in `gate.yaml` (`project.schema.json`, `project.load`): named pipelines, each a version's
-config and a golden set (with an optional manifest and `inputs-url`), and the settings `k`, `delta`, `prices`,
+config and a golden set (with an optional manifest and `inputs-url`), and the settings `k`, `delta`, `alpha`, `mean`, `checks`, `levels`, `prices`,
 `budgets` and `base_max_age_days`, which a pipeline may override, plus a `prepare` command. Its pull request job (on GitHub: `uses:
 Ilya-Grigoryev/llm-release-gate@<tag>` after its `setup` action) gets the golden set (from
 the repository, a GitHub release or a GitLab package; on GitHub in a step before the action), comments that it is running
@@ -197,7 +206,7 @@ with the number of cases (proving it can comment), then runs `llm-release-gate p
 repository's root. For each pipeline `pr` first copies the golden set's text files (cases and text inputs, never
 images; links followed) to `OUT/NAME/cases`, so even a run without a verdict shows what it was given, and checks the set
 against its manifest. It checks out the target branch in a worktree, runs `prepare` and syncs the environment in both
-trees, and asks each tree's own gate for the version's hash. The rules (`delta`, `k`, `budgets`, `prices`,
+trees, and asks each tree's own gate for the version's hash. The rules (`delta`, `alpha`, `k`, `mean`, `checks`, `levels`, `budgets`, `prices`,
 `base_max_age_days`) come
 from the target branch's `gate.yaml` when it has one (D-024); price files are copied before the request's `prepare`
 runs in that tree. Pipelines are matched by name, and the base arm runs the target branch's config of the pipeline, so

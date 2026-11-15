@@ -85,7 +85,7 @@ own are planned; the rest is built.
 - **An anchor against slow creep** (D-012): each pull request is also compared with a fixed earlier version, so losses
   smaller than δ cannot add up unseen.
 - **Checks that break on their own** (D-003, built): a check that passes significantly less often over the runs
-  blocks; a single broken check can block from 4 runs of each version. Critical checks block even when the others
+  blocks; at the default `alpha` a single broken check can block from 4 runs of each version. Critical checks block even when the others
   only report, minor ones only warn (D-028, built).
 
 ## Planned experiments

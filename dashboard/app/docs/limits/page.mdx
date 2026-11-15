@@ -12,7 +12,7 @@ The gate runs the request's code, workflow file and lock file, with the model pr
 in. A request can change any of these, so the gate catches mistakes, not an author who wants to get past it. It
 does stop a request loosening its own rules:
 
-- `delta`, `k`, `mean`, `checks`, `levels`, `budgets`, `prices` and `base_max_age_days` come from the target branch's
+- `delta`, `alpha`, `k`, `mean`, `checks`, `levels`, `budgets`, `prices` and `base_max_age_days` come from the target branch's
   `gate.yaml`; a new value applies after merge.
 - A request that changes `ignore`, or which files belong to which pipeline, runs every pipeline.
 - A request that removes or renames a pipeline fails as `inconclusive` (exit 11).
@@ -43,7 +43,7 @@ Say your booking assistant (a made-up example) may refund up to €30 without a 
 refunds of €20 and €60: raising the limit to €40 changes nothing any case sees. Changes outside the version stay unseen
 too ([What it catches](/docs/what-it-catches#what-it-cannot-see)).
 
-<Fig id="limits-1" caption={"A change can change the verdict only if it is part of the version, a case exercises it, and the drop it causes is larger than `delta` (or, over at least 4 runs of each version, a check breaks). With the default naive rule and one run per version, noise can push a drop over or under `delta`."} alt={"Three conditions in a row. First, the change must be part of the version: documentation, CI, gate.yaml, ignored paths and data outside the repository are not. Second, a case must exercise it: raising a refund limit from \u20ac30 to \u20ac40 is invisible when no case asks for an amount between them. Third, with one run per version, the mean score must drop by more than delta: one broken case among 20 lowers the mean by exactly 5 points, which passes at the default delta. With the default naive rule and one run per version, run-to-run noise can push a drop over or under delta."} />
+<Fig id="limits-1" caption={"A change can change the verdict only if it is part of the version, a case exercises it, and the drop it causes is larger than `delta` (or, over at least 4 runs of each version at the default `alpha`, a check breaks). With the default naive rule and one run per version, noise can push a drop over or under `delta`."} alt={"Three conditions in a row. First, the change must be part of the version: documentation, CI, gate.yaml, ignored paths and data outside the repository are not. Second, a case must exercise it: raising a refund limit from \u20ac30 to \u20ac40 is invisible when no case asks for an amount between them. Third, with one run per version, the mean score must drop by more than delta: one broken case among 20 lowers the mean by exactly 5 points, which passes at the default delta. With the default naive rule and one run per version, run-to-run noise can push a drop over or under delta."} />
 
 ## By default it decides on one run per version
 
@@ -52,7 +52,7 @@ candidate's is lower by more than `delta` points. In the author's measurement on
 had a spread of 30 points over 11 runs, and twice the same version, run as base and as candidate in one job, differed by
 10 points. So a block or a pass can be noise. Requests within `base_max_age_days` compare with the same base runs, so
 one noisy base run moves all their verdicts. A loss smaller than `delta` passes, so small losses add up unseen. The
-rule on checks reads every run but cannot block on one run per version: a single broken check needs 4 runs of each.
+rule on checks reads every run but cannot block on one run per version: at the default `alpha` a single broken check needs 4 runs of each.
 
 `mean: betting` reads every run and answers `inconclusive` when the runs show neither a pass nor a block. The comment
 then says how many runs a pass needs at least. With few cases that number is large, noise adds more, and every run
