@@ -200,7 +200,7 @@ function Train({ arm, at }: { arm: Arm; at: number }) {
   ));
 }
 
-/** The gate's comment while both versions run: the verdict is not in yet, and the count of cases done goes up. */
+/** The gate's comment while both versions run: the note `comment --running` posts, before the verdict replaces it. */
 function Pending({ ex }: { ex: Example }) {
   const name = ex.comment.match(/^`([^`]+)`/)?.[1];
   const n = ex.cases.length;
@@ -211,14 +211,9 @@ function Pending({ ex }: { ex: Example }) {
         <strong>Release gate: ⏳ running</strong>
       </p>
       <p>
-        {n ? (
-          <>
-            Running main and this request on the same {n} cases: <span data-done>0</span> of {n} done. This comment is edited
-            when the verdict is in.
-          </>
-        ) : (
-          <>Checking whether this request changes <code className="font-mono text-[0.9em]">{name}</code>.</>
-        )}
+        Started 2026-11-15 14:40 UTC: the gate compares the target branch&apos;s version with this request&apos;s
+        {n ? ` on ${n} cases` : ""}. The verdict replaces this note; if the job stops early (cancelled, timed out), the
+        note stays: see the job log.
       </p>
       <div aria-hidden className="space-y-2 pt-1">
         {["w-11/12", "w-3/4", "w-1/2"].map((w) => (
@@ -376,7 +371,6 @@ export default function Home1() {
           });
           tl.call(
             () => {
-              q("[data-done]").forEach((el) => (el.textContent = String(k + 1)));
               q("[data-mean=base]").forEach((el) => (el.textContent = mean(ex.cases.slice(0, k + 1).map((x) => x[1]))));
               q("[data-mean=cand]").forEach((el) => (el.textContent = mean(ex.cases.slice(0, k + 1).map((x) => x[2]))));
             },

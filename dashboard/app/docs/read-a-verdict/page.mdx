@@ -12,8 +12,10 @@ A made-up booking assistant books, moves and cancels rooms through tools. A pull
 its system prompt and raises `delta` in `gate.yaml` from 5 to 10. The figure shows the gate's comment; its numbers
 match this list.
 
-1. **Pipeline and outcome.** While the job runs, the comment says "⏳ running", when it started and on how many cases;
-   the verdict replaces that note, and later runs edit the comment again.
+1. **Pipeline and outcome.** When a pipeline's gate step starts, its comment says "⏳ running", when it started and on
+   how many cases; the verdict replaces that note, and later runs edit the comment again. A pipeline gated in a later
+   step of the same job keeps its last verdict until its step starts; a job that stops early (cancelled, timed out)
+   leaves the note in place of the last verdict.
 2. **Mean scores**, base → candidate, and the difference in points. "blocks below -5.00" marks −`delta`; a drop of
    exactly 5.00 passes. The line ends with the rule on the mean, here the naive rule, the default. Under
    `mean: betting` the line has no "blocks below", and the next one gives a range

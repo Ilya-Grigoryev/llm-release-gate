@@ -194,8 +194,8 @@ def project_with_cases(tmp_path, n):
 def test_the_running_note_says_when_and_on_how_many_cases(tmp_path):
     note = comment.running(project_with_cases(tmp_path, 3), "demo", NOW)
     assert note.startswith("**Release gate: ⏳ running**\n")
-    assert "Started 14:05 UTC" in note and "on 3 cases" in note
-    assert "on 1 case and" in comment.running(
+    assert "Started 2026-11-15 14:05 UTC" in note and "on 3 cases." in note
+    assert "on 1 case." in comment.running(
         project_with_cases(tmp_path / "one", 1), None, NOW
     )
 
@@ -204,7 +204,7 @@ def test_the_running_note_does_without_a_readable_gate_yaml(tmp_path):
     (tmp_path / "gate.yaml").write_text("pipelines: [broken")
     for directory, name in ((tmp_path, "demo"), (tmp_path / "missing", "demo")):
         note = comment.running(directory, name, NOW)
-        assert "this request's and turns this comment into the verdict" in note
+        assert "with this request's. The verdict replaces this note" in note
     assert " case" not in comment.running(
         project_with_cases(tmp_path / "p", 2), "other", NOW
     )
@@ -248,3 +248,18 @@ def test_the_running_note_fails_before_any_paid_run_without_a_token(
     monkeypatch.setattr(comment, "call", lambda *a, **k: pytest.fail("posted"))
     with pytest.raises(SystemExit, match="cannot comment: set GITLAB_TOKEN"):
         comment.main(["--running", "--project", str(tmp_path)])
+
+
+def test_dry_run_prints_the_running_note(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(comment, "call", lambda *a, **k: pytest.fail("posted"))
+    comment.main(
+        [
+            "--running",
+            "--dry-run",
+            "--project",
+            str(project_with_cases(tmp_path, 2)),
+            "--name",
+            "demo",
+        ]
+    )
+    assert capsys.readouterr().out.startswith("**Release gate: ⏳ running**")

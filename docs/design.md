@@ -177,7 +177,7 @@ runner's scorer is `hits(case, answer, trace=None)` (by default the run's trace,
   [--max-cost-per-run USD] [--max-latency S] [--latency-quantile Q] [--markdown FILE] [--json FILE]`; the exit code is
   the verdict's. `comment.py` posts the Markdown as one comment on a GitHub pull request or GitLab merge request, edits it on
   later pushes, and posts an infra-error comment when the job stopped before a verdict. CLI: `python -m
-  llm_release_gate.comment [FILE] [--name NAME] [--check] [--dry-run]`; it needs `GITHUB_TOKEN` with `pull-requests: write` or
+  llm_release_gate.comment [FILE] [--name NAME] [--running] [--project DIR] [--check] [--dry-run]`; it needs `GITHUB_TOKEN` with `pull-requests: write` or
   `GITLAB_TOKEN` with scope `api`.
 - **Built — budgets.** `budget.check(costs, latencies, retried, cost_limit, latency_limit, latency_q, level) -> Budget`, a
   pure function over the candidate's runs: the mean cost per run against its limit; a latency quantile with a
@@ -192,8 +192,9 @@ runner's scorer is `hits(case, answer, trace=None)` (by default the run's trace,
 A project says what to gate in `gate.yaml` (`project.schema.json`, `project.load`): named pipelines, each a version's
 config and a golden set (with an optional manifest and `inputs-url`), and the settings `k`, `delta`, `prices`,
 `budgets` and `base_max_age_days`, which a pipeline may override, plus a `prepare` command. Its pull request job (on GitHub: `uses:
-Ilya-Grigoryev/llm-release-gate@<tag>` after its `setup` action) comments that it is running (proving it can comment), gets the golden set (from
-the repository, a GitHub release or a GitLab package), then runs `llm-release-gate pr --base REV --out OUT` from the
+Ilya-Grigoryev/llm-release-gate@<tag>` after its `setup` action) gets the golden set (from
+the repository, a GitHub release or a GitLab package; on GitHub in a step before the action), comments that it is running
+with the number of cases (proving it can comment), then runs `llm-release-gate pr --base REV --out OUT` from the
 repository's root. For each pipeline `pr` first copies the golden set's text files (cases and text inputs, never
 images; links followed) to `OUT/NAME/cases`, so even a run without a verdict shows what it was given, and checks the set
 against its manifest. It checks out the target branch in a worktree, runs `prepare` and syncs the environment in both
@@ -290,8 +291,8 @@ sequenceDiagram
     participant RC as runner (candidate, this request)
     participant AD as program + model
     participant G as gate
-    CI->>C: --running: note on the request, proves it can comment
     CI->>CI: download or build the golden set
+    CI->>C: --running: note on the request, proves it can comment
     CI->>SH: --base revision, --pipeline
     SH->>SH: copy the set's text files, check it against its manifest
     SH->>SH: worktree of the target branch, prepare and sync both trees

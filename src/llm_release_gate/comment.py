@@ -17,9 +17,9 @@ from llm_release_gate import golden, project
 MARKER = "<!-- llm-release-gate -->"
 NO_VERDICT = "**Release gate: ⚠️ infra error**\n\nThe job stopped before the gate wrote a verdict; see the job log.\n"
 RUNNING = (
-    "**Release gate: ⏳ running**\n\nStarted {started} UTC: the gate runs the target branch's version and this "
-    "request's{cases} and turns this comment into the verdict. If the job stops early (cancelled, timed out), this note "
-    "stays: see the job log.\n"
+    "**Release gate: ⏳ running**\n\nStarted {started} UTC: the gate compares the target branch's version with this "
+    "request's{cases}. The verdict replaces this note; if the job stops early (cancelled, timed out), the note stays: "
+    "see the job log.\n"
 )
 Send = Callable[..., Any]
 
@@ -139,7 +139,7 @@ def running(directory: Path, name: str | None, now: datetime) -> str:
         cases = f" on {n} case{'s' * (n != 1)}" if n else ""
     except (OSError, ValueError):  # the gate step reports a broken gate.yaml or set
         pass
-    return RUNNING.format(started=now.strftime("%H:%M"), cases=cases)
+    return RUNNING.format(started=now.strftime("%Y-%m-%d %H:%M"), cases=cases)
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -172,6 +172,9 @@ def main(argv: list[str] | None = None) -> None:
     args = p.parse_args(argv)
     if not (args.check or args.running) and not args.file:
         p.error("give the Markdown file, --check or --running")
+    if args.dry_run and args.running:
+        print(running(args.project, args.name, datetime.now(UTC)), end="")
+        return
     if args.dry_run:
         if not args.file or not args.file.is_file():
             sys.exit(f"{args.file}: no such file")

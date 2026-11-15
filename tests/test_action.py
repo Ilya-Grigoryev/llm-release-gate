@@ -212,3 +212,5 @@ def test_the_running_note_comes_before_the_paid_runs_and_only_on_a_request():
         '--name "$NAME"' in step["run"]
         and step["env"]["NAME"] == "${{ steps.pipeline.outputs.name }}"
     )
+    # a failed note (no right to comment) stops the job before the paid runs: no always() or cancelled() on the gate step
+    assert not any(w in _step("gate")["if"] for w in ("always()", "cancelled()"))

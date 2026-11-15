@@ -433,7 +433,7 @@ Posts the Markdown as one comment, edited by later runs. It needs a GitHub Actio
 |---|---|
 | `FILE` | the Markdown from `gate --markdown` or `OUT/NAME/comment.md`; if missing, posts an infra-error comment |
 | `--name NAME` | the pipeline's name, for one comment per pipeline |
-| `--running` | post that the gate is running, with the start time and the number of cases from `gate.yaml`; the verdict later edits the same comment |
+| `--running` | post that the gate is running, with the start time and the number of cases from `gate.yaml`; the verdict later edits the same comment if it uses the same `--name` |
 | `--project DIR` | where `gate.yaml` is, for `--running` (default `.`) |
 | `--check` | only check that this job can comment, before paying for runs |
 | `--dry-run` | print the comment, post nothing |

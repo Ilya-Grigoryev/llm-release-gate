@@ -542,6 +542,7 @@ each outcome and what to do next.
 Outside GitHub Actions, install the project with uv and run from the repository's root:
 
 ```sh
+uv run llm-release-gate comment --running --name invoice   # optional: the note the verdict replaces
 uv run llm-release-gate pr --base origin/main --out OUT
 uv run llm-release-gate comment OUT/invoice/comment.md --name invoice
 ```
