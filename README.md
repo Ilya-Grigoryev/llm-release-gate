@@ -229,8 +229,8 @@ A lower `alpha` means fewer wrong blocks and wrong passes, and more runs before 
 The table assumes checks that may block. With none, the rule on the mean gets all of `alpha`: its runs are in the row
 whose share equals your `alpha`, the 0.1 row at the default. The fourth column is a limit of Tarone's correction: when more checks than that break in
 every run, it blocks none of them, and the rule on the mean has to catch the break. The comment states the split and
-the range's level. When no check could block with the pipeline's `k` and `alpha`, `pr` says so before the runs and
-names the `k` or `alpha` that would let it.
+the range's level. If no check could block with the pipeline's `k` and `alpha`, `pr` says so before the runs and names
+the `k` or `alpha` that would let it.
 
 `setup` installs Python, uv and the project's locked environment. The gate action first comments that it is running (which also proves it can
 comment), checks the golden set (against its manifest, if any), and compares the version from the target branch with the one from the
