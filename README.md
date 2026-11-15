@@ -257,7 +257,7 @@ Outside GitHub Actions the gate's command does the work, from the repository's r
 origin/main --out OUT` runs every pipeline of `gate.yaml` and writes `OUT/NAME` (`--project DIR` when `gate.yaml` is not
 at the root, `--list` only checks it; `--cache DIR` reuses the base's runs from a directory the CI keeps between jobs). `llm-release-gate comment OUT/NAME/comment.md --name NAME` posts a verdict (on
 GitLab with `GITLAB_TOKEN`, a project access token with the `api` scope); `--running --name NAME` posts that the gate is running and on
-how many cases, for the verdict to replace; `--check` only tells whether the job can comment, `--dry-run` prints the
+how many cases (`--project DIR` as for `pr`), for the verdict to replace; `--check` only tells whether the job can comment, `--dry-run` prints the
 comment and posts nothing.
 
 ## Dashboard

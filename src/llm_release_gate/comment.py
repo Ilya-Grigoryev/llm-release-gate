@@ -172,6 +172,8 @@ def main(argv: list[str] | None = None) -> None:
     args = p.parse_args(argv)
     if not (args.check or args.running) and not args.file:
         p.error("give the Markdown file, --check or --running")
+    if args.running and (args.file or args.check):
+        p.error("--running posts its own note: give no file and no --check")
     if args.dry_run and args.running:
         print(running(args.project, args.name, datetime.now(UTC)), end="")
         return

@@ -263,3 +263,9 @@ def test_dry_run_prints_the_running_note(tmp_path, monkeypatch, capsys):
         ]
     )
     assert capsys.readouterr().out.startswith("**Release gate: ⏳ running**")
+
+
+@pytest.mark.parametrize("argv", [["--running", "x.md"], ["--running", "--check"]])
+def test_the_running_note_takes_no_file_and_no_check(argv):
+    with pytest.raises(SystemExit):
+        comment.main(argv)

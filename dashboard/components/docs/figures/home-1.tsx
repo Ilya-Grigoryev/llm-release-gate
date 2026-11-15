@@ -215,6 +215,9 @@ function Pending({ ex }: { ex: Example }) {
         {n ? ` on ${n} cases` : ""}. The verdict replaces this note; if the job stops early (cancelled, timed out), the
         note stays: see the job log.
       </p>
+      <p>
+        <span className="text-arm-base underline underline-offset-2">Job log</span>
+      </p>
       <div aria-hidden className="space-y-2 pt-1">
         {["w-11/12", "w-3/4", "w-1/2"].map((w) => (
           <div key={w} className={`h-2.5 rounded-full bg-line motion-safe:animate-pulse ${w}`} />
