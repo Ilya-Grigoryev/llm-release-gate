@@ -35,11 +35,11 @@ gh secret set LLM_RELEASE_GATE_KEY < llm-release-gate-key   # run inside your pr
 
 ```sh
 GIT_SSH_COMMAND="ssh -F /dev/null -i llm-release-gate-key -o IdentitiesOnly=yes" \
-  git ls-remote git@github.com:Ilya-Grigoryev/llm-release-gate.git v0.1.0-dev.13
+  git ls-remote git@github.com:Ilya-Grigoryev/llm-release-gate.git v0.1.0-dev.14
 gh secret list   # run inside your project's repository
 ```
 
-The first command prints a commit id and `refs/tags/v0.1.0-dev.13`; `Permission denied (publickey)` means the gate's
+The first command prints a commit id and `refs/tags/v0.1.0-dev.14`; `Permission denied (publickey)` means the gate's
 repository does not know the key. The second lists `LLM_RELEASE_GATE_KEY`. Then delete the key files:
 
 ```sh
@@ -51,7 +51,7 @@ rm llm-release-gate-key llm-release-gate-key.pub
 `uv add` pins the gate to a release and updates the lock file:
 
 ```sh
-uv add "llm-release-gate @ git+https://github.com/Ilya-Grigoryev/llm-release-gate" --tag v0.1.0-dev.13
+uv add "llm-release-gate @ git+https://github.com/Ilya-Grigoryev/llm-release-gate" --tag v0.1.0-dev.14
 ```
 
 ```toml
@@ -59,7 +59,7 @@ uv add "llm-release-gate @ git+https://github.com/Ilya-Grigoryev/llm-release-gat
 dependencies = ["llm-release-gate"]
 
 [tool.uv.sources]
-llm-release-gate = { git = "https://github.com/Ilya-Grigoryev/llm-release-gate", tag = "v0.1.0-dev.13" }
+llm-release-gate = { git = "https://github.com/Ilya-Grigoryev/llm-release-gate", tag = "v0.1.0-dev.14" }
 ```
 
 Commit `pyproject.toml` and `uv.lock` together: a stale lock file stops the gate in CI. **Check:**
@@ -480,10 +480,10 @@ jobs:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
     steps:
       - uses: actions/checkout@v7
-      - uses: Ilya-Grigoryev/llm-release-gate/setup@v0.1.0-dev.13
+      - uses: Ilya-Grigoryev/llm-release-gate/setup@v0.1.0-dev.14
         with:
           gate-ssh-key: ${{ secrets.LLM_RELEASE_GATE_KEY }}  # while the gate's repository is private
-      - uses: Ilya-Grigoryev/llm-release-gate@v0.1.0-dev.13
+      - uses: Ilya-Grigoryev/llm-release-gate@v0.1.0-dev.14
 ```
 
 `setup` installs Python, uv and your project's locked environment; the gate step needs `pull-requests: write` to post
