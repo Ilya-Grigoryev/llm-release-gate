@@ -155,3 +155,17 @@ def test_levels_are_a_rule_of_the_project(tmp_path):
         )
     with pytest.raises(ValueError, match="levels"):
         load(tmp_path, "levels: {major: [x]}\npipelines: {a: {config: c, golden: g}}\n")
+
+
+def test_alpha_is_the_whole_gates_and_stays_below_one_half(tmp_path):
+    rules = load(
+        tmp_path,
+        "alpha: 0.01\npipelines: {a: {config: c, golden: g}, b: {config: d, golden: g, alpha: 0.1}}\n",
+    )
+    assert (rules.pipelines["a"].alpha, rules.pipelines["b"].alpha) == (0.01, 0.1)
+    assert project.Pipeline("c", "c", "g").alpha == 0.05
+    for bad in ("0", "0.5", ".nan"):
+        with pytest.raises(ValueError, match="alpha"):
+            load(
+                tmp_path, f"alpha: {bad}\npipelines: {{a: {{config: c, golden: g}}}}\n"
+            )

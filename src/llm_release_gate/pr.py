@@ -13,6 +13,7 @@ version on its own.
 
 import argparse
 import json
+import math
 import os
 import shutil
 import subprocess
@@ -20,15 +21,17 @@ import sys
 import traceback
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
+from fractions import Fraction
 from pathlib import Path
 
-from llm_release_gate import project, shared
+from llm_release_gate import criterion, project, shared
 from llm_release_gate.gate import (
     BUDGET_FAIL,
     INCONCLUSIVE,
     INFRA_ERROR,
     PASS,
     QUALITY_FAIL,
+    split,
 )
 from llm_release_gate.golden import check
 from llm_release_gate.runner import read_records
@@ -414,7 +417,7 @@ def one(
     decide = [
         *PYTHON, "-m", "llm_release_gate.gate",
         *(["--base", str(dest / "base.jsonl")] if base else ["--no-base"]), "--candidate", str(dest / "candidate.jsonl"),
-        "--golden", str(golden), "--threshold", str(p.delta), "--mean", p.mean, "--checks", p.checks,
+        "--golden", str(golden), "--threshold", str(p.delta), "--alpha", str(p.alpha), "--mean", p.mean, "--checks", p.checks,
         *(["--levels", json.dumps(p.levels)] if p.levels else []),
         "--markdown", str(dest / "comment.md"), "--json", str(dest / "verdict.json"),
         *(["--prices", prices] if prices else []),
@@ -427,6 +430,24 @@ def one(
         with (dest / "comment.md").open("a") as f:
             f.write(f"\n{note}\n")
     return code
+
+
+def too_few_runs(p: project.Pipeline) -> str | None:
+    """Before any run: a warning if not even one check broken in every run can block with these `k` and `alpha`,
+    although the settings let checks block; it names the `k` and the `alpha` that would."""
+    levels = p.levels or {}
+    critical = levels.get("critical") or "critical" in levels.get("cases", {}).values()
+    if p.checks != "block" and not critical:
+        return None
+    need = criterion.runs_to_block(split(p.alpha, True)[1])
+    if p.k >= need:
+        return None
+    # one check passes in all k base runs and fails in all k candidate runs; the checks get half of alpha
+    alpha = math.ceil(Fraction(20_000, math.comb(2 * p.k, p.k))) / 10_000
+    return (
+        f"⚠️ With alpha {p.alpha:g} and k: {p.k} the rule on checks cannot block: it needs k: {need}"
+        + (f", or alpha {alpha:g} at k: {p.k}." if alpha < 0.5 else ".")
+    )
 
 
 def layout(settings: project.Project, directory: Path) -> tuple:
@@ -703,6 +724,8 @@ def main(argv: list[str] | None = None) -> int:
                     prices_copy,
                 )
                 notes += more
+                if warning := too_few_runs(p):  # before the runs cost anything
+                    print(f"{name}: {warning}", file=sys.stderr)
                 golden, set_hash = checked_set(p, candidate, dest)
                 if problem:
                     raise problem

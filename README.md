@@ -89,7 +89,7 @@ uv run --env-file .env llm-release-gate run --config configs/sroie-image.yaml --
 
 The first gate compares one run per version: it blocks when the candidate's mean score is lower than the base's by more than a threshold, 5 points by default (`--relative` reads it as a percentage of the base mean). It pairs the two files case by case and refuses files with different set hashes, different scorer versions or cases missing from one side. `--golden` rescores both sides from their saved answers with the current scorer, without calling the model.
 
-The rule on checks reads every run: per case and check, Fisher's exact test compares how often the check passed in each version (one-sided, α 0.025, Bonferroni over the checks that can reach significance, after Tarone). A check that got significantly worse gives `quality fail` whatever the mean did; `--checks report` (`checks: report` in `gate.yaml`) only lists it. With one run of each version no check can reach significance: a single broken check can block from 4 runs of each, several broken at once need more (the correction counts every check that changed or varies), and the comment says when no break can be significant.
+The rule on checks reads every run: per case and check, Fisher's exact test compares how often the check passed in each version (one-sided, at half of `alpha`, 0.025 by default; Bonferroni over the checks that can reach significance, after Tarone). A check that got significantly worse gives `quality fail` whatever the mean did; `--checks report` (`checks: report` in `gate.yaml`) only lists it. With one run of each version no check can reach significance: at the default `alpha` a single broken check can block from 4 runs of each, several broken at once need more (the correction counts every check that changed or varies), and the comment says when no break can be significant.
 
 `--prices` takes a YAML of `model: [input, output]` in USD per 1M tokens, or `[input, output, cached input]`, and adds what the decision cost: every successful call of both runs. An agent resends the whole dialog on every call, so most of its input is billed as cached; without the third price, cached tokens cost the full input price. For a traced record that means every model step, the user simulator's included.
 
@@ -198,6 +198,7 @@ apply to every pipeline, and a pipeline's own win:
 | `pipelines.NAME.inputs-url` | where the dashboard finds the set's other files (images): a URL with `{path}` or `{name}` |
 | `k` | runs per case and version, default 1; the naive rule reads the first run, the betting rule, the rule on checks and budgets all |
 | `delta` | points of mean score the candidate may lose, default 5 |
+| `alpha` | the bound on how often the gate blocks a candidate that is no worse, default 0.05, split between the rules; the naive rule has none ([below](#how-often-the-gate-may-be-wrong)) |
 | `mean` | `naive` (default): block when the first run's mean drops by more than `delta`; `betting`: pass when the runs show the loss is under `delta`, block when they show it is over, otherwise inconclusive with the number of runs a pass needs (from 2 runs; with δ 5 and 50 cases, a candidate that never differs from the base passes after 2, and noise needs more) |
 | `checks` | `block` (default): a check that got significantly worse over the runs blocks; `report`: it is only listed |
 | `levels` | `critical: [ids]` block even under `checks: report` and lead the comment; `minor: [ids]` stay out of the case score and only warn (⚠️ in the title, a CI annotation) when significantly worse, as normal checks under `checks: report` do once `levels` is set; `cases: {pattern: level}` for a case's checks, and a `minor` case leaves the mean. Ids take shell patterns (`assert-*`); a pattern that matches no check is named in the comment |
@@ -206,6 +207,30 @@ apply to every pipeline, and a pipeline's own win:
 | `base_max_age_days` | the gate reuses the target branch's runs from earlier jobs up to this many days old, default 7; `0` runs both versions in every job |
 | `prepare` | a command that readies the project in both trees before their runs, such as `[npm, ci]` |
 | `ignore` | glob patterns, from the project's directory, of files that never change what the model gets, such as `web/` (a trailing `/` takes the directory, `**` crosses directories); on top of documentation and CI; `!docs/kb/` takes files back, for an app that reads them |
+
+### How often the gate may be wrong
+
+Under `mean: betting`, `alpha` bounds how often the gate blocks a candidate that is no worse than the base. Each of
+the two rules can block on its own, so the gate splits `alpha` between them: half to the betting rule on the mean, half
+to the rule on checks. If no check can block (`checks: report` without `critical` levels), the rule on the mean gets
+all of it. The betting rule's share bounds a second error: a candidate that lost more than `delta` and passes. Raise
+`alpha` to decide sooner, and more such losses pass. The naive rule has no bound of either kind; under `mean: naive`
+the rule on checks gets its half and the rest goes unused.
+
+A lower `alpha` means fewer wrong blocks and wrong passes, and more runs before the gate decides. At `delta` 5:
+
+| `alpha` | Each rule's share: false blocks, and missed losses for the betting rule | A check broken in every run can block from | Fully broken checks that can still block at `k: 5` | Runs of each version a pass needs when nothing changed, 10 / 30 / 50 cases |
+|---|---|---|---|---|
+| 0.01 | 0.005 | `k: 5` | 1 | 14 / 5 / 3 |
+| 0.025 | 0.0125 | `k: 5` | 3 | 12 / 4 / 3 |
+| 0.05 (default) | 0.025 | `k: 4` | 6 | 10 / 4 / 2 |
+| 0.1 | 0.05 | `k: 3` | 12 | 8 / 3 / 2 |
+
+The table assumes checks that may block. With none, the rule on the mean gets all of `alpha`: its runs are in the row
+whose share equals your `alpha`, the 0.1 row at the default. The fourth column is a limit of Tarone's correction: when more checks than that break in
+every run, it blocks none of them, and the rule on the mean has to catch the break. The comment states the split and
+the range's level. When no check could block with the pipeline's `k` and `alpha`, `pr` says so before the runs and
+names the `k` or `alpha` that would let it.
 
 `setup` installs Python, uv and the project's locked environment. The gate action first comments that it is running (which also proves it can
 comment), checks the golden set (against its manifest, if any), and compares the version from the target branch with the one from the
@@ -224,7 +249,7 @@ request compares with the same base runs, so one noisy base run moves all their 
 both versions together, as an experiment that counts the gate's errors should. The gate never reuses runs when the request changes `prepare` or when the target branch has no valid `gate.yaml`. The job needs `actions: read` to find earlier runs;
 without it the base runs again and the comment says so.
 
-The rules (`delta`, `k`, `budgets`, `prices`, `base_max_age_days`) come from the target branch's `gate.yaml`, so editing the rules in a
+The rules (`delta`, `alpha`, `k`, `budgets`, `prices`, `base_max_age_days`) come from the target branch's `gate.yaml`, so editing the rules in a
 request does not loosen that request's gate: new rules apply after merge, and the comment says when a request changes
 them, adds a pipeline or changes a test set. A request that removes a pipeline (or renames it, which looks the same)
 fails as inconclusive (exit 11; the other pipelines keep their verdicts): no version of it was compared, so a

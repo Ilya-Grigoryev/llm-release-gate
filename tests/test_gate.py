@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from llm_release_gate import criterion, gate, runner
+from llm_release_gate import criterion, gate, mean, runner
 from llm_release_gate.golden import load_cases
 from llm_release_gate.pipeline import Answer
 
@@ -787,3 +787,120 @@ def test_the_annotation_escapes_what_github_reads_as_commands(
     gate.main(args)
     out = capsys.readouterr().out
     assert "in 50%25%0Acase: passed" in out and "50%\ncase" not in out
+
+
+def test_the_gate_splits_its_alpha_between_the_rules():
+    assert gate.split(0.05, True) == (0.025, 0.025)
+    assert gate.split(0.05, False) == (
+        0.05,
+        0.025,
+    )  # no check can block: all for the mean
+    assert gate.alpha_line(0.05, True, True) == (
+        "False blocks: at most α 0.05 for the gate, 0.025 for the rule on the mean and 0.025 for the rule on checks."
+    )
+    assert (
+        "all of it for the rule on the mean, since no check can block"
+        in gate.alpha_line(0.05, True, False)
+    )
+    assert gate.alpha_line(0.05, False, True) == (
+        "False blocks: at most α 0.025 for the rule on checks; the naive rule on the mean has no such bound."
+    )
+    assert gate.alpha_line(0.05, False, False).startswith(
+        "False blocks: no check can block"
+    )
+
+
+@pytest.mark.parametrize("k, code", [(4, gate.PASS), (5, gate.QUALITY_FAIL)])
+def test_a_lower_alpha_needs_more_runs_for_a_check_to_block(
+    tmp_path, monkeypatch, capsys, k, code
+):
+    # alpha 0.025 leaves 0.0125 for checks: 4/4 -> 0/4 has p 1/70, above it; 5/5 -> 0/5 has 1/252
+    base = runs(tmp_path, monkeypatch, "base", 0, Fixed(), k=k)
+    broken = runs(tmp_path, monkeypatch, "broken", 1, Fixed(total="21.50"), k=k)
+    report, comment = tmp_path / "v.json", tmp_path / "c.md"
+    args = ["--base", str(base), "--candidate", str(broken), "--threshold", "30"]
+    args += ["--alpha", "0.025", "--json", str(report), "--markdown", str(comment)]
+    assert gate.main(args) == code
+    v = json.loads(report.read_text())
+    assert v["alpha"] == {"gate": 0.025, "mean": None, "checks": 0.0125}
+    assert (v["checks"]["alpha"], v["checks"]["runs_to_block"]) == (0.0125, 5)
+    assert (
+        "False blocks: at most α 0.0125 for the rule on checks" in comment.read_text()
+    )
+
+
+def test_the_rule_on_the_mean_gets_all_of_alpha_when_no_check_can_block(
+    tmp_path, monkeypatch, capsys
+):
+    args, report, comment = betting_args(tmp_path, monkeypatch, Fixed(), Fixed(), 2, 5)
+    gate.main(args)
+    v = json.loads(report.read_text())
+    assert v["alpha"] == {"gate": 0.05, "mean": 0.025, "checks": 0.025}
+    assert v["mean"]["alpha"] == 0.025 and "points (95 %)" in comment.read_text()
+    gate.main([*args, "--checks", "report"])
+    v = json.loads(report.read_text())
+    assert v["alpha"] == {"gate": 0.05, "mean": 0.05, "checks": None}
+    assert (
+        v["mean"]["alpha"] == 0.05 and v["checks"]["alpha"] == 0.025
+    )  # listed at half
+    text = comment.read_text()
+    assert "all of it for the rule on the mean, since no check can block" in text
+    assert "points (90 %)" in text  # 0.05 on each side
+    assert "fewer with a larger `alpha` or δ" in text
+
+
+def test_a_critical_check_keeps_half_of_alpha_under_report(
+    tmp_path, monkeypatch, capsys
+):
+    args, report, _ = levels_args(
+        tmp_path, monkeypatch, Fixed(), {"critical": ["total"]}, "--checks", "report"
+    )
+    gate.main([*args, "--mean", "betting"])
+    assert json.loads(report.read_text())["alpha"] == {
+        "gate": 0.05,
+        "mean": 0.025,
+        "checks": 0.025,
+    }
+
+
+@pytest.mark.parametrize("alpha", ["0", "0.5", "-0.1", "nan"])
+def test_an_alpha_outside_its_range_is_refused(tmp_path, monkeypatch, capsys, alpha):
+    args, _, _ = betting_args(tmp_path, monkeypatch, Fixed(), Fixed(), 2, 5)
+    assert gate.main([*args, "--alpha", alpha]) == gate.INFRA_ERROR
+    alone = ["--no-base", "--candidate", args[args.index("--candidate") + 1]]
+    assert gate.main([*alone, "--alpha", alpha]) == gate.INFRA_ERROR
+    assert "alpha must lie in (0, 0.5)" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "page", ["README.md", "dashboard/app/docs/how-it-decides/page.mdx"]
+)
+def test_the_table_of_alpha_follows_the_code(page):
+    text = (REPO / page).read_text()
+    method = mean.METHODS[mean.DEFAULT]
+
+    def blocks(n, alpha):
+        base = {(f"c{i}", "x"): [True] * 5 for i in range(n)}
+        broken = {key: [False] * 5 for key in base}
+        return criterion.per_check(base, broken, alpha=alpha).outcome == "block"
+
+    for alpha in (0.01, 0.025, 0.05, 0.1):
+        on_mean, on_checks = gate.split(alpha, True)
+        most = max(n for n in range(1, 30) if blocks(n, on_checks))
+        runs = " / ".join(
+            str(mean.runs_for_pass(n, 0.05, on_mean, **method)) for n in (10, 30, 50)
+        )
+        default = " (default)" if alpha == 0.05 else ""
+        need = criterion.runs_to_block(on_checks)
+        row = f"| {alpha:g}{default} | {on_checks:g} | `k: {need}` | {most} | {runs} |"
+        assert row in text
+
+
+def test_the_pass_floor_names_alpha_only_when_it_could_lower_it():
+    def floor(cases):
+        same = {f"c{i}": [1.0] for i in range(cases)}
+        return gate.mean_lines(mean.decide(same, same, 0.05), None)[0]
+
+    assert "fewer with a larger `alpha` or δ" in floor(1)  # 96 runs
+    many = floor(60)  # 2 runs, the first look
+    assert "A pass needs at least 2 runs" in many and "fewer with" not in many

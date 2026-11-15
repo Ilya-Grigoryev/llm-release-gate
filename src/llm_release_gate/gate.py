@@ -162,12 +162,15 @@ def all_runs(records: list[dict]) -> list[float]:
 
 
 def betting(
-    pairs: dict[str, tuple[list[dict], list[dict]]], delta_pp: float, method: str
+    pairs: dict[str, tuple[list[dict], list[dict]]],
+    delta_pp: float,
+    method: str,
+    alpha: float = 0.025,
 ) -> tuple[Verdict, mean.MeanVerdict]:
     """The rule on the mean over all runs (D-004 C, D-026 C): pass, block (quality fail) or inconclusive."""
     base = {k: all_runs(b) for k, (b, _) in pairs.items()}
     candidate = {k: all_runs(c) for k, (_, c) in pairs.items()}
-    mv = mean.decide(base, candidate, delta_pp / 100, **mean.METHODS[method])
+    mv = mean.decide(base, candidate, delta_pp / 100, alpha, **mean.METHODS[method])
     code = {"pass": PASS, "block": QUALITY_FAIL, "inconclusive": INCONCLUSIVE}[
         mv.outcome
     ]
@@ -191,7 +194,7 @@ def betting(
 
 def mean_lines(mv: mean.MeanVerdict, cost_per_run: float | None) -> list[str]:
     """What the betting rule showed, and what a pass would take."""
-    span = f"[{100 * mv.lower:+.1f}, {100 * mv.upper:+.1f}] points (95 %)"
+    span = f"[{100 * mv.lower:+.1f}, {100 * mv.upper:+.1f}] points ({100 * (1 - 2 * mv.alpha):g} %)"
     shown = f"The difference lies in {span}"
     if mv.outcome != "inconclusive":
         out = [
@@ -211,9 +214,12 @@ def mean_lines(mv: mean.MeanVerdict, cost_per_run: float | None) -> list[str]:
             f"{shown}; not decided. With this method and {mv.cases} case{'s' if mv.cases != 1 else ''} a pass needs more than 10 000 runs."
         ]
     more = max(0, need - mv.runs)
+    fewer = (
+        "; fewer with a larger `alpha` or δ" if need > 2 else ""
+    )  # no look before run 2
     floor = (
         f"A pass needs at least {need} runs of each version even if nothing changed "
-        f"({mv.cases} case{'s' if mv.cases != 1 else ''}, δ {100 * mv.delta:g} points, α {mv.alpha:g})"
+        f"({mv.cases} case{'s' if mv.cases != 1 else ''}, δ {100 * mv.delta:g} points, α {mv.alpha:g}{fewer})"
     )
     if not more:
         return [
@@ -225,6 +231,24 @@ def mean_lines(mv: mean.MeanVerdict, cost_per_run: float | None) -> list[str]:
         else ""
     )
     return [f"{shown}; not decided. {floor}: {more} more{price}."]
+
+
+def split(alpha: float, checks_block: bool) -> tuple[float, float]:
+    """The whole gate's alpha (D-031) as (rule on the mean, rule on checks). Whether a check may block depends on the
+    settings and the set's checks, never on the results, so the split keeps the bound."""
+    return (alpha / 2 if checks_block else alpha), alpha / 2
+
+
+def alpha_line(alpha: float, betting: bool, checks_block: bool) -> str:
+    """How the gate spends its alpha, for the comment."""
+    on_mean, on_checks = split(alpha, checks_block)
+    if betting and checks_block:
+        return f"False blocks: at most α {alpha:g} for the gate, {on_mean:g} for the rule on the mean and {on_checks:g} for the rule on checks."
+    if betting:
+        return f"False blocks: at most α {alpha:g} for the gate, all of it for the rule on the mean, since no check can block."
+    if checks_block:
+        return f"False blocks: at most α {on_checks:g} for the rule on checks; the naive rule on the mean has no such bound."
+    return "False blocks: no check can block, and the naive rule on the mean has no bound on them."
 
 
 def leveled(
@@ -462,6 +486,7 @@ def markdown(
     mv: mean.MeanVerdict | None = None,
     lv: Levelled | None = None,
     run_cost: float | None = None,  # both versions, one run, reused base runs included
+    bound: str | None = None,  # `alpha_line`
 ) -> str:
     icon = {
         "pass": "✅",
@@ -505,6 +530,7 @@ def markdown(
             f"{v.cases} cases, {'first run' if mv is None else f'{v.runs} run{"s" if v.runs != 1 else ""}'} of each version · config "
             f"{base.config_hash[:8]} → {candidate.config_hash[:8]} · set {base.set_hash[:8]}"
         ),
+        *([bound] if bound else []),
     ]
     line, broken = checks_lines(checks) if checks else (None, [])
     if line:
@@ -669,6 +695,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="drop in points that blocks (default 5)",
     )
     p.add_argument(
+        "--alpha",
+        type=float,
+        default=0.05,
+        help="the bound on how often the gate blocks a candidate that is no worse (default 0.05): half to the "
+        "betting rule on the mean, half to the rule on checks; the naive rule has no bound",
+    )
+    p.add_argument(
         "--relative",
         action="store_true",
         help="read --threshold as percent of the base mean",
@@ -721,6 +754,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     p.add_argument("--markdown", type=Path, help="write the merge request comment")
     args = p.parse_args(argv)
     try:
+        if not 0 < args.alpha < 0.5:
+            raise ValueError(f"alpha must lie in (0, 0.5), got {args.alpha:g}")
         if args.no_base:
             candidate = load_arm(args.candidate)
             if args.golden:
@@ -752,6 +787,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             else {}
         )
         pairs, minor_cases = leveled(full, rules, how)
+        runs = check_runs(full)  # minor cases too: their checks warn
+        blocking, reporting = (
+            families(runs, rules, args.checks)
+            if rules
+            else (runs, ({}, {}))
+            if args.checks == "block"
+            else (({}, {}), runs)
+        )
+        on_mean, on_checks = split(args.alpha, bool(blocking[0]))
         mv = None
         if args.mean == "naive":
             v = naive(
@@ -767,20 +811,27 @@ def main(argv: Sequence[str] | None = None) -> int:
                 pairs,
                 args.threshold,
                 mean.DEFAULT if args.mean == "betting" else args.mean,
+                on_mean,
             )
-        runs = check_runs(full)  # minor cases too: their checks warn
         lv = None
         if rules:
-            (blocking, reporting) = families(runs, rules, args.checks)
             checks = (
-                criterion.per_check(*blocking, mode="block") if blocking[0] else None
+                criterion.per_check(*blocking, alpha=on_checks, mode="block")
+                if blocking[0]
+                else None
             )
             reported = (
-                criterion.per_check(*reporting, mode="report") if reporting[0] else None
+                criterion.per_check(*reporting, alpha=on_checks, mode="report")
+                if reporting[0]
+                else None
             )
             lv = Levelled(rules, reported, minor_cases, rules.unmatched(runs[0]))
         else:
-            checks = criterion.per_check(*runs, mode=args.checks) if runs[0] else None
+            checks = (
+                criterion.per_check(*runs, alpha=on_checks, mode=args.checks)
+                if runs[0]
+                else None
+            )
         if v.exit_code != QUALITY_FAIL and checks and checks.outcome == "block":
             v = replace(v, outcome=VERDICTS[QUALITY_FAIL], exit_code=QUALITY_FAIL)
         prices = load_prices(args.prices) if args.prices else None
@@ -798,11 +849,19 @@ def main(argv: Sequence[str] | None = None) -> int:
                 runs_each = max(len(rs[side]) for rs in full.values())
                 per_arm.append(None if None in spent else sum(spent) / runs_each)
             run_cost = None if None in per_arm else sum(per_arm)
-        text = markdown(v, base, candidate, costs, spend, checks, mv, lv, run_cost)
+        bound = alpha_line(args.alpha, mv is not None, bool(blocking[0]))
+        text = markdown(
+            v, base, candidate, costs, spend, checks, mv, lv, run_cost, bound
+        )
         report = {
             **asdict(v),
             "threshold_pp": args.threshold,
             "relative": args.relative,
+            "alpha": {
+                "gate": args.alpha,
+                "mean": None if mv is None else on_mean,
+                "checks": on_checks if blocking[0] else None,
+            },
             "mean": None if mv is None else {**asdict(mv), "name": args.mean},
             "checks": checks_report(checks, rules) if checks else None,
             "levels": args.levels,

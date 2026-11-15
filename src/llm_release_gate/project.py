@@ -14,6 +14,7 @@ VALIDATOR = protocol.Validator(SCHEMA)
 SETTINGS = (
     "k",
     "delta",
+    "alpha",
     "mean",
     "checks",
     "levels",
@@ -32,6 +33,7 @@ class Pipeline:
     inputs_url: str | None = None
     k: int = 1
     delta: float = 5.0
+    alpha: float = 0.05  # the whole gate's, split between the rules (D-031)
     mean: str = "naive"  # rule on the mean: naive or betting (D-026)
     checks: str = "block"  # the rule on checks blocks or only reports (D-003)
     levels: dict = field(
@@ -68,6 +70,13 @@ def load(directory: Path) -> Project:
         raise ValueError(f"{path}: {e}") from None
     if found := protocol.describe(VALIDATOR, raw):
         raise ValueError(f"{path}: {'; '.join(found)}")
+    for where, given in (
+        ("", raw),
+        *((f"pipelines.{n}.", p) for n, p in raw["pipelines"].items()),
+    ):
+        for k in ("delta", "alpha"):
+            if k in given and given[k] != given[k]:  # NaN passes the schema's bounds
+                raise ValueError(f"{path}: {where}{k} is not a number")
     top = {k: raw[k] for k in SETTINGS if k in raw}
     if "cost_per_run_usd" in top.get("budgets", {}) and "prices" not in top:
         raise ValueError(f"{path}: budgets.cost_per_run_usd needs prices")

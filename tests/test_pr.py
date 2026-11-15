@@ -2,12 +2,13 @@ import json
 import shutil
 import subprocess
 import sys
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
 
-from llm_release_gate import pr
+from llm_release_gate import pr, project
 
 FIXTURES = Path(__file__).parent / "fixtures"
 AGENT = FIXTURES / "command" / "agent.sh"
@@ -906,3 +907,39 @@ def test_the_rule_on_the_mean_follows_the_target_branch(repo):
     verdict = json.loads((out / "verdict.json").read_text())
     assert verdict["mean"]["name"] == "betting" and verdict["mean"]["runs"] == 1
     assert code == pr.INCONCLUSIVE  # k 1: betting cannot decide
+
+
+def test_a_warning_before_the_runs_when_no_check_could_block():
+    p = project.Pipeline("demo", "demo.yaml", "golden")
+    assert pr.too_few_runs(p) == (
+        "⚠️ With alpha 0.05 and k: 1 the rule on checks cannot block: it needs k: 4."
+    )
+    assert pr.too_few_runs(replace(p, k=4)) is None
+    assert pr.too_few_runs(replace(p, k=4, alpha=0.025)).endswith(
+        "it needs k: 5, or alpha 0.0286 at k: 4."  # 2 / 70, rounded up
+    )
+    assert pr.too_few_runs(replace(p, k=3)).endswith("or alpha 0.1 at k: 3.")
+    assert pr.too_few_runs(replace(p, checks="report")) is None
+    assert pr.too_few_runs(replace(p, checks="report", levels={"critical": ["x"]}))
+    assert pr.too_few_runs(
+        replace(p, checks="report", levels={"cases": {"x*": "critical"}})
+    )
+
+
+def test_alpha_comes_from_the_target_branch_and_reaches_the_gate(repo, capsys):
+    (repo / "gate.yaml").write_text(GATE + "alpha: 0.02\nk: 2\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "strict")
+    version(repo, "answer-again", GATE + "alpha: 0.2\nk: 2\n")  # loosens its own gate
+    code, out = gate(repo)
+    assert code == pr.PASS
+    assert json.loads((out / "verdict.json").read_text())["alpha"] == {
+        "gate": 0.02,
+        "mean": None,
+        "checks": 0.01,
+    }
+    assert "changes the gate's rules for `demo`" in (out / "comment.md").read_text()
+    assert (
+        "demo: ⚠️ With alpha 0.02 and k: 2 the rule on checks cannot block: it needs k: 5, "
+        "or alpha 0.3334 at k: 2." in capsys.readouterr().err
+    )

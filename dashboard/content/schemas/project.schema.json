@@ -42,6 +42,9 @@
     "delta": {
       "$ref": "#/$defs/delta"
     },
+    "alpha": {
+      "$ref": "#/$defs/alpha"
+    },
     "mean": {
       "$ref": "#/$defs/mean"
     },
@@ -96,6 +99,9 @@
         "delta": {
           "$ref": "#/$defs/delta"
         },
+        "alpha": {
+          "$ref": "#/$defs/alpha"
+        },
         "mean": {
           "$ref": "#/$defs/mean"
         },
@@ -126,6 +132,12 @@
       "description": "The loss in points of the mean score that matters (default 5): the naive rule blocks a larger drop; the betting rule passes when the loss is shown to be smaller and blocks when shown to be larger.",
       "type": "number",
       "minimum": 0
+    },
+    "alpha": {
+      "description": "How often the gate as a whole may block a candidate that is no worse (default 0.05). The gate splits it: half to the betting rule on the mean, half to the rule on checks, all to the rule on the mean when no check can block. The betting rule's share bounds its wrong passes of a loss over delta as well; the naive rule has no bound. A lower alpha needs more runs to decide.",
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "exclusiveMaximum": 0.5
     },
     "mean": {
       "description": "Rule on the mean (default naive): naive compares the first run of each version with delta; betting reads all runs and gives pass, block or inconclusive (needs k of at least 2).",

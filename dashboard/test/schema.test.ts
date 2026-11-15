@@ -19,7 +19,7 @@ describe("schemaView", () => {
     const view = schemaView(project as Schema, "#", { "#/$defs/pipeline": "#pipeline", "#/$defs/budgets": "#budgets", "#/$defs/levels": "#levels" });
     const rows = byPath(view.rows);
     expect(view.title).toBe("gate.yaml");
-    expect(Object.keys(rows)).toEqual(["prepare", "ignore", "pipelines", "k", "delta", "mean", "checks", "levels", "prices", "budgets", "base_max_age_days"]);
+    expect(Object.keys(rows)).toEqual(["prepare", "ignore", "pipelines", "k", "delta", "alpha", "mean", "checks", "levels", "prices", "budgets", "base_max_age_days"]);
     expect(rows.checks.rules.join(" ")).toMatch(/one of .*block.*report/);
     expect(rows.pipelines.required).toBe(true);
     expect(text(rows.pipelines.type)).toBe("map of name to [pipeline](#pipeline)");
@@ -29,6 +29,7 @@ describe("schemaView", () => {
     expect(text(rows.k.type)).toBe("integer");
     expect(rows.k.rules).toEqual(["≥ 1"]);
     expect(rows.k.description).toMatch(/Runs per case/);
+    expect(rows.alpha.rules).toEqual(["> 0 and < 0.5"]);
     expect(text(rows.budgets.type)).toBe("[budgets](#budgets)");
     sane(view.rows);
 

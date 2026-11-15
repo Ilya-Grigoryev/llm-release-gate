@@ -41,9 +41,9 @@ On every pull request that changes the version, the gate:
 3. takes each version's mean score and computes the difference in points: 100 × (candidate mean − base mean);
 4. blocks with `quality fail` (exit 10) when the difference is below −`delta`, 5 points by default;
 5. blocks with `quality fail` too when a check passed significantly less often in the candidate's runs than in the
-   base's (Fisher's exact test per case and check, one-sided, α 0.025, corrected for the number of checks that could
-   show it). With one run of each version this cannot happen: a single broken check can block from 4 runs of each,
-   several broken at once need more. `checks: report` only lists it, and [levels](#critical-and-minor-checks) set
+   base's (Fisher's exact test per case and check, one-sided, at half of [`alpha`](#how-often-the-gate-may-be-wrong),
+   0.025 by default, corrected for the number of checks that could show it). With one run of each version this cannot
+   happen: at the default `alpha` a single broken check can block from 4 runs of each, several broken at once need more. `checks: report` only lists it, and [levels](#critical-and-minor-checks) set
    which checks may block;
 6. checks the [budgets](#budgets-cost-and-latency), if you set any.
 
@@ -82,22 +82,25 @@ so a hard case is hard on both sides. It takes its first look after 2 runs of ea
 answer `inconclusive`. Then it looks again after every run, and the first look that shows a side decides.
 
 However many looks the rule takes over the same runs, the chance of a wrong pass, where the candidate in truth loses
-more than `delta` on these cases, stays at most 2.5 % (α 0.025); the same holds for a wrong block. The promise needs runs
+more than `delta` on these cases, stays at most the rule's share of `alpha`; the same holds for a wrong block. At the
+default `alpha` the share is 2.5 %, or 5 % when no check can block
+([How often the gate may be wrong](#how-often-the-gate-may-be-wrong)). The promise needs runs
 that go wrong independently of each other, and base runs reused from an earlier job that still behave like today's. When
 a whole run goes bad at once, say the provider changes something for an hour, the errors grow, and the gate cannot tell.
-The comment gives a 95 % range for the difference at the run that decided, and that run
-([Read a verdict](/docs/read-a-verdict#lines-of-the-betting-rule)).
+The comment gives the run that decided and a range for the difference at that run
+([Read a verdict](/docs/read-a-verdict#lines-of-the-betting-rule)). The range covers 1 − 2 × the rule's share: 95 % at
+0.025.
 
 The method is a betting confidence sequence (Waudby-Smith and Ramdas,
 [arXiv:2010.09686](https://arxiv.org/abs/2010.09686)). For each side the gate bets on the paired differences, run after
-run, and the side whose stake grows 40-fold (1 / α) decides. The bet stays fixed within a run, which keeps the
+run, and the side whose stake grows 1 / α-fold decides, where α is the rule's share: 40-fold at 0.025. The bet stays fixed within a run, which keeps the
 guarantee when cases differ in difficulty.
 
 The runs a pass needs depend on the number of cases and on `delta`, and few cases need many. The comment states the
 number for your set: what a candidate that scores like the base in every run would need. Noise adds more. Outside CI,
 a second `run` with a larger `-k` appends only the missing runs, and `gate` decides again over all of them: that keeps
-the 2.5 %. A new CI job is different: it runs the candidate again from the start, so it is a new test, and running jobs
-until one passes makes a wrong pass more likely than 2.5 %. To use more runs in CI, raise `k` in the target branch's
+the bound. A new CI job is different: it runs the candidate again from the start, so it is a new test, and running jobs
+until one passes makes a wrong pass more likely than the bound. To use more runs in CI, raise `k` in the target branch's
 `gate.yaml`, in a request of its own, before the job. Continuing a request with the runs it already paid for is planned
 ([Reference](/docs/reference#gate)).
 
@@ -109,6 +112,37 @@ Planned: when the answer is `inconclusive`, the gate buys the missing runs itsel
 continues in the same request. Also planned: a second comparison against an anchor, a fixed earlier version that only a
 person moves, so that small losses cannot pile up. Until experiments measure the rules on recorded runs, this site
 states no measured error rates.
+
+## How often the gate may be wrong
+
+Each of the two rules can block on its own, so the gate's chance of blocking a candidate that is no worse adds up over
+both. Under `mean: betting`, `alpha` in `gate.yaml` bounds that sum, 0.05 by default, and the gate splits it:
+
+```yaml
+alpha: 0.05   # the whole gate: 0.025 to the rule on the mean, 0.025 to the rule on checks
+```
+
+- With `mean: betting` and checks that may block, each rule gets half.
+- If no check can block (`checks: report` without `critical` levels), the rule on the mean gets all of it.
+- The betting rule's share bounds both of its errors: a wrong block, and a wrong pass of a candidate that lost more
+  than `delta`. Raising `alpha` to decide sooner lets more such losses pass.
+- The naive rule has no bound; under `mean: naive` the rule on checks gets its half and the rest goes unused.
+
+The comment says how the gate spent its `alpha`, for example "False blocks: at most α 0.05 for the gate, 0.025 for the
+rule on the mean and 0.025 for the rule on checks." A lower `alpha` needs more runs before the gate decides. At
+`delta` 5:
+
+| `alpha` | Each rule's share: false blocks, and missed losses for the betting rule | A check broken in every run can block from | Fully broken checks that can still block at `k: 5` | Runs of each version a pass needs when nothing changed, 10 / 30 / 50 cases |
+|---|---|---|---|---|
+| 0.01 | 0.005 | `k: 5` | 1 | 14 / 5 / 3 |
+| 0.025 | 0.0125 | `k: 5` | 3 | 12 / 4 / 3 |
+| 0.05 (default) | 0.025 | `k: 4` | 6 | 10 / 4 / 2 |
+| 0.1 | 0.05 | `k: 3` | 12 | 8 / 3 / 2 |
+
+The table assumes checks that may block. With none, the rule on the mean gets all of `alpha`: its runs are in the row
+whose share equals your `alpha`, the 0.1 row at the default. The fourth column is a limit of Tarone's correction: when more checks than that break in every run, it blocks none of
+them, and the rule on the mean has to catch the break. If the pipeline's `k` is too small for any check to block at its
+`alpha`, `pr` says so in the job's log before the runs start and names the `k` or `alpha` that would let one block. Like `delta`, `alpha` comes from the target branch's `gate.yaml`.
 
 ## Critical and minor checks
 
@@ -137,9 +171,10 @@ matches no check of the set, so a typo cannot leave checks normal unnoticed. Whe
 position: in the author's telecom-support app, `assert-N` is the N-th assertion of each task, so `assert-1` is a
 different rule in each case.
 
-The rule on checks tests two families apart, each at α 0.025 with its own correction: the checks that may block
-(critical ones, and normal ones under `checks: block`) and the checks that only report (minor ones, and normal ones
-under `checks: report`). Without `levels` nothing changes.
+The rule on checks tests two families apart, each at half of `alpha` (0.025 by default) with its own correction: the
+checks that may block (critical ones, and normal ones under `checks: block`) and the checks that only report (minor
+ones, and normal ones under `checks: report`). The second family never blocks, so it spends none of the gate's bound.
+Without `levels` nothing changes.
 
 ## Where the base's runs come from
 
