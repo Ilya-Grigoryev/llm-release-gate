@@ -192,7 +192,7 @@ runner's scorer is `hits(case, answer, trace=None)` (by default the run's trace,
 A project says what to gate in `gate.yaml` (`project.schema.json`, `project.load`): named pipelines, each a version's
 config and a golden set (with an optional manifest and `inputs-url`), and the settings `k`, `delta`, `prices`,
 `budgets` and `base_max_age_days`, which a pipeline may override, plus a `prepare` command. Its pull request job (on GitHub: `uses:
-Ilya-Grigoryev/llm-release-gate@<tag>` after its `setup` action) checks that it can comment, gets the golden set (from
+Ilya-Grigoryev/llm-release-gate@<tag>` after its `setup` action) comments that it is running (proving it can comment), gets the golden set (from
 the repository, a GitHub release or a GitLab package), then runs `llm-release-gate pr --base REV --out OUT` from the
 repository's root. For each pipeline `pr` first copies the golden set's text files (cases and text inputs, never
 images; links followed) to `OUT/NAME/cases`, so even a run without a verdict shows what it was given, and checks the set
@@ -290,7 +290,7 @@ sequenceDiagram
     participant RC as runner (candidate, this request)
     participant AD as program + model
     participant G as gate
-    CI->>C: --check: can comment
+    CI->>C: --running: note on the request, proves it can comment
     CI->>CI: download or build the golden set
     CI->>SH: --base revision, --pipeline
     SH->>SH: copy the set's text files, check it against its manifest

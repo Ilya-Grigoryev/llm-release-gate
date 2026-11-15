@@ -205,13 +205,13 @@ apply to every pipeline, and a pipeline's own win:
 | `prepare` | a command that readies the project in both trees before their runs, such as `[npm, ci]` |
 | `ignore` | glob patterns, from the project's directory, of files that never change what the model gets, such as `web/` (a trailing `/` takes the directory, `**` crosses directories); on top of documentation and CI; `!docs/kb/` takes files back, for an app that reads them |
 
-`setup` installs Python, uv and the project's locked environment. The gate action checks that it can comment, checks
-the golden set (against its manifest, if any), and compares the version from the target branch with the one from the
+`setup` installs Python, uv and the project's locked environment. The gate action first comments that it is running (which also proves it can
+comment), checks the golden set (against its manifest, if any), and compares the version from the target branch with the one from the
 request, each with its own code; the base runs next to the candidate unless recent runs of it exist (below). A request that leaves a pipeline's version as it is (config,
 prompts and code, see [Running a version](#running-a-version)) gets `unchanged` and costs nothing; a pipeline's own
 files (another pipeline's prompt, say) do not count for the others. A request that changes `ignore` or which files
 belong to which pipeline (the prompts its configs name included) runs every pipeline, so it cannot hide new code from
-its own gate. The verdict comes as one comment, edited on later pushes.
+its own gate. The verdict replaces that note in the same comment, edited again on later pushes.
 
 A version is the same in any commit, so the gate runs it once and shares the runs. Each job uploads the runs it paid
 for as an artifact named after the version and the test set (`llm-release-gate-runs-NAME-VERSION-SET`); before running
@@ -256,8 +256,9 @@ Three projects use it, each with its own `.github/workflows/ci.yml`: [receipt-in
 Outside GitHub Actions the gate's command does the work, from the repository's root. `llm-release-gate pr --base
 origin/main --out OUT` runs every pipeline of `gate.yaml` and writes `OUT/NAME` (`--project DIR` when `gate.yaml` is not
 at the root, `--list` only checks it; `--cache DIR` reuses the base's runs from a directory the CI keeps between jobs). `llm-release-gate comment OUT/NAME/comment.md --name NAME` posts a verdict (on
-GitLab with `GITLAB_TOKEN`, a project access token with the `api` scope); `--check` tells beforehand whether the job
-can comment, `--dry-run` prints the comment and posts nothing.
+GitLab with `GITLAB_TOKEN`, a project access token with the `api` scope); `--running --name NAME` posts that the gate is running and on
+how many cases, for the verdict to replace; `--check` only tells whether the job can comment, `--dry-run` prints the
+comment and posts nothing.
 
 ## Dashboard
 

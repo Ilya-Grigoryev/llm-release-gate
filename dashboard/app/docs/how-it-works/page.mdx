@@ -14,8 +14,8 @@ own config, test set (`golden`), verdict and comment.
 Take a booking assistant, a made-up agent that books, moves and cancels rooms through tools, and a pull request that
 rewrites the cancellation rule in its system prompt.
 
-1. **The job starts.** Before any model call, the gate checks that the request is not from a fork, that `gate.yaml`
-   is valid and that it can comment.
+1. **The job starts.** Before any model call, the gate checks that the request is not from a fork and that `gate.yaml`
+   is valid, and comments "⏳ running" with the number of cases; the verdict later replaces that note.
 2. **The gate checks out the target branch next to the request.** Both trees get your `prepare` command, if any, and
    their own locked dependencies, so a request that updates an SDK is compared with the old SDK.
 3. **Each tree works out its version.** If the two [version](#what-a-version-is) hashes are equal, the pipeline is

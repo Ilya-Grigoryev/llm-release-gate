@@ -23,7 +23,7 @@ def test_the_gate_action_runs_the_packaged_commands():
     text = (ROOT / "action.yml").read_text()
     for command in (
         "llm-release-gate pr --project",
-        "llm-release-gate comment --check",
+        "llm-release-gate comment --running",
         "llm-release-gate pr --base FETCH_HEAD",
         'llm-release-gate comment "$OUT/comment.md"',
     ):
@@ -108,7 +108,7 @@ def test_a_fork_fails_the_job_and_says_why(tmp_path):
     assert all(
         "steps.fork.outputs.fork != 'true'" in s["if"]
         for s in steps
-        if s.get("name") in ("pipeline", "can comment", "gate", "comment")
+        if s.get("name") in ("pipeline", "running", "gate", "comment")
     )
     env = {"PATH": "/usr/bin:/bin", "GITHUB_STEP_SUMMARY": str(tmp_path / "summary")}
     done = subprocess.run(
@@ -198,3 +198,17 @@ def test_each_paid_arm_is_shared_under_its_name(tmp_path):
     )
     assert "pull_request_target" in _step("shared runs")["if"]
     assert "actions/cache" not in (ROOT / "action.yml").read_text()
+
+
+def test_the_running_note_comes_before_the_paid_runs_and_only_on_a_request():
+    names = [
+        s.get("name")
+        for s in yaml.safe_load((ROOT / "action.yml").read_text())["runs"]["steps"]
+    ]
+    assert names.index("pipeline") < names.index("running") < names.index("gate")
+    step = _step("running")
+    assert "github.base_ref != ''" in step["if"]
+    assert (
+        '--name "$NAME"' in step["run"]
+        and step["env"]["NAME"] == "${{ steps.pipeline.outputs.name }}"
+    )

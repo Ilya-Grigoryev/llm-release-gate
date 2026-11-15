@@ -12,7 +12,8 @@ A made-up booking assistant books, moves and cancels rooms through tools. A pull
 its system prompt and raises `delta` in `gate.yaml` from 5 to 10. The figure shows the gate's comment; its numbers
 match this list.
 
-1. **Pipeline and outcome.** Later runs edit this comment.
+1. **Pipeline and outcome.** While the job runs, the comment says "⏳ running", when it started and on how many cases;
+   the verdict replaces that note, and later runs edit the comment again.
 2. **Mean scores**, base → candidate, and the difference in points. "blocks below -5.00" marks −`delta`; a drop of
    exactly 5.00 passes. The line ends with the rule on the mean, here the naive rule, the default. Under
    `mean: betting` the line has no "blocks below", and the next one gives a range

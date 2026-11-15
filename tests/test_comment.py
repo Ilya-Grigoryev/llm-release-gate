@@ -1,5 +1,6 @@
 import json
 import urllib.error
+from datetime import UTC, datetime
 
 import pytest
 
@@ -173,3 +174,77 @@ def test_named_pipelines_keep_a_comment_each(tmp_path):
         "<!-- llm-release-gate:support-agent -->\n`support-agent` · **Release gate"
     )
     assert edited[1].endswith("/comments/2")
+
+
+NOW = datetime(2026, 11, 15, 14, 5, tzinfo=UTC)
+
+
+def project_with_cases(tmp_path, n):
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    (tmp_path / "gate.yaml").write_text(
+        "pipelines:\n  demo:\n    config: demo.yaml\n    golden: golden\n"
+    )
+    (tmp_path / "golden").mkdir()
+    (tmp_path / "golden" / "inputs").mkdir()  # not a case
+    for i in range(n):
+        (tmp_path / "golden" / f"case-{i}.yaml").write_text("id: x\n")
+    return tmp_path
+
+
+def test_the_running_note_says_when_and_on_how_many_cases(tmp_path):
+    note = comment.running(project_with_cases(tmp_path, 3), "demo", NOW)
+    assert note.startswith("**Release gate: ⏳ running**\n")
+    assert "Started 14:05 UTC" in note and "on 3 cases" in note
+    assert "on 1 case and" in comment.running(
+        project_with_cases(tmp_path / "one", 1), None, NOW
+    )
+
+
+def test_the_running_note_does_without_a_readable_gate_yaml(tmp_path):
+    (tmp_path / "gate.yaml").write_text("pipelines: [broken")
+    for directory, name in ((tmp_path, "demo"), (tmp_path / "missing", "demo")):
+        note = comment.running(directory, name, NOW)
+        assert "this request's and turns this comment into the verdict" in note
+    assert " case" not in comment.running(
+        project_with_cases(tmp_path / "p", 2), "other", NOW
+    )
+
+
+class Thread(FakeAPI):
+    """Keeps what is posted, so a later run finds and edits it."""
+
+    def __call__(self, method, url, headers, body=None):
+        self.calls.append((method, url, headers, body))
+        if method == "GET":
+            return list(self.comments)
+        if method == "POST":
+            self.comments.append({"id": len(self.comments) + 1, **body})
+        else:
+            cid = int(url.rsplit("/", 1)[1])
+            next(c for c in self.comments if c["id"] == cid).update(body)
+        return {"id": len(self.comments)}
+
+
+def test_the_verdict_replaces_the_running_note(tmp_path, monkeypatch, capsys):
+    api = Thread([{"id": 1, "body": "looks good"}])
+    monkeypatch.setattr(comment.os, "environ", github_env(tmp_path))
+    monkeypatch.setattr(comment, "call", api)
+    project = project_with_cases(tmp_path / "p", 2)
+    comment.main(["--running", "--project", str(project), "--name", "demo"])
+    verdict = tmp_path / "comment.md"
+    verdict.write_text("**Release gate: ✅ pass**\n")
+    comment.main([str(verdict), "--name", "demo"])
+    assert capsys.readouterr().out == "comment created\ncomment updated\n"
+    assert len(api.comments) == 2
+    body = api.comments[1]["body"]
+    assert "✅ pass" in body and "running" not in body
+    assert body.startswith("<!-- llm-release-gate:demo -->\n`demo` · ")
+
+
+def test_the_running_note_fails_before_any_paid_run_without_a_token(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(comment.os, "environ", {**GITLAB_ENV, "GITLAB_TOKEN": ""})
+    monkeypatch.setattr(comment, "call", lambda *a, **k: pytest.fail("posted"))
+    with pytest.raises(SystemExit, match="cannot comment: set GITLAB_TOKEN"):
+        comment.main(["--running", "--project", str(tmp_path)])

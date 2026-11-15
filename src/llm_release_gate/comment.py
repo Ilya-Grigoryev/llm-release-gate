@@ -8,11 +8,19 @@ import urllib.error
 import urllib.request
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from llm_release_gate import golden, project
+
 MARKER = "<!-- llm-release-gate -->"
 NO_VERDICT = "**Release gate: ⚠️ infra error**\n\nThe job stopped before the gate wrote a verdict; see the job log.\n"
+RUNNING = (
+    "**Release gate: ⏳ running**\n\nStarted {started} UTC: the gate runs the target branch's version and this "
+    "request's{cases} and turns this comment into the verdict. If the job stops early (cancelled, timed out), this note "
+    "stays: see the job log.\n"
+)
 Send = Callable[..., Any]
 
 
@@ -121,6 +129,19 @@ def post(
     return "created"
 
 
+def running(directory: Path, name: str | None, now: datetime) -> str:
+    """The note a job posts before its runs: when it started and on how many cases, from `gate.yaml` if it reads."""
+    cases = ""
+    try:
+        pipelines = project.load(directory).pipelines
+        p = pipelines.get(name) if name else next(iter(pipelines.values()), None)
+        n = len(golden.case_files(directory / p.golden)) if p else 0
+        cases = f" on {n} case{'s' * (n != 1)}" if n else ""
+    except (OSError, ValueError):  # the gate step reports a broken gate.yaml or set
+        pass
+    return RUNNING.format(started=now.strftime("%H:%M"), cases=cases)
+
+
 def main(argv: list[str] | None = None) -> None:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument(
@@ -137,16 +158,32 @@ def main(argv: list[str] | None = None) -> None:
         action="store_true",
         help="only check that this job can comment, before paying for runs",
     )
+    p.add_argument(
+        "--running",
+        action="store_true",
+        help="post that the gate is running, before paying for runs; the verdict replaces it",
+    )
+    p.add_argument(
+        "--project",
+        type=Path,
+        default=Path("."),
+        help="directory with gate.yaml, for the number of cases in --running",
+    )
     args = p.parse_args(argv)
-    if not args.check and not args.file:
-        p.error("give the Markdown file, or --check")
+    if not (args.check or args.running) and not args.file:
+        p.error("give the Markdown file, --check or --running")
     if args.dry_run:
         if not args.file or not args.file.is_file():
             sys.exit(f"{args.file}: no such file")
         print(args.file.read_text(), end="")
         return
     # no file: the job failed before the gate ran, and the request still learns that
-    text = args.file.read_text() if args.file and args.file.is_file() else NO_VERDICT
+    if args.running:
+        text = running(args.project, args.name, datetime.now(UTC))
+    else:
+        text = (
+            args.file.read_text() if args.file and args.file.is_file() else NO_VERDICT
+        )
     try:
         t = target(os.environ)
         if args.check:

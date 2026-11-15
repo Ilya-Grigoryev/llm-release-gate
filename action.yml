@@ -50,13 +50,15 @@ runs:
         echo "name=$PIPELINE" >> "$GITHUB_OUTPUT"
         echo "out=$RUNNER_TEMP/llm-release-gate/$PIPELINE" >> "$GITHUB_OUTPUT"
         echo "cache=$RUNNER_TEMP/llm-release-gate-cache" >> "$GITHUB_OUTPUT"
-    - name: can comment
+    - name: running
       if: steps.fork.outputs.fork != 'true' && github.base_ref != ''
       shell: bash
       env:
         GITHUB_TOKEN: ${{ inputs.github-token }}
         PROJECT: ${{ inputs.project-dir }}
-      run: uv run --project "$PROJECT" llm-release-gate comment --check
+        NAME: ${{ steps.pipeline.outputs.name }}
+      run: |  # also proves the job can comment, before it pays for runs; the verdict edits this comment
+        uv run --project "$PROJECT" llm-release-gate comment --running --project "$PROJECT" --name "$NAME"
     - name: gate
       if: steps.fork.outputs.fork != 'true'
       shell: bash
