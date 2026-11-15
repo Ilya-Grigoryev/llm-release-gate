@@ -72,8 +72,8 @@ hours" and "do not guess which booking; ask" by `not_called`, "pick the smallest
 
 Another model may follow a rule less reliably, write dates or amounts in another format, take more steps or cost more.
 `field_match` with typed fields compares a `date` or a `number` by value, so a new format passes as long as it parses.
-For a model name without a date the comment warns, and the gate reports an infra error when runs of such a model
-cannot be compared ([How it decides](/docs/how-it-decides#where-the-bases-runs-come-from)).
+For a model name without a date the comment warns, and the gate reports an infra error when the provider reported
+different models for the two versions' runs ([How it decides](/docs/how-it-decides#where-the-bases-runs-come-from)).
 
 ## Tools
 

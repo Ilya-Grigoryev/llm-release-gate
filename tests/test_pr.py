@@ -508,7 +508,7 @@ def test_a_recent_base_comes_from_the_cache(repo):
 def test_an_old_base_runs_again(repo):
     version(repo, "bare")
     cached_gate(repo)
-    age(repo.parent / "cache", 4)  # the default limit is 3 days
+    age(repo.parent / "cache", 8)  # the default limit is 7 days
     _, out = cached_gate(repo)
     assert not any(r.get("reused") for r in records(out / "base.jsonl"))
     assert "Base:" not in (out / "comment.md").read_text()
@@ -530,7 +530,7 @@ def test_the_target_branch_sets_the_age_limit(repo):
         assert "changes the gate's rules" in (out / "comment.md").read_text()
 
 
-def test_a_model_without_a_date_never_comes_from_the_cache(repo):
+def test_a_model_without_a_date_comes_from_the_cache_too(repo):
     for config in (repo / "demo.yaml",):
         config.write_text(
             config.read_text().replace("fake-model-2026-01-01", "fake-model")
@@ -539,12 +539,10 @@ def test_a_model_without_a_date_never_comes_from_the_cache(repo):
     version(
         repo, "bare"
     )  # the request asks for a dated model: the base's alias still counts
-    cached_gate(repo)
+    _, first = cached_gate(repo)
+    assert (first / "shared.txt").read_text().split()[0] == "base"  # D-029
     _, out = cached_gate(repo)
-    assert not any(r.get("reused") for r in records(out / "base.jsonl"))
-    assert (out / "shared.txt").read_text().split()[
-        0
-    ] == "candidate"  # the base's alias is never shared
+    assert all(r.get("reused") for r in records(out / "base.jsonl"))
 
 
 def test_more_runs_per_case_add_to_the_cached_ones(repo):
@@ -654,7 +652,7 @@ def test_the_cache_keeps_each_runs_raw_responses_and_the_newest_run(tmp_path):
     assert [r["native"] for r in records(pr.native(out))] == [["aR1"], ["bR1"]]
 
 
-def test_the_cache_gives_only_good_recent_runs_of_a_dated_model(tmp_path):
+def test_the_cache_gives_only_good_recent_runs(tmp_path):
     now, cache = datetime.now(UTC), tmp_path
     (cache / "v-s.jsonl").write_text(
         lines(
@@ -670,9 +668,14 @@ def test_the_cache_gives_only_good_recent_runs_of_a_dated_model(tmp_path):
     assert pr.reuse(cache, "v", "s", 7, 1, out) == 1
     assert [(r["case"], r["rep"]) for r in records(out)] == [("a", 0)]
     (cache / "w-s.jsonl").write_text(
-        lines(record("a", 0, now, config_hash="w", requested_model="m"))
+        lines(
+            record(
+                "a", 0, now, config_hash="w", requested_model="m"
+            ),  # D-029: no date is fine
+            record("b", 0, now, config_hash="w", requested_model=5),  # malformed
+        )
     )
-    assert pr.reuse(cache, "w", "s", 7, 1, tmp_path / "none.jsonl") == 0
+    assert pr.reuse(cache, "w", "s", 7, 1, tmp_path / "w.jsonl") == 1
 
 
 def commit_rules(repo, rules):
@@ -695,14 +698,14 @@ def test_fewer_runs_per_case_take_only_the_first_cached_ones(repo):
     }
 
 
-def test_a_candidate_without_a_dated_model_runs_the_base_too(repo):
+def test_a_candidate_without_a_dated_model_takes_the_base_from_the_cache(repo):
     version(repo, "bare")
     cached_gate(repo)
     (repo / "demo.yaml").write_text(
         (repo / "demo.yaml").read_text().replace("fake-model-2026-01-01", "fake-model")
     )
     _, out = cached_gate(repo)
-    assert not any(r.get("reused") for r in records(out / "base.jsonl"))
+    assert all(r.get("reused") for r in records(out / "base.jsonl"))  # D-029
 
 
 def test_a_changed_test_set_runs_the_base_again(repo):
@@ -717,19 +720,9 @@ def test_a_changed_test_set_runs_the_base_again(repo):
 
 def test_refresh_says_why_it_keeps_nothing(repo, capsys):
     cache, out = repo.parent / "cache", repo.parent / "refresh"
-    for rules, why in (
-        (GATE + "base_max_age_days: 0\n", "base_max_age_days is 0"),
-        (GATE, "its model has no date"),
-    ):
-        version(repo, "answer", rules)
-        if "0" not in rules:
-            (repo / "demo.yaml").write_text(
-                (repo / "demo.yaml").read_text().replace("-2026-01-01", "")
-            )
-        assert (
-            pr.main(["--refresh", "--cache", str(cache), "--out", str(out)]) == pr.PASS
-        )
-        assert f"demo: not cached, {why}" in capsys.readouterr().out
+    version(repo, "answer", GATE + "base_max_age_days: 0\n")
+    assert pr.main(["--refresh", "--cache", str(cache), "--out", str(out)]) == pr.PASS
+    assert "demo: not cached, base_max_age_days is 0" in capsys.readouterr().out
     assert not list(cache.glob("*/*.jsonl"))
 
 
@@ -830,7 +823,9 @@ def test_a_broken_cache_never_fails_the_check(repo):
     code, out = cached_gate(repo)
     assert code == pr.QUALITY_FAIL
     assert not any(r.get("reused") for r in records(out / "base.jsonl"))
-    assert "earlier runs: TypeError" in (out / "base.log").read_text()
+    assert (
+        "0 runs of" in (out / "base.log").read_text()
+    )  # the malformed record is skipped
 
 
 def test_a_run_from_a_wrong_clock_gives_way_to_a_new_one(tmp_path):
@@ -864,7 +859,7 @@ def test_a_request_that_changes_prepare_runs_its_base_for_itself(repo):
     assert (out / "shared.txt").read_text().split()[0] == "candidate"
 
 
-def test_shared_names_only_paid_runs_of_a_dated_model(tmp_path):
+def test_shared_names_only_paid_runs(tmp_path):
     now = datetime.now(UTC)
     (tmp_path / "base.jsonl").write_text(
         lines(
@@ -883,8 +878,10 @@ def test_shared_names_only_paid_runs_of_a_dated_model(tmp_path):
     (tmp_path / "base.jsonl").write_text(
         lines(record("a", 0, now, requested_model="m"))
     )
-    pr.share(tmp_path, "demo", ("base.jsonl",))
-    assert (tmp_path / "shared.txt").read_text() == ""
+    pr.share(tmp_path, "demo", ("base.jsonl",))  # a model without a date too (D-029)
+    assert (
+        tmp_path / "shared.txt"
+    ).read_text() == f"base {pr.shared.name('demo', 'v', 's')}\n"
 
 
 def test_the_pipelines_get_no_token():

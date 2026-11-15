@@ -39,7 +39,7 @@ class Pipeline:
     )  # critical / minor checks and cases (D-028)
     prices: str | None = None
     budgets: dict = field(default_factory=dict)
-    base_max_age_days: float = 3.0
+    base_max_age_days: float = 7.0
 
 
 @dataclass(frozen=True)

@@ -62,7 +62,7 @@ moves ([How it decides](/docs/how-it-decides#the-betting-rule-every-run-three-an
 ## How it differs from other tools
 
 The gate runs each version from its own checkout. It reuses the target branch's runs for up to `base_max_age_days`
-(3 by default; `0` runs both versions in the same job) and refuses to compare runs on different test sets or scored by
+(7 by default; `0` runs both versions in the same job) and refuses to compare runs on different test sets or scored by
 different scorers (`infra error`, exit 20).
 
 <Fig id="limits-2" caption={"When the base ran earlier, anything that changed at the provider in between counts as an effect of your change. When both versions run together (`base_max_age_days: 0`), a shift that hits both cancels out in the difference; run-to-run noise remains in both cases."} alt={"Two timelines. In the first, the base version ran last week and the candidate runs today; the difference between them mixes the effect of the change with anything that changed at the provider in between, plus run-to-run noise. In the second, both versions run in the same job at the same time, so a shift at the provider affects both, and the difference shows the change plus run-to-run noise, without the drift."} />

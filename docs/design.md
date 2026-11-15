@@ -49,10 +49,9 @@ agent over a booking system, alone on a ticket or in a chat with a simulated use
   and a timeout retry; 78, 126, 127 and a program that cannot start stop the run; any other non-zero code fails the run.
   A trace printed before a failed exit is kept. On timeout the gate kills the program's process group (POSIX) and that
   attempt's trace is lost.
-- **Model names.** A dated snapshot when there is one. A name without a date is accepted (`is_alias(model)`) with three
-  precautions: the record keeps the requested and the reported model and the time, the report warns, and comparison
-  refuses runs with a pause longer than an hour, or runs that asked for the same model and got different ones or did not
-  say which one they got.
+- **Model names.** A dated snapshot when there is one. One name is one model (D-029), with or without a date. For a
+  name without a date (`is_alias(model)`) the record keeps the requested and the reported model, the report warns, and
+  comparison refuses runs that asked for the same model and got different ones or did not say which one they got.
 
 ### Golden set (built)
 
@@ -117,7 +116,7 @@ runner's scorer is `hits(case, answer, trace=None)` (by default the run's trace,
 - `load_arm(path) -> Arm` reads one version's runs: one config, one set, one scorer, the last error-free record per pair;
   `Arm` holds `config_hash`, `set_hash`, `scorer_version`, `records`, `aliases`.
 - `pair(base, candidate) -> {case: (base records, candidate records)}` refuses different sets or scorers, cases on one side
-  only, and, for a model without a date, runs that are not close in time.
+  only, and, for a model without a date, runs whose provider reported different models (or none).
 - **Built — naive rule.** `naive(base, candidate, threshold_pp, relative=False) -> Verdict`, a pure function over one
   score per case and version (the CLI passes the earliest repetition): block when the candidate's mean is lower than the
   base's by more than the threshold (absolute or relative; the CLI's default is 5 points). Means are compared as exact fractions. `Verdict` holds
@@ -216,14 +215,15 @@ never passes an unchecked request.
 **Shared runs** (D-007). A version is the same in any commit (config, prompts, tracked code), so the gate runs it once.
 `pr --cache DIR` keeps each version's error-free runs in `DIR/NAME/VERSION-SET.jsonl` (the newest run per case and
 repetition, raw responses next to them) and, before running the base, copies that version's runs on that set into
-`base.jsonl`, the first `k` per case and at most `base_max_age_days` old (default 3), each marked `reused`; the runner
+`base.jsonl`, the first `k` per case and at most `base_max_age_days` old (default 7), each marked `reused`; the runner
 then runs only what is missing. On GitHub the directory starts empty: `shared.fetch` asks the REST API for the newest
 artifact `llm-release-gate-runs-NAME-VERSION16-SET16` of this repository's own runs (not a fork's) within the age limit,
 downloads it (the redirect to storage gets no token) and adds its runs to the directory; `pr` names the versions this
 job paid for in `OUT/NAME/shared.txt`, and the action uploads them under that name. A merged request's candidate is the
 target branch's new version when the merge keeps the tree, so the next request usually finds its base run. Reuse never
-fails a check: any error there runs the base. The gate skips it when either version's model has no date (D-018), when
-the request changes `prepare` and when the target branch has no valid `gate.yaml`; it needs `actions:
+fails a check: any error there runs the base, and a malformed cached record is skipped. The gate skips reuse when the
+request changes `prepare` and when the target branch has no valid `gate.yaml` (a model without a date is cached too,
+D-029); it needs `actions:
 read`, and without it the comment says so. The verdict counts the cost
 of the runs this job paid for and reports `base_reused` (how many, how much older than the candidate). `pr --refresh`
 runs the default branch's version on a push, a manual run or a schedule, for later requests; it reuses recent runs too,

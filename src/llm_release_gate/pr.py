@@ -22,8 +22,6 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-import yaml
-
 from llm_release_gate import project, shared
 from llm_release_gate.gate import (
     BUDGET_FAIL,
@@ -33,7 +31,6 @@ from llm_release_gate.gate import (
     QUALITY_FAIL,
 )
 from llm_release_gate.golden import check
-from llm_release_gate.pipeline import is_alias, load_config
 from llm_release_gate.runner import read_records
 from llm_release_gate.version import own_files
 
@@ -183,15 +180,11 @@ def cached(path: Path, version_hash: str, set_hash: str) -> dict[tuple[str, int]
         and type(r.get("rep")) is int
         and r["rep"] >= 0
         and isinstance(r.get("trace") or {}, dict)
+        and all(
+            isinstance(r.get(f), (str, type(None)))
+            for f in ("run_id", "requested_model", "model")
+        )
     }
-
-
-def dated(config: Path) -> bool:
-    """The config names a dated model; a model without a date never runs from the cache (D-018)."""
-    try:
-        return not is_alias(load_config(config).model)
-    except (ValueError, OSError, yaml.YAMLError):
-        return False
 
 
 def reuse(
@@ -205,8 +198,6 @@ def reuse(
         for (_, rep), r in cached(path, version_hash, set_hash).items()
         if rep < k and recent(r, days)
     ]
-    if any(is_alias(r.get("requested_model")) for r in runs):
-        return 0
     raw, lines, raws = raw_lines(path), [], []
     for r in runs:
         trace = r.get("trace")
@@ -306,7 +297,7 @@ def store(
 def share(dest: Path, pipeline: str, arms: tuple[str, ...]) -> None:
     """Name each of ARMS (`base.jsonl`, `candidate.jsonl`) with runs this job paid for in DEST/shared.txt
     (`base NAME`), for the CI to upload as an artifact of that name; the candidate only if its version differs from
-    the base's, neither for a model without a date."""
+    the base's."""
     names = {}
     for arm in (a.removesuffix(".jsonl") for a in arms):
         found = read_records(dest / f"{arm}.jsonl")
@@ -315,8 +306,6 @@ def share(dest: Path, pipeline: str, arms: tuple[str, ...]) -> None:
             for r in found
             if r.get("error") is None and not r.get("reused")
         }
-        if any(is_alias(r.get("requested_model")) for r in found):
-            continue
         hashes = paid.pop() if len(paid) == 1 else ()
         if all(isinstance(h, str) and h.isalnum() for h in hashes) and hashes:
             n = shared.name(pipeline, *hashes)
@@ -397,13 +386,7 @@ def one(
         )
         if may_skip and hashes[0] and hashes[0] == hashes[1]:
             return unchanged(p, hashes[0], set_hash, dest)
-        if (
-            cache
-            and base_as_usual
-            and hashes[0]
-            and dated(base / base_config)
-            and dated(candidate / p.config)
-        ):
+        if cache and base_as_usual and hashes[0]:
             _, note = earlier(
                 p, cache, hashes[0], set_hash, dest / "base.jsonl", logs[0]
             )
@@ -565,13 +548,8 @@ def refresh(
             here = version(tree, p.config, dest / "base.log")
             if not here:
                 raise Infra("The version's hash cannot be computed.", dest / "base.log")
-            why = (
-                "base_max_age_days is 0" if not p.base_max_age_days
-                else "its model has no date" if not dated(tree / p.config)
-                else None
-            )  # fmt: skip
-            if why:
-                print(f"{name}: not cached, {why}")
+            if not p.base_max_age_days:
+                print(f"{name}: not cached, base_max_age_days is 0")
                 continue
             reused, note = earlier(
                 p, cache / name, here, set_hash, dest / "base.jsonl", dest / "base.log"

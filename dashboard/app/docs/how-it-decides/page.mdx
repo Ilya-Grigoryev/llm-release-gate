@@ -146,7 +146,7 @@ under `checks: report`). Without `levels` nothing changes.
 A version stays the same version in any commit ([What a version is](/docs/how-it-works#what-a-version-is)), so the gate
 runs it once and shares the runs. Each job uploads the runs it paid for as an artifact named after the version and the
 test set. Before running the base, the next job looks for that artifact and reuses its runs when they are at most
-`base_max_age_days` old, 3 by default. A merged request's candidate is the target branch's new version, so the next
+`base_max_age_days` old, 7 by default. A merged request's candidate is the target branch's new version, so the next
 request usually finds its base already run. The comment says how many base runs came from earlier jobs, and its cost
 counts only the runs this job paid for.
 
@@ -159,9 +159,11 @@ Reuse has two prices:
 - **Shared luck.** Every request within the age limit compares with the same base runs. With one run per case, a lucky
   or unlucky base run moves all their verdicts the same way. Use `0` when you count the gate's errors across requests.
 
-The gate never reuses runs when either version's model has no date, when the request changes `prepare`, or when the target branch has no valid `gate.yaml`. Prefer a dated
-snapshot. For a model without a date, the comment warns, and the gate refuses to compare (`infra error`) runs
-with a pause longer than one hour, and, when both versions asked for it, runs the provider reported as different models.
+The gate never reuses runs when the request changes `prepare` or when the target branch has no valid `gate.yaml`. It
+takes one model name for one model, with or without a date: Anthropic's ids from Claude 4.6 on are fixed snapshots, while
+other providers' names without a date may move to a newer snapshot. Prefer a dated snapshot there. For a model without a
+date the comment warns, and the gate refuses to compare (`infra error`) runs the provider reported as different models
+when both versions asked for the same one.
 Reuse needs `actions: read` in the job's `permissions`; without it the base runs again and the comment says why.
 
 ## Budgets: cost and latency

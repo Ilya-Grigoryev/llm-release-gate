@@ -2,16 +2,11 @@
 
 from collections import defaultdict
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
-from itertools import pairwise
+from datetime import UTC, datetime
 from pathlib import Path
 
 from llm_release_gate.pipeline import is_alias
 from llm_release_gate.runner import read_records
-
-ALIAS_WINDOW = timedelta(
-    hours=1
-)  # an alias's two arms must run this close together (D-018)
 
 
 class Mismatch(ValueError):
@@ -82,40 +77,29 @@ def pair(base: Arm, candidate: Arm) -> dict[str, tuple[list[dict], list[dict]]]:
         raise Mismatch(
             f"different scorers: {base.scorer_version} and {candidate.scorer_version}"
         )
-    aliases = base.aliases | candidate.aliases
-    if aliases:
-        names = ", ".join(sorted(aliases))
-        times = base.times(), candidate.times()
-        if None in times:
-            raise Mismatch(f"model {names} has no date and some runs no time")
-        timeline = sorted(times[0] + times[1])
-        gap = max((b - a for a, b in pairwise(timeline)), default=timedelta(0))
-        if gap > ALIAS_WINDOW:
+    # one model name is one model (D-029), so runs days apart compare; where both versions asked for a name without
+    # a date, the provider must have reported the same model for both
+    for alias in sorted(
+        base.aliases & candidate.aliases
+    ):  # a model change between the versions is fine
+        reported = [
+            {
+                r.get("model")
+                for r in arm.records.values()
+                if r.get("requested_model") == alias
+            }
+            for arm in (base, candidate)
+        ]
+        if None in reported[0] | reported[1]:
             raise Mismatch(
-                f"model {names} has no date, so the provider may have changed it while these runs were made: "
-                f"they have a pause of {gap}; run both versions together"
+                f"model {alias} has no date and some runs do not say which model the provider used: "
+                "the pipeline must report it"
             )
-        for alias in sorted(
-            base.aliases & candidate.aliases
-        ):  # a model change between the versions is fine
-            reported = [
-                {
-                    r.get("model")
-                    for r in arm.records.values()
-                    if r.get("requested_model") == alias
-                }
-                for arm in (base, candidate)
-            ]
-            if None in reported[0] | reported[1]:
-                raise Mismatch(
-                    f"model {alias} has no date and some runs do not say which model the provider used: "
-                    "the pipeline must report it"
-                )
-            if reported[0] != reported[1]:
-                raise Mismatch(
-                    f"model {alias}: the provider reported {sorted(map(str, reported[0]))} for the base "
-                    f"and {sorted(map(str, reported[1]))} for the candidate"
-                )
+        if reported[0] != reported[1]:
+            raise Mismatch(
+                f"model {alias}: the provider reported {sorted(map(str, reported[0]))} for the base "
+                f"and {sorted(map(str, reported[1]))} for the candidate"
+            )
     b, c = by_case(base), by_case(candidate)
     one_sided = sorted(b.keys() ^ c.keys())
     if one_sided:

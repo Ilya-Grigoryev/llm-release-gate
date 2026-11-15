@@ -538,9 +538,8 @@ def markdown(
     aliases = sorted(base.aliases | candidate.aliases)
     if aliases:
         lines.append(
-            f"⚠️ Model without a date ({', '.join(aliases)}): the provider may change it; "
-            "the runs of both versions have no pause longer than an hour, and where both asked for the same model the provider "
-            "reported the same one."
+            f"⚠️ Model without a date ({', '.join(aliases)}): the gate takes one name for one model, though the "
+            "provider may change it; where both versions asked for the same model, the provider reported the same one."
         )
     if costs and None in costs:
         lines.append("Cost: a model in these runs has no price.")

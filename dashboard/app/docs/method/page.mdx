@@ -58,7 +58,7 @@ The decisions below answer the first research question; D-numbers are the thesis
   SDK with a hosted service. Today the gate is still added to a project as a dependency.
 - **Checks that the team writes** (D-019, D-020, D-022, partly built), over the answer and the trace.
 - **No model grades the text by default** (D-005, D-022); a model-graded check is planned as an option.
-- **Models without a date** (D-018, built) are accepted, with
+- **Models without a date** (D-018, D-029, built) are accepted: one name is one model, with
   [precautions](/docs/how-it-decides#where-the-bases-runs-come-from).
 
 ## Decisions: deciding under noise
@@ -67,10 +67,10 @@ These answer the second research question. By default the gate uses the naive ru
 by default, and the rule on checks; `mean: betting` turns on the statistical rule. The anchor and running more on its
 own are planned; the rest is built.
 
-- **Both versions run on the same cases** (D-007, D-018, built), so a case's difficulty cancels out. The base's runs of a
-  dated model come from earlier jobs for up to `base_max_age_days` (3 by default), so a shift in the service within
-  that window counts as an effect and the requests in it share one base sample; `0` runs both versions together. A
-  model without a date always runs together
+- **Both versions run on the same cases** (D-007, D-018, built), so a case's difficulty cancels out. The base's runs
+  come from earlier jobs for up to `base_max_age_days` (7 by default), so a shift in the service within that window
+  counts as an effect and the requests in it share one base sample; `0` runs both versions together, as the experiments
+  that count the gate's errors do
   ([Where the base's runs come from](/docs/how-it-decides#where-the-bases-runs-come-from)).
 - **A pass speaks for these cases** (D-004, built), as a test suite does, not for inputs like these.
 - **δ is the loss you accept** (D-004, built), specified in advance and not tuned to the noise.

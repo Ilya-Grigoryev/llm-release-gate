@@ -37,11 +37,11 @@ answer against. The site's Get started page shows one program in Python, Node.js
 `command` is part of the version and its hash, and the program's code is part of the version as any code of the
 project is ([Running a version](#running-a-version)).
 
-Prefer a dated snapshot. A name without a date (`gpt-6-luna`) works, but the provider may change the model behind it,
-so the gate takes three precautions: every record keeps the requested model next to the one the provider reports and the
-time, the gate's comment warns about it, and the gate refuses to compare two versions whose runs, taken together, have a
-pause longer than an hour, or that asked for the same model and got different ones from the provider (or runs that do
-not say which one they got: report `model`).
+Prefer a dated snapshot. The gate takes one model name for one model, with or without a date (Anthropic's ids from
+Claude 4.6 on are fixed snapshots; other providers' names without a date, such as OpenAI's `gpt-4.1-mini`, may move to a
+newer snapshot). For a name without a date every record keeps the requested model next to the one the provider reports,
+the gate's comment warns, and the gate refuses to compare two versions that asked for the same model and got different
+ones from the provider (or runs that do not say which one they got: report `model`).
 
 The gate imports no application code, only the module of a `function` check. [receipt-intake](https://github.com/Ilya-Grigoryev/receipt-intake) is a whole project set up this way.
 
@@ -201,7 +201,7 @@ apply to every pipeline, and a pipeline's own win:
 | `levels` | `critical: [ids]` block even under `checks: report` and lead the comment; `minor: [ids]` stay out of the case score and only warn (⚠️ in the title, a CI annotation) when significantly worse, as normal checks under `checks: report` do once `levels` is set; `cases: {pattern: level}` for a case's checks, and a `minor` case leaves the mean. Ids take shell patterns (`assert-*`); a pattern that matches no check is named in the comment |
 | `prices` | YAML of `model: [input, output]` USD per 1M tokens, for costs and the cost budget |
 | `budgets` | `cost_per_run_usd` (needs `prices`), `latency_s` and `latency_quantile` (default 0.95) |
-| `base_max_age_days` | the gate reuses the target branch's runs from earlier jobs up to this many days old, default 3; `0` runs both versions in every job |
+| `base_max_age_days` | the gate reuses the target branch's runs from earlier jobs up to this many days old, default 7; `0` runs both versions in every job |
 | `prepare` | a command that readies the project in both trees before their runs, such as `[npm, ci]` |
 | `ignore` | glob patterns, from the project's directory, of files that never change what the model gets, such as `web/` (a trailing `/` takes the directory, `**` crosses directories); on top of documentation and CI; `!docs/kb/` takes files back, for an app that reads them |
 
@@ -219,7 +219,7 @@ the base, a later job reuses such runs if they are at most `base_max_age_days` o
 target branch's new version, so the next request usually finds its base already run, and the comment's cost counts
 only what this job paid for. The price: within the age limit, a shift at the provider counts as an effect of the change, and every
 request compares with the same base runs, so one noisy base run moves all their verdicts; `base_max_age_days: 0` runs
-both versions together, as an experiment that counts the gate's errors should. The gate never reuses runs when either version's model has no date, when the request changes `prepare`, or when the target branch has no valid `gate.yaml`. The job needs `actions: read` to find earlier runs;
+both versions together, as an experiment that counts the gate's errors should. The gate never reuses runs when the request changes `prepare` or when the target branch has no valid `gate.yaml`. The job needs `actions: read` to find earlier runs;
 without it the base runs again and the comment says so.
 
 The rules (`delta`, `k`, `budgets`, `prices`, `base_max_age_days`) come from the target branch's `gate.yaml`, so editing the rules in a

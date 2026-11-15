@@ -22,7 +22,7 @@ rewrites the cancellation rule in its system prompt.
    `unchanged` and nothing runs.
 4. **Both versions run.** The candidate (the request's version) runs `k` times on each [case](#cases) of the
    request's test set, and the base (the target branch's version) next to it, unless an earlier job ran that version on
-   the same set within `base_max_age_days` (3 by default): then the gate
+   the same set within `base_max_age_days` (7 by default): then the gate
    [reuses those runs](/docs/how-it-decides#where-the-bases-runs-come-from).
 5. **Checks score every run.** The case's [checks](#checks) read the answer and the [trace](/docs/connect#traces) of
    steps that produced it, and give the run a score from 0 to 1.

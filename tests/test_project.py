@@ -37,7 +37,7 @@ def test_defaults(tmp_path):
         5.0,
         None,
         {},
-        3,
+        7,
     )
 
 

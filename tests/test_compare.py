@@ -100,7 +100,7 @@ def alias_arm(model, hour, set_hash="s" * 64):
     return Arm("c" * 64, set_hash, "metrics/5", records, aliases)
 
 
-def test_a_resumed_arm_with_old_records_is_refused():
+def test_a_resumed_arm_with_old_records_compares():
     old_and_new = Arm(
         "c" * 64,
         "s" * 64,
@@ -141,8 +141,12 @@ def test_a_resumed_arm_with_old_records_is_refused():
         },
         frozenset({"gpt-6-luna"}),
     )
-    with pytest.raises(Mismatch, match="pause"):
-        pair(old_and_new, new)
+    for arm in (old_and_new, new):
+        for r in arm.records.values():
+            r["model"] = "gpt-6-luna"
+    pair(
+        old_and_new, new
+    )  # one name is one model (D-029): days between runs do not matter
 
 
 def test_an_alias_whose_reported_model_changed_is_refused():
@@ -174,20 +178,20 @@ def test_load_arm_finds_the_aliases(tmp_path):
     f = tmp_path / "runs.jsonl"
     f.write_text(json.dumps(record) + "\n")
     assert load_arm(f).aliases == frozenset({"gpt-6-luna"})
-    record.pop("timestamp")
+    record.pop("timestamp")  # no time is fine now (D-029); no reported model is not
     f.write_text(json.dumps(record) + "\n")
-    with pytest.raises(Mismatch, match="no time"):
+    with pytest.raises(Mismatch, match="must report it"):
         pair(load_arm(f), load_arm(f))
+    f.write_text(json.dumps({**record, "model": "gpt-6-luna"}) + "\n")
+    pair(load_arm(f), load_arm(f))
 
 
-def test_an_alias_needs_both_arms_run_together():
-    pair(alias_arm("gpt-6-luna", 10), alias_arm("gpt-6-luna", 10))
-    with pytest.raises(Mismatch, match="no date"):
-        pair(alias_arm("gpt-6-luna", 8), alias_arm("gpt-6-luna", 12))
+def test_an_alias_compares_runs_hours_apart():
+    pair(alias_arm("gpt-6-luna", 8), alias_arm("gpt-6-luna", 12))  # D-029
     pair(
         alias_arm("gpt-5.4-mini-2026-03-17", 8),
         alias_arm("gpt-5.4-mini-2026-03-17", 12),
-    )  # dated: fine
+    )
 
 
 def test_is_alias():

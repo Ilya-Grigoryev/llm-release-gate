@@ -75,8 +75,8 @@ What the schema does not say:
 
 - **Names**: letters, digits, `_`, `-` and `.`, not starting with `.`; the name also labels `OUT/NAME`.
 - **`golden`**: both versions run on the request's test set.
-- **`base_max_age_days`**: comes from the target branch, like `delta`. The gate never reuses runs when either version's model has no date, when the request changes `prepare`,
-  or when the target branch has no valid `gate.yaml`.
+- **`base_max_age_days`**: comes from the target branch, like `delta`; 7 by default. The gate never reuses runs when the
+  request changes `prepare` or when the target branch has no valid `gate.yaml`.
   ([Why](/docs/how-it-decides#where-the-bases-runs-come-from))
 - **`delta`**: points out of 100; under the naive rule a drop of exactly `delta` passes. Only `gate --relative` makes it
   relative, and only for the naive rule.
@@ -385,8 +385,7 @@ uv run --env-file .env llm-release-gate run --config configs/invoice.yaml --gold
 ### gate
 
 Compares two files of runs case by case with a rule on the mean and the rule on checks. It gives `infra error` for different set hashes, cases on
-one side only, different scorer versions (unless `--golden` rescores both) and, for a model name without a date, a
-pause over an hour or, when both asked for it, different reported models ([why](/docs/how-it-decides#where-the-bases-runs-come-from)).
+one side only, different scorer versions (unless `--golden` rescores both) and, for a model name without a date that both asked for, different reported models ([why](/docs/how-it-decides#where-the-bases-runs-come-from)).
 
 | Flag | Meaning |
 |---|---|

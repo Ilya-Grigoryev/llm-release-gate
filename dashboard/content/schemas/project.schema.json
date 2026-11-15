@@ -204,7 +204,7 @@
       }
     },
     "base_max_age_days": {
-      "description": "The gate reuses the target branch's runs from earlier jobs up to this many days old instead of running its version again (default 3). With 0 it runs that version on every request, as it always does for a model without a date.",
+      "description": "The gate reuses the target branch's runs from earlier jobs up to this many days old instead of running its version again (default 7). With 0 it runs that version on every request.",
       "type": "number",
       "minimum": 0,
       "maximum": 365
