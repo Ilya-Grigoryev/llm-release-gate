@@ -218,8 +218,8 @@ Without `levels` nothing changes.
 
 By default (`base_max_age_hours: 0`) the base runs next to the candidate in every job, so a change at the provider
 between sessions hits both versions and cancels out. On 16.11.2026 two requests that changed nothing but the gate's
-version were blocked by checks that passed in the base runs of the evening before (5 of 5 and 4 of 5) and failed in
-all 5 candidate runs of the next afternoon; with both versions in one job that cannot happen.
+version were blocked by checks that passed in the base runs of a night job (5 of 5 and 4 of 5) and failed in all 5
+candidate runs 16 hours later; with both versions in one job such a shift hits both.
 
 A version stays the same version in any commit ([What a version is](/docs/how-it-works#what-a-version-is)), so with
 `base_max_age_hours` above 0, such as `24` or `48`, the gate runs it once and shares the runs. Each job uploads the runs
