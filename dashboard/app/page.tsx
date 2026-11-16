@@ -188,8 +188,9 @@ export default function Home() {
             ))}
           </div>
           <p className="mt-5 max-w-[68ch] text-ink-2">
-            Today the gate&apos;s repository is private and only its owner&apos;s repositories can use it; a public release is
-            planned.
+            The gate&apos;s repository is public on{" "}
+            <a href="https://github.com/Ilya-Grigoryev/llm-release-gate" className="underline">GitHub</a>, under the MIT
+            license.
           </p>
         </section>
       </div>

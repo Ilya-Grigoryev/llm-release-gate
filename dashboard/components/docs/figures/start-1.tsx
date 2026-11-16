@@ -3,39 +3,35 @@ import { FigureHead } from "./kit";
 
 /** The anchors of the page's steps (the ids its headings get). */
 const STEP: Record<number, string> = {
-  1: "1-get-access-while-the-gate-is-private",
-  2: "2-add-the-dependency",
-  3: "3-write-gate-yaml",
-  4: "4-describe-the-version-and-connect-your-app",
-  5: "5-write-a-first-case",
-  6: "6-add-the-gate-to-your-workflow",
+  1: "1-add-the-dependency",
+  2: "2-write-gate-yaml",
+  3: "3-describe-the-version-and-connect-your-app",
+  4: "4-write-a-first-case",
+  5: "5-add-the-gate-to-your-workflow",
 };
 
 type Row = { name: string; depth?: number; step?: number; edited?: boolean; note?: ReactNode };
 
 const TREE: Row[] = [
   { name: ".github/workflows/" },
-  { name: "release-gate.yml", depth: 1, step: 6 },
+  { name: "release-gate.yml", depth: 1, step: 5 },
   { name: "configs/" },
-  { name: "invoice.yaml", depth: 1, step: 4 },
+  { name: "invoice.yaml", depth: 1, step: 3 },
   { name: "gate/" },
-  { name: "extract.py", depth: 1, step: 4, note: <>or <code className="font-mono">extract.mjs</code>, <code className="font-mono">extract.go</code></> },
+  { name: "extract.py", depth: 1, step: 3, note: <>or <code className="font-mono">extract.mjs</code>, <code className="font-mono">extract.go</code></> },
   { name: "golden/invoices/" },
   { name: "inputs/", depth: 1 },
-  { name: "inv-001.txt", depth: 2, step: 5 },
-  { name: "inv-001.yaml", depth: 1, step: 5 },
+  { name: "inv-001.txt", depth: 2, step: 4 },
+  { name: "inv-001.yaml", depth: 1, step: 4 },
   { name: "prompts/" },
-  { name: "extract.md", depth: 1, step: 4 },
-  { name: ".gitignore", step: 5, edited: true, note: <>adds <code className="font-mono">.env</code> and <code className="font-mono">runs/</code></> },
-  { name: "gate.yaml", step: 3 },
-  { name: "pyproject.toml", step: 2, edited: true },
-  { name: "uv.lock", step: 2, edited: true },
+  { name: "extract.md", depth: 1, step: 3 },
+  { name: ".gitignore", step: 4, edited: true, note: <>adds <code className="font-mono">.env</code> and <code className="font-mono">runs/</code></> },
+  { name: "gate.yaml", step: 2 },
+  { name: "pyproject.toml", step: 1, edited: true },
+  { name: "uv.lock", step: 1, edited: true },
 ];
 
-const SECRETS: Row[] = [
-  { name: "LLM_RELEASE_GATE_KEY", step: 1 },
-  { name: "OPENAI_API_KEY", step: 6 },
-];
+const SECRETS: Row[] = [{ name: "OPENAI_API_KEY", step: 5 }];
 
 function StepNo({ step }: { step: number }) {
   return (

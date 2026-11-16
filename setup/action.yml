@@ -1,11 +1,11 @@
 name: llm-release-gate setup
-description: Python, uv and the project's locked environment, with read access to the gate's repository while it is private.
+description: Python, uv and the project's locked environment.
 inputs:
   project-dir:
     description: The project's directory in the repository.
     default: "."
   gate-ssh-key:
-    description: A read-only deploy key of Ilya-Grigoryev/llm-release-gate, as long as that repository is private.
+    description: Not needed since Ilya-Grigoryev/llm-release-gate is public; a deploy key passed here is still used.
     default: ""
   python-version:
     description: Python for uv to find; the project's own pin wins.

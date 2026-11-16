@@ -56,7 +56,7 @@ scoring:
 `state` compares the whole `state_change` your program reports, so an extra change, such as a refund, fails it. A run
 that cancels the booking and pays the €80 itself fails `state`, `did.1:hand_to_staff` and `no-big-refund`.
 
-An invoice reader uses `method: field_match` ([Get started](/docs/start#5-write-a-first-case)): a field expected as
+An invoice reader uses `method: field_match` ([Get started](/docs/start#4-write-a-first-case)): a field expected as
 `null` is not scored, and `type: date` or `type: number` compare by value. Dates with slashes or dots are read day first
 unless that is impossible. Amounts in `€` or with a decimal comma do not parse as numbers.
 

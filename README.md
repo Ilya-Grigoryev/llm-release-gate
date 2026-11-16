@@ -183,8 +183,6 @@ A check compares against its own `value` or against the case's expected value at
        steps:
          - uses: actions/checkout@v7
          - uses: Ilya-Grigoryev/llm-release-gate/setup@v0.1.0-dev.16
-           with:
-             gate-ssh-key: ${{ secrets.LLM_RELEASE_GATE_KEY }}  # while this repository is private
          - uses: Ilya-Grigoryev/llm-release-gate@v0.1.0-dev.16
    ```
 
@@ -272,13 +270,8 @@ step per pipeline with `pipeline: NAME` and `if: ${{ !cancelled() }}` on all but
 skip the others; each gets its own comment and artifact. A golden set that stays out of git is
 fetched or built in a step before the gate; if that step fails, the gate does not run and the request gets no comment.
 
-While this repository is private, only repositories of its owner can use it: the owner shares its actions with them
-(Settings → Actions → Access) and gives each a read-only deploy key, passed as `gate-ssh-key`. Other projects wait for
-the public release.
-
-Three projects use it, each with its own `.github/workflows/ci.yml`: [receipt-intake](https://github.com/Ilya-Grigoryev/receipt-intake)
-(about $0.06 a pull request), [workbench-support](https://github.com/Ilya-Grigoryev/workbench-support) ($0.14) and
-[telecom-support](https://github.com/Ilya-Grigoryev/telecom-support) ($0.20).
+Three private projects use it, each with its own `.github/workflows/ci.yml`: `receipt-intake` (about $0.06 a pull
+request), `workbench-support` ($0.14) and `telecom-support` ($0.20).
 
 Outside GitHub Actions the gate's command does the work, from the repository's root. `llm-release-gate pr --base
 origin/main --out OUT` runs every pipeline of `gate.yaml` and writes `OUT/NAME` (`--project DIR` when `gate.yaml` is not

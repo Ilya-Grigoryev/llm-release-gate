@@ -7,8 +7,6 @@ end with a check on your machine, so mistakes show up before CI.
 
 ## Before you start
 
-- **Access to the gate.** Its repository is private today: only private repositories of its owner can use it
-  ([step 1](#1-get-access-while-the-gate-is-private)).
 - **A GitHub repository** with Actions turned on, or see [Other CI](#other-ci).
 - **A uv project**: `pyproject.toml` and a committed, up-to-date `uv.lock` at the root, Python 3.12 or newer. An
   application in another language still needs a small `pyproject.toml` that lists the gate.
@@ -17,36 +15,9 @@ end with a check on your machine, so mistakes show up before CI.
 The examples use a made-up **invoice reader**: one model call reads the vendor, the date and the total from an invoice.
 [Reference](/docs/reference#terms) defines the terms.
 
-<Fig id="start-1" caption={"Seven new files, three edited ones and two secrets. The numbers are the steps below."} alt={"The setup does this, by step: 1, adds the secret `LLM_RELEASE_GATE_KEY`; 2, edits `pyproject.toml` and `uv.lock` to add the gate as a dependency; 3, adds `gate.yaml`; 4, adds the version's config `configs/invoice.yaml`, its prompt `prompts/extract.md` and the program that answers a case, `gate/extract.py` (or `.mjs`, `.go`); 5, adds a first case `golden/invoices/inv-001.yaml` with its input file `golden/invoices/inputs/inv-001.txt`, and adds the lines `.env` and `runs/` to `.gitignore`; 6, adds the workflow `.github/workflows/release-gate.yml` and the secret `OPENAI_API_KEY`."} />
+<Fig id="start-1" caption={"Seven new files, three edited ones and a secret. The numbers are the steps below."} alt={"The setup does this, by step: 1, edits `pyproject.toml` and `uv.lock` to add the gate as a dependency; 2, adds `gate.yaml`; 3, adds the version's config `configs/invoice.yaml`, its prompt `prompts/extract.md` and the program that answers a case, `gate/extract.py` (or `.mjs`, `.go`); 4, adds a first case `golden/invoices/inv-001.yaml` with its input file `golden/invoices/inputs/inv-001.txt`, and adds the lines `.env` and `runs/` to `.gitignore`; 5, adds the workflow `.github/workflows/release-gate.yml` and the secret `OPENAI_API_KEY`."} />
 
-## 1. Get access while the gate is private
-
-The owner of the gate's repository does this once per project. In the gate's repository, under Settings → Actions →
-General → Access, choose "Accessible from repositories owned by" the owner's account. Then create a key pair, add its
-public half as a deploy key without write access, and store its private half as your project's secret:
-
-```sh
-ssh-keygen -t ed25519 -N "" -f llm-release-gate-key
-gh repo deploy-key add llm-release-gate-key.pub --repo Ilya-Grigoryev/llm-release-gate --title "your-project"
-gh secret set LLM_RELEASE_GATE_KEY < llm-release-gate-key   # run inside your project's repository
-```
-
-**Check:**
-
-```sh
-GIT_SSH_COMMAND="ssh -F /dev/null -i llm-release-gate-key -o IdentitiesOnly=yes" \
-  git ls-remote git@github.com:Ilya-Grigoryev/llm-release-gate.git v0.1.0-dev.16
-gh secret list   # run inside your project's repository
-```
-
-The first command prints a commit id and `refs/tags/v0.1.0-dev.16`; `Permission denied (publickey)` means the gate's
-repository does not know the key. The second lists `LLM_RELEASE_GATE_KEY`. Then delete the key files:
-
-```sh
-rm llm-release-gate-key llm-release-gate-key.pub
-```
-
-## 2. Add the dependency
+## 1. Add the dependency
 
 `uv add` pins the gate to a release and updates the lock file:
 
@@ -70,7 +41,7 @@ uv run llm-release-gate pr --help
 
 It prints the help of `pr`. If uv cannot fetch the gate, your git cannot read its repository.
 
-## 3. Write gate.yaml
+## 2. Write gate.yaml
 
 `gate.yaml` at the project's root names, for each pipeline, a version's config and its test set:
 
@@ -92,9 +63,9 @@ uv run llm-release-gate pr --list
 ```
 
 It prints the pipeline names, here `invoice`, or `infra error` with every problem in the file. It does not open the
-config or your code; [step 5](#5-write-a-first-case) does.
+config or your code; [step 4](#4-write-a-first-case) does.
 
-## 4. Describe the version and connect your app
+## 3. Describe the version and connect your app
 
 Your app answers the gate's test cases as a program. For each run the gate starts it, writes one JSON request to its
 stdin and reads one JSON answer from its stdout. The request names the case's input file and the version's model, prompt
@@ -388,7 +359,7 @@ func main() {
 ```
 
 Add `bin/` to `.gitignore`, and build once with the same `go build` before the check in [step
-5](#5-write-a-first-case): only `pr` runs `prepare`. Do not use `go run` in `command`: it turns every exit code of the
+4](#4-write-a-first-case): only `pr` runs `prepare`. Do not use `go run` in `command`: it turns every exit code of the
 program into 1, so the gate cannot tell a rate limit from a wrong key.
 
 </Tab>
@@ -404,7 +375,7 @@ Prefer a model name with a date: for a name without one, the gate warns and in s
 version is this config, the bytes of its prompts and the repository's code as git sees it ([What a version
 is](/docs/how-it-works#what-a-version-is)).
 
-## 5. Write a first case
+## 4. Write a first case
 
 A case is a YAML file in the test set's directory: what goes in, what should come out, and how to score the answer:
 
@@ -464,7 +435,7 @@ uv run --env-file .env llm-release-gate run --config configs/invoice.yaml --gold
 It prints the mean score and the hashes. If the program cannot start, the prompt is missing or the key is wrong, it
 stops and says which.
 
-## 6. Add the gate to your workflow
+## 5. Add the gate to your workflow
 
 Add a job that runs on pull requests, and store your provider's key as the secret `OPENAI_API_KEY`:
 
@@ -481,8 +452,6 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: Ilya-Grigoryev/llm-release-gate/setup@v0.1.0-dev.16
-        with:
-          gate-ssh-key: ${{ secrets.LLM_RELEASE_GATE_KEY }}  # while the gate's repository is private
       - uses: Ilya-Grigoryev/llm-release-gate@v0.1.0-dev.16
 ```
 
@@ -504,9 +473,9 @@ uv run --env-file .env llm-release-gate pr --base origin/main --out ../release-g
 
 It writes `comment.md`, `verdict.json` and the runs to `../release-gate-out/invoice/` and exits with the verdict's code
 ([outcomes](#what-each-outcome-means)): 0 on your first setup. If it is 20, read `comment.md` and [step
-7](#7-open-a-pull-request).
+6](#6-open-a-pull-request).
 
-## 7. Open a pull request
+## 6. Open a pull request
 
 Push your branch and open a pull request. The job posts one comment and edits it on later pushes.
 
@@ -552,6 +521,5 @@ On GitLab, `comment` needs `GITLAB_TOKEN`, a project access token with the `api`
 
 ## What is planned for setup
 
-Planned: `init` and `doctor` commands, a gate that installs itself (no `setup` step, no deploy key, no `pyproject.toml`
-in a project in another language), a GitLab CI/CD component and a public release
-([Method](/docs/method)).
+Planned: `init` and `doctor` commands, a gate that installs itself (no `setup` step, no `pyproject.toml` in a project in
+another language) and a GitLab CI/CD component ([Method](/docs/method)).
