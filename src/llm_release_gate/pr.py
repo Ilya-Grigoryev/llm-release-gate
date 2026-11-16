@@ -5,14 +5,14 @@ checkout's on the pipeline's test set, each in its own tree and environment, and
 the verdict, both arms' runs and logs, and cases/ with the set's text files (never images) for whoever reads the results.
 Exits with the worst outcome: 20 infra error, 10 quality fail, 12 budget fail, 11 inconclusive, 0 pass.
 
-With --cache, runs outlive the job (D-007): the gate reuses the target branch's runs of the same version on the same set,
-up to `base_max_age_days` old, from that directory and from other jobs' artifacts (`shared`), instead of running them
-again. OUT/NAME/shared.txt names the arms this job paid for, for the CI to upload; --refresh runs the target branch's
+With --cache, runs outlive the job (D-007): when `base_max_age_hours` is above 0 (D-033) the gate reuses the target
+branch's runs of the same version on the same set, up to that age, from that directory and from other jobs' artifacts
+(`shared`), instead of running them again. OUT/NAME/shared.txt names the arms this job paid for, for the CI to upload; --refresh runs the target branch's
 version on its own.
 
 With `max_spend_usd` (D-032) the gate buys rounds, one run of every case by both versions, until it decides or the next
 round would not fit; a re-run of the job continues with the rounds paid for and the base runs they were compared with
-(OUT/NAME/pinned.jsonl, uploaded with the candidate's runs).
+(OUT/NAME/pinned.jsonl, uploaded with the candidate's runs), with or without a cache of the base.
 """
 
 import argparse
@@ -197,17 +197,36 @@ def cached(path: Path, version_hash: str, set_hash: str) -> dict[tuple[str, int]
     }
 
 
+CONTINUE_DAYS = 14  # a re-run of an adaptive job reuses its own rounds this long: the action keeps run artifacts 14 days
+
+
+def stored(
+    cache: Path, version_hash: str, set_hash: str, met: str | None = None
+) -> Path:
+    """The cache's file of a version's runs on a set; with MET, only the base runs that candidate's rounds met (D-033)."""
+    return cache / f"{version_hash}-{set_hash}{f'-met-{met[:16]}' if met else ''}.jsonl"
+
+
 def reuse(
-    cache: Path, version_hash: str, set_hash: str, days: float, k: int | None, out: Path
+    cache: Path,
+    version_hash: str,
+    set_hash: str,
+    days: float,
+    k: int | None,
+    out: Path,
+    met: str | None = None,
 ) -> int:
     """Copy the cache's error-free runs of this version on this set, the first K per case (all if None), at most DAYS
-    old, to OUT with their raw responses, each marked `reused`; the runner then runs only the rest. Returns how many it
-    copied."""
-    path = cache / f"{version_hash}-{set_hash}.jsonl"
+    old, to OUT with their raw responses, each marked `reused`; the runner then runs only the rest. MET: from the file of
+    the base runs that candidate met. Returns how many it copied."""
+    path = stored(cache, version_hash, set_hash, met)
+    have = {
+        (r.get("case"), r.get("rep")) for r in read_records(out)
+    }  # restored pairs stay
     runs = [
         r
-        for (_, rep), r in cached(path, version_hash, set_hash).items()
-        if (k is None or rep < k) and recent(r, days)
+        for at, r in cached(path, version_hash, set_hash).items()
+        if (k is None or at[1] < k) and recent(r, days) and at not in have
     ]
     raw, lines, raws = raw_lines(path), [], []
     for r in runs:
@@ -227,10 +246,10 @@ def reuse(
     return len(runs)
 
 
-def keep(cache: Path, runs: Path, days: float) -> None:
-    """Add RUNS' error-free runs to the cache, and delete files without a run from the last DAYS. Per case and repetition
-    a recent run already kept stays (D-032): a re-run that continues reads the records its first look read; within RUNS
-    the later line wins."""
+def keep(cache: Path, runs: Path, days: float, met: str | None = None) -> None:
+    """Add RUNS' error-free runs to the cache (MET: to the file of the base runs that candidate met), and delete files
+    without a run from the last DAYS. Per case and repetition a recent run already kept stays (D-032): a re-run that
+    continues reads the records its first look read; within RUNS the later line wins."""
     cache.mkdir(parents=True, exist_ok=True)
     for old in cache.glob("*.jsonl"):
         if not old.name.endswith(".native.jsonl") and not any(
@@ -247,7 +266,7 @@ def keep(cache: Path, runs: Path, days: float) -> None:
             isinstance(h, str) and h.isalnum() for h in (version_hash, set_hash)
         ):
             continue  # a hash names a file
-        path = cache / f"{version_hash}-{set_hash}.jsonl"
+        path = stored(cache, version_hash, set_hash, met)
         merged, raw_old = cached(path, version_hash, set_hash), raw_lines(path)
         for at, r in cached(runs, version_hash, set_hash).items():
             old = merged.get(at)
@@ -268,24 +287,33 @@ def earlier(
     cache: Path,
     version_hash: str,
     set_hash: str,
-    out: Path,
+    out: Path | None,
     log: Path,
     k: int | None,
+    days: float,
+    keep_days: float | None = None,
+    met: str | None = None,
 ) -> tuple[int, str | None]:
-    """Put the version's recent runs, from CACHE and from other jobs, into OUT. Returns how many, and a note for the
-    comment when the job cannot read other jobs' runs."""
+    """Put the version's runs at most DAYS old, from CACHE and from other jobs, into OUT (None: only fetch them). The
+    cache keeps runs KEEP_DAYS (default DAYS); MET routes an artifact's pinned.jsonl, the base runs that candidate met,
+    to a file only that candidate reads. Returns how many runs, and a note for the comment when the job cannot read other
+    jobs' runs."""
+    keep_days = days if keep_days is None else keep_days
     try:
         line, note = shared.fetch(
             shared.name(p.name, version_hash, set_hash),
-            lambda runs: keep(cache, runs, p.base_max_age_days),
-            p.base_max_age_days,
+            lambda runs: keep(
+                cache, runs, keep_days, met if runs.name == "pinned.jsonl" else None
+            ),
+            days,
             os.environ,
         )
-        reused = reuse(cache, version_hash, set_hash, p.base_max_age_days, k, out)
+        reused = reuse(cache, version_hash, set_hash, days, k, out) if out else 0
     except Exception as e:  # noqa: BLE001 - reuse saves money and must never fail a check: the base runs
         line, note, reused = f"earlier runs: {type(e).__name__}: {e}", None, 0
-        out.unlink(missing_ok=True)
-        native(out).unlink(missing_ok=True)
+        if out:
+            out.unlink(missing_ok=True)
+            native(out).unlink(missing_ok=True)
     with log.open("a") as f:
         f.write(f"{line}\n{reused} runs of {version_hash[:12]} reused\n")
     return reused, note
@@ -387,10 +415,12 @@ def one(
         raise Infra(f"There is no {p.config}.")
     if base is None or base_config is None or not (base / base_config).is_file():
         base = None
-    if not p.base_max_age_days:
-        cache = None
-    logs, note = (dest / "base.log", dest / "candidate.log"), None
-    adaptive = p.max_spend_usd is not None
+    hours, adaptive = p.base_max_age_hours, p.max_spend_usd is not None
+    if not hours and not adaptive:
+        cache = None  # nothing to reuse: the base runs next to the candidate (D-033)
+    keep_days = max(hours / 24, CONTINUE_DAYS if adaptive else 0)
+    logs, note, hashes = (dest / "base.log", dest / "candidate.log"), None, (None, None)
+    resumable = False  # whether a re-run of an adaptive job can continue
     if base is not None and (may_skip or cache):
         hashes = both(
             lambda: version(base, base_config, logs[0]),
@@ -398,22 +428,15 @@ def one(
         )
         if may_skip and hashes[0] and hashes[0] == hashes[1]:
             return unchanged(p, hashes[0], set_hash, dest)
-        if (
-            cache and adaptive and hashes[1]
-        ):  # a re-run continues: this version's rounds and the base runs they met
-            earlier(
-                p, cache, hashes[1], set_hash, dest / "candidate.jsonl", logs[1], None
+        if cache and adaptive and hashes[1]:
+            resumable = resume(
+                p, cache, hashes, set_hash, golden, dest, logs, keep_days
             )
-        if cache and base_as_usual and hashes[0]:
+        if cache and hours and base_as_usual and hashes[0]:
             _, note = earlier(
-                p,
-                cache,
-                hashes[0],
-                set_hash,
-                dest / "base.jsonl",
-                logs[0],
-                None if adaptive else p.k,
-            )
+                p, cache, hashes[0], set_hash, dest / "base.jsonl", logs[0], None if adaptive else p.k, hours / 24,
+                keep_days,
+            )  # fmt: skip
     runs = [*PYTHON, "-m", "llm_release_gate.runner", "--golden", str(golden), "-k"]
 
     def run(k: int) -> None:
@@ -436,6 +459,7 @@ def one(
         *(["--prices", prices] if prices else []),
         *(a for k, flag in BUDGETS.items() if k in p.budgets for a in (flag, str(p.budgets[k]))),
         *(["--max-spend", str(p.max_spend_usd)] if adaptive and base else []),
+        *(["--no-resume"] if adaptive and base and not resumable else []),
     ]  # fmt: skip
 
     def verdict() -> int:
@@ -469,14 +493,74 @@ def one(
                         shutil.copyfile(src, dst)
             arms = (
                 ("base.jsonl", "candidate.jsonl")
-                if base_as_usual
+                if base_as_usual and hours
                 else ("candidate.jsonl",)
             )
-            store(cache, dest, arms, p.name, p.base_max_age_days)
+            store(cache, dest, arms, p.name, keep_days)
+            if (
+                adaptive and hashes[1] and (dest / "pinned.jsonl").is_file()
+            ):  # for a re-run with this cache
+                keep(cache, dest / "pinned.jsonl", keep_days, hashes[1])
     if note:
         with (dest / "comment.md").open("a") as f:
             f.write(f"\n{note}\n")
     return code
+
+
+def resume(
+    p: project.Pipeline,
+    cache: Path,
+    hashes: tuple[str | None, str | None],
+    set_hash: str,
+    golden: Path,
+    dest: Path,
+    logs: tuple[Path, Path],
+    keep_days: float,
+) -> bool:
+    """A re-run of an adaptive job continues with the candidate's rounds paid for and the base runs those rounds met, in
+    pairs: only the rounds both versions finished, and no other base runs for them, so the checks never read other data
+    for rounds they read (D-032) and each round keeps its two runs together (D-033). Returns whether a re-run of this
+    job can continue: the job keeps its runs where a later one finds them."""
+    base_hash, version_hash = hashes
+    _, note = earlier(
+        p,
+        cache,
+        version_hash,
+        set_hash,
+        None,
+        logs[1],
+        None,
+        CONTINUE_DAYS,
+        keep_days,
+        version_hash,
+    )
+    try:
+        k = 0
+        if base_hash:
+            reuse(
+                cache,
+                base_hash,
+                set_hash,
+                CONTINUE_DAYS,
+                None,
+                dest / "base.jsonl",
+                version_hash,
+            )
+            k = rounds_done(dest / "base.jsonl", [c.id for c in load_cases(golden)])
+        n = reuse(
+            cache, version_hash, set_hash, CONTINUE_DAYS, k, dest / "candidate.jsonl"
+        )
+        line = f"{n} runs of {version_hash[:12]} continued"
+    except Exception as e:  # noqa: BLE001 - see `earlier`: without them the job starts over
+        line = f"earlier rounds: {type(e).__name__}: {e}"
+        for arm in ("base.jsonl", "candidate.jsonl"):
+            (dest / arm).unlink(missing_ok=True)
+            native(dest / arm).unlink(missing_ok=True)
+    with logs[1].open("a") as f:
+        f.write(f"{line}\n")
+    return (
+        note is None and os.environ.get("GITHUB_EVENT_NAME") != "pull_request_target"
+    )  # that event shares nothing
 
 
 def rounds_done(path: Path, cases: list[str]) -> int:
@@ -649,10 +733,13 @@ def refresh(
             here = version(tree, p.config, dest / "base.log")
             if not here:
                 raise Infra("The version's hash cannot be computed.", dest / "base.log")
-            if not p.base_max_age_days:
-                print(f"{name}: not cached, base_max_age_days is 0")
+            if not p.base_max_age_hours:
+                print(f"{name}: not cached, base_max_age_hours is 0")
                 continue
-            k = k_c(p.alpha, p.checks_block) if p.max_spend_usd is not None else p.k
+            adaptive = p.max_spend_usd is not None
+            k = k_c(p.alpha, p.checks_block) if adaptive else p.k
+            days = p.base_max_age_hours / 24
+            keep_days = max(days, CONTINUE_DAYS if adaptive else 0)
             reused, note = earlier(
                 p,
                 cache / name,
@@ -661,6 +748,8 @@ def refresh(
                 dest / "base.jsonl",
                 dest / "base.log",
                 k,
+                days,
+                keep_days,
             )
             if note:
                 print(f"{name}: {note}")
@@ -670,7 +759,7 @@ def refresh(
                 tree,
                 dest / "base.log",
             )  # fmt: skip
-            store(cache / name, dest, ("base.jsonl",), name, p.base_max_age_days)
+            store(cache / name, dest, ("base.jsonl",), name, keep_days)
             if done:
                 raise Infra("The runs did not finish.", dest / "base.log")
             print(

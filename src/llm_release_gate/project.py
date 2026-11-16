@@ -20,7 +20,7 @@ SETTINGS = (
     "levels",
     "prices",
     "budgets",
-    "base_max_age_days",
+    "base_max_age_hours",
     "max_spend_usd",
 )
 
@@ -42,7 +42,9 @@ class Pipeline:
     )  # critical / minor checks and cases (D-028)
     prices: str | None = None
     budgets: dict = field(default_factory=dict)
-    base_max_age_days: float = 7.0
+    base_max_age_hours: float = (
+        0.0  # 0: the base runs next to the candidate in every job (D-033)
+    )
     max_spend_usd: float | None = None  # adaptive runs instead of `k` (D-032)
 
     @property
@@ -71,6 +73,17 @@ class Project:
         return replace(p, **{k: getattr(own, k) for k in SETTINGS})
 
 
+def hours(given: dict, path: Path, where: str) -> dict:
+    """`base_max_age_hours`, or the deprecated `base_max_age_days` in hours; never both."""
+    if "base_max_age_days" not in given:
+        return {}
+    if "base_max_age_hours" in given:
+        raise ValueError(
+            f"{path}: {where}base_max_age_days and base_max_age_hours: set one"
+        )
+    return {"base_max_age_hours": given["base_max_age_days"] * 24}
+
+
 def load(directory: Path) -> Project:
     """Read DIRECTORY/gate.yaml. Raises ValueError naming the file and each broken field."""
     path = Path(directory) / FILE
@@ -89,12 +102,16 @@ def load(directory: Path) -> Project:
         for k in ("delta", "alpha"):
             if k in given and given[k] != given[k]:  # NaN passes the schema's bounds
                 raise ValueError(f"{path}: {where}{k} is not a number")
-    top = {k: raw[k] for k in SETTINGS if k in raw}
+    top = {k: raw[k] for k in SETTINGS if k in raw} | hours(raw, path, "")
     if "cost_per_run_usd" in top.get("budgets", {}) and "prices" not in top:
         raise ValueError(f"{path}: budgets.cost_per_run_usd needs prices")
     pipelines = {}
     for name, p in raw["pipelines"].items():
-        settings = top | {k: p[k] for k in SETTINGS if k in p}
+        settings = (
+            top
+            | {k: p[k] for k in SETTINGS if k in p}
+            | hours(p, path, f"pipelines.{name}.")
+        )
         if (
             "cost_per_run_usd" in settings.get("budgets", {})
             and "prices" not in settings

@@ -17,7 +17,7 @@ inputs:
     description: Days GitHub keeps that artifact.
     default: "30"
   runs-retention-days:
-    description: Days GitHub keeps each version's runs for later jobs to reuse; at least base_max_age_days in gate.yaml.
+    description: Days GitHub keeps each version's runs for later jobs to reuse; at least base_max_age_hours in gate.yaml, and 14 for re-runs of adaptive jobs (max_spend_usd).
     default: "14"
 runs:
   using: composite

@@ -256,6 +256,9 @@ def may_block(checks: str, rules: levels.Levels) -> bool:
     )
 
 
+MAX_ROUNDS = 60  # the most rounds the adaptive gate buys, as experiment E-011 simulated
+
+
 def k_c(alpha: float, checks_block: bool) -> int:
     """The round at which the adaptive gate reads the checks, once (D-032): known from the settings before any run. Five,
     or more when `alpha` is so small that a check broken in every run needs more; two when no check may block."""
@@ -346,7 +349,7 @@ def adaptive_lines(a: dict) -> list[str]:
         return [
             f"{a['rounds']} rounds of each version (checks read on rounds 1–{a['k_c']}) · {spent}."
         ]
-    if a["stop"] != "limit":
+    if a["stop"] is None:  # the loop buys more; a later comment replaces this one
         return [
             f"{a['rounds']} rounds of each version so far · {spent}; buying {a['next_rounds']} more."
         ]
@@ -355,6 +358,13 @@ def adaptive_lines(a: dict) -> list[str]:
         if a["next_round_usd"] is None
         else f"; the next round (about ${a['next_round_usd']:.2f}) does not fit"
     )
+    if a["stop"] == "rounds":
+        return [
+            (
+                f"⏸ {a['rounds']} rounds of each version, the most the gate buys · {spent}. More rounds will not "
+                "settle it: a person decides, or the set needs more cases."
+            )
+        ]
     out = [f"⏸ {a['rounds']} rounds of each version · {spent}{nxt}."]
     if left:
         out.append(
@@ -382,6 +392,9 @@ def adaptive_lines(a: dict) -> list[str]:
         )
     out.append(
         f"Re-run this job to buy up to ${a['max_spend_usd']:g} more; the rounds paid for count."
+        if a["resume"]
+        else "A re-run of this job starts over, as a new test: it finds none of these runs (no cache directory, no "
+        "`actions: read`, or `pull_request_target`). Raise max_spend_usd on the target branch instead."
     )
     return out
 
@@ -905,6 +918,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="adaptive runs (needs a betting --mean and --prices): read the rounds both versions finished, the checks "
         "and budgets on rounds 1 to K_c only, and say in the JSON how many rounds fit in this many USD next",
     )
+    p.add_argument(
+        "--no-resume",
+        action="store_true",
+        help="with --max-spend: a re-run of the job finds none of these runs, so the comment does not offer one",
+    )
     p.add_argument("--json", type=Path, help="write the verdict as JSON")
     p.add_argument("--markdown", type=Path, help="write the merge request comment")
     args = p.parse_args(argv)
@@ -1049,6 +1067,17 @@ def main(argv: Sequence[str] | None = None) -> int:
             nxt = (
                 0 if decided else plan(rounds, kc, sum(costs), args.max_spend, cost_of)
             )
+            capped = not decided and nxt and rounds + nxt > MAX_ROUNDS
+            nxt = 0 if capped or rounds >= MAX_ROUNDS else nxt
+            stop = (
+                "decided"
+                if decided
+                else "rounds"
+                if rounds >= MAX_ROUNDS or capped
+                else None
+                if nxt
+                else "limit"
+            )
             need = (
                 None
                 if mv.pass_at is None or mv.runs_for_pass is None
@@ -1056,7 +1085,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             adaptive = {
                 "max_spend_usd": args.max_spend, "spent_usd": sum(costs), "k_c": kc, "rounds": rounds,
-                "stop": "decided" if decided else None if nxt else "limit", "next_rounds": nxt,
+                "stop": stop, "next_rounds": nxt, "resume": not args.no_resume,
                 "next_round_usd": None if decided else cost_of(rounds + 1),
                 "rounds_to_k_c": max(0, kc - rounds), "to_k_c_usd": sum(map(cost_of, range(rounds + 1, kc + 1))),
                 "pass_rounds": need, "pass_usd": None if need is None else sum(map(cost_of, range(rounds + 1, need + 1))),

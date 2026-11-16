@@ -12,7 +12,10 @@ from llm_release_gate import pr, project
 
 FIXTURES = Path(__file__).parent / "fixtures"
 AGENT = FIXTURES / "command" / "agent.sh"
-GATE = "pipelines:\n  demo: {config: demo.yaml, golden: golden}\n"
+CACHE = "base_max_age_hours: 168\n"  # the cache tests below reuse the base for a week, the default before D-033
+GATE = (
+    CACHE + "pipelines:\n  demo: {config: demo.yaml, golden: golden}\n"
+)  # requests append pipelines
 
 
 def git(repo, *args):
@@ -520,7 +523,7 @@ def test_an_old_base_runs_again(repo):
 
 def test_the_target_branch_sets_the_age_limit(repo):
     for days, reused in (("0", False), ("10", True)):
-        version(repo, "answer", GATE + f"base_max_age_days: {days}\n")
+        version(repo, "answer", GATE.replace(CACHE, f"base_max_age_days: {days}\n"))
         git(repo, "add", "-A")
         git(repo, "commit", "-q", "-m", f"limit {days}")
         version(repo, "bare", GATE)  # the request's own limit does not count
@@ -724,9 +727,9 @@ def test_a_changed_test_set_runs_the_base_again(repo):
 
 def test_refresh_says_why_it_keeps_nothing(repo, capsys):
     cache, out = repo.parent / "cache", repo.parent / "refresh"
-    version(repo, "answer", GATE + "base_max_age_days: 0\n")
+    version(repo, "answer", GATE.replace(CACHE, ""))  # no cache is the default (D-033)
     assert pr.main(["--refresh", "--cache", str(cache), "--out", str(out)]) == pr.PASS
-    assert "demo: not cached, base_max_age_days is 0" in capsys.readouterr().out
+    assert "demo: not cached, base_max_age_hours is 0" in capsys.readouterr().out
     assert not list(cache.glob("*/*.jsonl"))
 
 
@@ -1083,3 +1086,74 @@ def test_the_cache_keeps_a_recent_run_it_has_over_a_newer_one(tmp_path):
     )
     pr.keep(cache, runs, 7)  # an old one gives way
     assert [r["run_id"] for r in records(cache / "v-s.jsonl")] == ["R1", "R1"]
+
+
+def test_without_a_cache_the_base_runs_next_to_the_candidate_in_every_job(repo):
+    commit_rules(repo, GATE.replace(CACHE, ""))
+    version(repo, "bare", GATE.replace(CACHE, ""))
+    cached_gate(repo)
+    _, out = cached_gate(repo)
+    assert not any(r.get("reused") for r in records(out / "base.jsonl"))
+    assert not list((repo.parent / "cache").glob("*/*.jsonl"))  # nothing kept to reuse
+
+
+def test_without_a_cache_a_rerun_continues_with_the_pairs_its_rounds_ran_in(
+    repo, monkeypatch
+):
+    rules = adaptive(repo, 0.0001).replace(CACHE, "")
+    commit_rules(repo, rules)
+    version(repo, "answer-again", rules)
+    _, out = cached_gate(repo)  # 3 rounds, limit before round 5
+    names = dict(line.split() for line in (out / "shared.txt").read_text().splitlines())
+    assert list(names) == ["candidate"]  # without a cache no one reuses this base
+    job1 = repo.parent / "artifact"
+    job1.mkdir()
+    for name in ("candidate.jsonl", "pinned.jsonl"):
+        shutil.copy(out / name, job1 / name)
+    met = reps(out / "base.jsonl")
+    shutil.rmtree(repo.parent / "cache")  # a new job starts without a cache
+    asked = []
+
+    def fetch(name, keep, days, env):
+        asked.append(name)
+        if name == names["candidate"]:
+            keep(job1 / "candidate.jsonl")
+            keep(job1 / "pinned.jsonl")
+        return f"earlier runs: {name}", None
+
+    monkeypatch.setattr(pr.shared, "fetch", fetch)
+    _, out = cached_gate(repo)
+    assert asked == [
+        names["candidate"]
+    ]  # the target branch's runs from other jobs are not asked for
+    base = reps(out / "base.jsonl")
+    assert all(base[k] == met[k] for k in met)
+    assert all(
+        r.get("reused", False) == (r["rep"] < 3) for r in records(out / "base.jsonl")
+    )
+    verdict = json.loads((out / "verdict.json").read_text())
+    assert verdict["runs"] == 6 and verdict["spent_usd"] == pytest.approx(0.00009)
+
+
+def test_a_request_that_changes_prepare_continues_with_its_own_base_runs(repo):
+    rules = adaptive(repo, 0.0001)
+    version(
+        repo, "answer-again", rules + "prepare: [sh, -c, 'true']\n"
+    )  # its base runs for it alone
+    _, out = cached_gate(repo)
+    met = reps(out / "base.jsonl")
+    assert len(met) == 3 and not any(
+        r.get("reused") for r in records(out / "base.jsonl")
+    )
+    _, out = cached_gate(repo)
+    base = reps(out / "base.jsonl")
+    assert all(
+        base[k] == met[k] for k in met
+    )  # the rounds the checks will read keep their base runs
+
+
+def test_without_a_cache_directory_the_comment_does_not_offer_a_rerun(repo):
+    version(repo, "answer-again", adaptive(repo, 0.0001))
+    code, out = gate(repo)
+    assert code == pr.INCONCLUSIVE
+    assert "A re-run of this job starts over" in (out / "comment.md").read_text()

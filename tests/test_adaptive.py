@@ -237,3 +237,30 @@ def test_no_pass_in_sight_says_so(tmp_path, table):
 
 def load_records(path):
     return [json.loads(line) for line in path.read_text().splitlines()]
+
+
+def test_the_gate_buys_at_most_60_rounds(tmp_path):
+    free = tmp_path / "free.yaml"
+    free.write_text(f"{MODEL}: [0, 0]\n")
+    # a loss of exactly delta: neither capital grows, and rounds cost nothing, so only the cap stops it
+    more = ("--threshold", "25", "--checks", "report")
+    code, asked, v, comment = loop(
+        tmp_path, free, 1, candidate=(WRONG_DATE,), more=more
+    )
+    assert (
+        code == gate.INCONCLUSIVE
+        and v["runs"] == gate.MAX_ROUNDS
+        and v["stop"] == "rounds"
+    )
+    assert asked[-1] == gate.MAX_ROUNDS and "the most the gate buys" in comment
+
+
+def test_without_a_way_to_continue_the_comment_says_a_rerun_starts_over(
+    tmp_path, table
+):
+    _, _, v, comment = loop(tmp_path, table, 1, more=("--no-resume",))
+    assert v["stop"] == "limit" and not v["adaptive"]["resume"]
+    assert (
+        "A re-run of this job starts over, as a new test" in comment
+        and "Re-run this job to buy" not in comment
+    )

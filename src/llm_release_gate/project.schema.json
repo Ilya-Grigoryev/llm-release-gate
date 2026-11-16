@@ -63,6 +63,9 @@
     "base_max_age_days": {
       "$ref": "#/$defs/base_max_age_days"
     },
+    "base_max_age_hours": {
+      "$ref": "#/$defs/base_max_age_hours"
+    },
     "max_spend_usd": {
       "$ref": "#/$defs/max_spend_usd"
     }
@@ -122,6 +125,9 @@
         },
         "base_max_age_days": {
           "$ref": "#/$defs/base_max_age_days"
+        },
+        "base_max_age_hours": {
+          "$ref": "#/$defs/base_max_age_hours"
         },
         "max_spend_usd": {
           "$ref": "#/$defs/max_spend_usd"
@@ -222,15 +228,21 @@
       }
     },
     "base_max_age_days": {
-      "description": "The gate reuses the target branch's runs from earlier jobs up to this many days old instead of running its version again (default 7). With 0 it runs that version on every request.",
+      "description": "Deprecated: base_max_age_hours in days (24 hours each). Set one of the two.",
       "type": "number",
       "minimum": 0,
       "maximum": 365
     },
     "max_spend_usd": {
-      "description": "Adaptive runs, instead of k (needs mean: betting and prices): the gate buys rounds, one run of every case by both versions, until it decides or the next round, priced like the last one, would take this job over this many USD. Checks and budgets are read once, on rounds 1 to 5. A re-run of the job continues where it stopped and counts the rounds already paid for.",
+      "description": "Adaptive runs, instead of k (needs mean: betting and prices): the gate buys rounds, one run of every case by both versions, until it decides or the next round, priced like the last one, would take this job over this many USD. Checks and budgets are read once, on rounds 1 to 5 (1 to 2 when no check can block). A re-run of the job continues where it stopped with the rounds already paid for, both versions as they ran together.",
       "type": "number",
       "exclusiveMinimum": 0
+    },
+    "base_max_age_hours": {
+      "description": "Reuse the target branch's runs from earlier jobs up to this many hours old, such as 24 or 48, instead of running its version again (default 0: the base runs next to the candidate in every job, so a change at the provider between sessions cannot pass for the request's).",
+      "type": "number",
+      "minimum": 0,
+      "maximum": 8760
     }
   }
 }

@@ -27,19 +27,22 @@ def test_a_pipelines_settings_win_over_the_top_ones(tmp_path):
         "https://x/{name}",
     )
     assert (docs.k, docs.delta, docs.prices, docs.budgets) == (3, 2, None, {})
-    assert (chat.base_max_age_days, docs.base_max_age_days) == (0, 3)
+    assert (chat.base_max_age_hours, docs.base_max_age_hours) == (
+        0,
+        72,
+    )  # days still read, in hours
 
 
 def test_defaults(tmp_path):
     [p] = load(
         tmp_path, "pipelines: {a: {config: c.yaml, golden: g}}\n"
     ).pipelines.values()
-    assert (p.k, p.delta, p.prices, p.budgets, p.base_max_age_days) == (
+    assert (p.k, p.delta, p.prices, p.budgets, p.base_max_age_hours) == (
         1,
         5.0,
         None,
         {},
-        7,
+        0,  # D-033: no cache of the base unless asked for
     )
 
 
@@ -93,6 +96,14 @@ def test_defaults(tmp_path):
         (
             "pipelines: {a: {config: c, golden: g, mean: betting, max_spend_usd: 5}}\n",
             "pipelines.a: max_spend_usd needs prices",
+        ),
+        (
+            "pipelines: {a: {config: c, golden: g}}\nbase_max_age_hours: 1\nbase_max_age_days: 1\n",
+            "base_max_age_days and base_max_age_hours: set one",
+        ),
+        (
+            "pipelines: {a: {config: c, golden: g, base_max_age_hours: -1}}\n",
+            "base_max_age_hours: -1 is less than the minimum of 0",
         ),
         (
             "pipelines: {a: {config: c, golden: g}}\nmax_spend_usd: 0\n",
