@@ -5,6 +5,7 @@ n-th attempt, and the last one again after that.
 """
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -14,7 +15,11 @@ case = request["case"]["id"]
 attempts = json.loads(script.read_text())[case]
 counter = script.with_name(f"{script.name}.{case}.n")
 n = int(counter.read_text()) if counter.exists() else 0
-counter.write_text(str(n + 1))
+step = counter.with_name(f"{counter.name}.{os.getpid()}")
+step.write_text(str(n + 1))
+os.replace(
+    step, counter
+)  # a parallel run of the case never reads a half-written counter
 attempt = attempts[min(n, len(attempts) - 1)]
 print(json.dumps(attempt["answer"]))
 sys.exit(attempt.get("exit", 0))
