@@ -22,7 +22,7 @@ The examples use a made-up **invoice reader**: one model call reads the vendor, 
 `uv add` pins the gate to a release and updates the lock file:
 
 ```sh
-uv add "llm-release-gate @ git+https://github.com/Ilya-Grigoryev/llm-release-gate" --tag v0.1.0-dev.16
+uv add "llm-release-gate @ git+https://github.com/Ilya-Grigoryev/llm-release-gate" --tag v0.1.0-dev.17
 ```
 
 ```toml
@@ -30,7 +30,7 @@ uv add "llm-release-gate @ git+https://github.com/Ilya-Grigoryev/llm-release-gat
 dependencies = ["llm-release-gate"]
 
 [tool.uv.sources]
-llm-release-gate = { git = "https://github.com/Ilya-Grigoryev/llm-release-gate", tag = "v0.1.0-dev.16" }
+llm-release-gate = { git = "https://github.com/Ilya-Grigoryev/llm-release-gate", tag = "v0.1.0-dev.17" }
 ```
 
 Commit `pyproject.toml` and `uv.lock` together: a stale lock file stops the gate in CI. **Check:**
@@ -453,8 +453,8 @@ jobs:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
     steps:
       - uses: actions/checkout@v7
-      - uses: Ilya-Grigoryev/llm-release-gate/setup@v0.1.0-dev.16
-      - uses: Ilya-Grigoryev/llm-release-gate@v0.1.0-dev.16
+      - uses: Ilya-Grigoryev/llm-release-gate/setup@v0.1.0-dev.17
+      - uses: Ilya-Grigoryev/llm-release-gate@v0.1.0-dev.17
 ```
 
 `setup` installs Python, uv and your project's locked environment; the gate step needs `pull-requests: write` to post

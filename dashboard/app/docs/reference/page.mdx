@@ -4,7 +4,7 @@ export const metadata = { title: "Reference" };
 
 # Reference
 
-The exact names of what you write for the gate and what it writes back, for release `v0.1.0-dev.16`. Tables labelled
+The exact names of what you write for the gate and what it writes back, for release `v0.1.0-dev.17`. Tables labelled
 "from … .schema.json" are built from the JSON Schemas the gate validates against. The gate decides with a rule on the
 mean, naive by default or betting, and the rule on checks ([How it decides](/docs/how-it-decides)).
 
@@ -463,7 +463,7 @@ branch's version for later requests instead (optional; its artifact is `llm-rele
 `pull_request_target` it uploads no runs. GitLab and other CI run `pr` and `comment` themselves, with `--cache` on
 a cached directory.
 
-`Ilya-Grigoryev/llm-release-gate/setup@v0.1.0-dev.16` installs Python, uv and the project's locked environment:
+`Ilya-Grigoryev/llm-release-gate/setup@v0.1.0-dev.17` installs Python, uv and the project's locked environment:
 
 | Input | Default | Meaning |
 |---|---|---|
@@ -472,7 +472,7 @@ a cached directory.
 | `python-version` | `3.12` | for uv to find; the project's own pin wins |
 | `uv-version` | `0.11.25` | the uv release |
 
-`Ilya-Grigoryev/llm-release-gate@v0.1.0-dev.16` gates one pipeline per step, with `pr --pipeline NAME`:
+`Ilya-Grigoryev/llm-release-gate@v0.1.0-dev.17` gates one pipeline per step, with `pr --pipeline NAME`:
 
 | Input | Default | Meaning |
 |---|---|---|
