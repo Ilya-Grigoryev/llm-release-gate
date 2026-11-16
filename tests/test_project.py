@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 import pytest
 
 from llm_release_gate import project
@@ -84,6 +86,18 @@ def test_defaults(tmp_path):
             "budgets.cost_per_run_usd needs prices",
         ),
         ("pipelines: [\n", "gate.yaml"),
+        (
+            "pipelines: {a: {config: c, golden: g}}\nmax_spend_usd: 5\nprices: p.yaml\n",
+            "pipelines.a: max_spend_usd needs mean: betting",
+        ),
+        (
+            "pipelines: {a: {config: c, golden: g, mean: betting, max_spend_usd: 5}}\n",
+            "pipelines.a: max_spend_usd needs prices",
+        ),
+        (
+            "pipelines: {a: {config: c, golden: g}}\nmax_spend_usd: 0\n",
+            "max_spend_usd: 0 is less than or equal to the minimum of 0",
+        ),
     ],
 )
 def test_errors_name_the_file_and_the_field(tmp_path, text, error):
@@ -169,3 +183,19 @@ def test_alpha_is_the_whole_gates_and_stays_below_one_half(tmp_path):
             load(
                 tmp_path, f"alpha: {bad}\npipelines: {{a: {{config: c, golden: g}}}}\n"
             )
+
+
+def test_a_spend_limit_makes_the_runs_adaptive_and_k_c_follows_the_settings(tmp_path):
+    p = load(
+        tmp_path,
+        "pipelines: {a: {config: c, golden: g}, b: {config: c, golden: g, checks: report}}\n"
+        "mean: betting\nprices: p.yaml\nmax_spend_usd: 2.5\n",
+    )
+    a, b = p.pipelines["a"], p.pipelines["b"]
+    assert (
+        a.max_spend_usd == b.max_spend_usd == 2.5
+        and "max_spend_usd" in project.SETTINGS
+    )
+    assert a.checks_block and not b.checks_block
+    assert replace(b, levels={"critical": ["x"]}).checks_block
+    assert replace(b, levels={"cases": {"x-*": "critical"}}).checks_block

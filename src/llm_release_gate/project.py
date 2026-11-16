@@ -21,6 +21,7 @@ SETTINGS = (
     "prices",
     "budgets",
     "base_max_age_days",
+    "max_spend_usd",
 )
 
 
@@ -42,6 +43,17 @@ class Pipeline:
     prices: str | None = None
     budgets: dict = field(default_factory=dict)
     base_max_age_days: float = 7.0
+    max_spend_usd: float | None = None  # adaptive runs instead of `k` (D-032)
+
+    @property
+    def checks_block(self) -> bool:
+        """Whether a check may block, by the settings alone: `checks: block`, or a critical level."""
+        levels = self.levels or {}
+        return (
+            self.checks == "block"
+            or bool(levels.get("critical"))
+            or "critical" in levels.get("cases", {}).values()
+        )
 
 
 @dataclass(frozen=True)
@@ -90,6 +102,15 @@ def load(directory: Path) -> Project:
             raise ValueError(
                 f"{path}: pipelines.{name}: budgets.cost_per_run_usd needs prices"
             )
+        if "max_spend_usd" in settings:
+            for need, ok in (
+                ("prices", "prices" in settings),
+                ("mean: betting", settings.get("mean") == "betting"),
+            ):
+                if not ok:
+                    raise ValueError(
+                        f"{path}: pipelines.{name}: max_spend_usd needs {need}"
+                    )
         pipelines[name] = Pipeline(
             name,
             p["config"],

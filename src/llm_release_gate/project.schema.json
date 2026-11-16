@@ -62,6 +62,9 @@
     },
     "base_max_age_days": {
       "$ref": "#/$defs/base_max_age_days"
+    },
+    "max_spend_usd": {
+      "$ref": "#/$defs/max_spend_usd"
     }
   },
   "additionalProperties": false,
@@ -119,12 +122,15 @@
         },
         "base_max_age_days": {
           "$ref": "#/$defs/base_max_age_days"
+        },
+        "max_spend_usd": {
+          "$ref": "#/$defs/max_spend_usd"
         }
       },
       "additionalProperties": false
     },
     "k": {
-      "description": "Runs per case and version (default 1). The naive rule on the mean reads the first; the betting rule, the rule on checks and budgets use all.",
+      "description": "Runs per case and version (default 1). The naive rule on the mean reads the first; the betting rule, the rule on checks and budgets use all. Ignored with max_spend_usd.",
       "type": "integer",
       "minimum": 1
     },
@@ -220,6 +226,11 @@
       "type": "number",
       "minimum": 0,
       "maximum": 365
+    },
+    "max_spend_usd": {
+      "description": "Adaptive runs, instead of k (needs mean: betting and prices): the gate buys rounds, one run of every case by both versions, until it decides or the next round, priced like the last one, would take this job over this many USD. Checks and budgets are read once, on rounds 1 to 5. A re-run of the job continues where it stopped and counts the rounds already paid for.",
+      "type": "number",
+      "exclusiveMinimum": 0
     }
   }
 }

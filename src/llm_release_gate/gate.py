@@ -7,7 +7,7 @@ import math
 import os
 import sys
 import traceback
-from collections.abc import Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import asdict, dataclass, replace
 from fractions import Fraction
 from pathlib import Path
@@ -192,8 +192,10 @@ def betting(
     return v, mv
 
 
-def mean_lines(mv: mean.MeanVerdict, cost_per_run: float | None) -> list[str]:
-    """What the betting rule showed, and what a pass would take."""
+def mean_lines(
+    mv: mean.MeanVerdict, cost_per_run: float | None, floor: bool = True
+) -> list[str]:
+    """What the betting rule showed, and what a pass would take (`floor`: the adaptive gate says it in its own lines)."""
     span = f"[{100 * mv.lower:+.1f}, {100 * mv.upper:+.1f}] points ({100 * (1 - 2 * mv.alpha):g} %)"
     shown = f"The difference lies in {span}"
     if mv.outcome != "inconclusive":
@@ -209,6 +211,8 @@ def mean_lines(mv: mean.MeanVerdict, cost_per_run: float | None) -> list[str]:
             out.append("⚠️ Shown worse than the base, but by less than δ.")
         return out
     need = mv.runs_for_pass
+    if not floor:
+        return [f"{shown}; not decided."]
     if need is None:
         return [
             f"{shown}; not decided. With this method and {mv.cases} case{'s' if mv.cases != 1 else ''} a pass needs more than 10 000 runs."
@@ -217,9 +221,15 @@ def mean_lines(mv: mean.MeanVerdict, cost_per_run: float | None) -> list[str]:
     fewer = (
         "; fewer with a larger `alpha` or δ" if need > 2 else ""
     )  # no look before run 2
+    twice = mv.runs_for_pass_twice
+    more_cases = (
+        f"; with {2 * mv.cases} cases, {twice}"
+        if twice is not None and twice < need
+        else ""
+    )
     floor = (
         f"A pass needs at least {need} runs of each version even if nothing changed "
-        f"({mv.cases} case{'s' if mv.cases != 1 else ''}, δ {100 * mv.delta:g} points, α {mv.alpha:g}{fewer})"
+        f"({mv.cases} case{'s' if mv.cases != 1 else ''}, δ {100 * mv.delta:g} points, α {mv.alpha:g}{fewer}{more_cases})"
     )
     if not more:
         return [
@@ -237,6 +247,143 @@ def split(alpha: float, checks_block: bool) -> tuple[float, float]:
     """The whole gate's alpha (D-031) as (rule on the mean, rule on checks). Whether a check may block depends on the
     settings and the set's checks, never on the results, so the split keeps the bound."""
     return (alpha / 2 if checks_block else alpha), alpha / 2
+
+
+def may_block(checks: str, rules: levels.Levels) -> bool:
+    """Whether a check may block, by the settings alone: `checks: block`, or a critical level."""
+    return (
+        checks == "block" or bool(rules.critical) or "critical" in rules.cases.values()
+    )
+
+
+def k_c(alpha: float, checks_block: bool) -> int:
+    """The round at which the adaptive gate reads the checks, once (D-032): known from the settings before any run. Five,
+    or more when `alpha` is so small that a check broken in every run needs more; two when no check may block."""
+    return max(5, criterion.runs_to_block(split(alpha, True)[1])) if checks_block else 2
+
+
+def plan(
+    rounds: int,
+    kc: int,
+    spent: float,
+    limit: float,
+    cost_of: Callable[[int], float | None],
+) -> int:
+    """Rounds to run next in one go; 0: stop, the next round does not fit. `cost_of(j)` estimates round j's cost to this
+    job from the last round, None before the candidate's first. A round runs only if its estimate fits in what is left
+    of `limit`; with no estimate yet, one round runs to learn it. Up to `kc` the rounds go in one batch, then one at a
+    time."""
+    target = kc if rounds < kc else rounds + 1
+    n, total = 0, spent
+    for j in range(rounds + 1, target + 1):
+        cost = cost_of(j)
+        if cost is None:
+            return max(n, 1)
+        if total + cost > limit * (1 + 1e-9):
+            break
+        n, total = n + 1, total + cost
+    return n
+
+
+def complete(arm: Arm, cases: Iterable[str]) -> int:
+    """Rounds every case has: the largest r with an error-free run of each case for every repetition below r."""
+    reps: dict[str, set[int]] = {}
+    for case, rep in arm.records:
+        reps.setdefault(case, set()).add(rep)
+    cases = list(cases)
+    r = 0
+    while cases and all(r in reps.get(c, ()) for c in cases):
+        r += 1
+    return r
+
+
+def first_rounds(arm: Arm, rounds: int) -> Arm:
+    return replace(arm, records={k: r for k, r in arm.records.items() if k[1] < rounds})
+
+
+def round_cost(arm: Arm, rep: int, prices: Prices) -> float:
+    """USD for one round of the arm, reused runs priced too: the estimate of the next."""
+    spent = [record_cost(r, prices) for (_, k), r in arm.records.items() if k == rep]
+    if None in spent:
+        raise ValueError(
+            "a model in these runs has no price: max_spend_usd cannot be kept"
+        )
+    return sum(spent)
+
+
+def look(
+    runs: tuple[dict[criterion.Key, list], dict[criterion.Key, list]],
+    rules: levels.Levels,
+    mode: str,
+    alpha: float,
+    rounds: int | None = None,
+) -> tuple[criterion.CheckVerdict | None, criterion.CheckVerdict | None]:
+    """The rule on checks: one look at runs 1..`rounds` of each version (all if None). The adaptive gate calls it on
+    rounds 1..K_c only, so later rounds never give the checks a second look. Returns the checks that may block and,
+    with levels, those that only report."""
+    if rounds is not None:
+        runs = tuple({k: v[:rounds] for k, v in side.items()} for side in runs)
+    if rules:
+        blocking, reporting = families(runs, rules, mode)
+        return (
+            criterion.per_check(*blocking, alpha=alpha, mode="block")
+            if blocking[0]
+            else None,
+            criterion.per_check(*reporting, alpha=alpha, mode="report")
+            if reporting[0]
+            else None,
+        )
+    return (
+        criterion.per_check(*runs, alpha=alpha, mode=mode) if runs[0] else None
+    ), None
+
+
+def adaptive_lines(a: dict) -> list[str]:
+    """The adaptive gate's lines (D-032): rounds and money, and why it stopped."""
+    left = a["rounds_to_k_c"]
+    spent = f"${a['spent_usd']:.2f} of max_spend_usd ${a['max_spend_usd']:g} spent in this job"
+    if a["stop"] == "decided":
+        return [
+            f"{a['rounds']} rounds of each version (checks read on rounds 1–{a['k_c']}) · {spent}."
+        ]
+    if a["stop"] != "limit":
+        return [
+            f"{a['rounds']} rounds of each version so far · {spent}; buying {a['next_rounds']} more."
+        ]
+    nxt = (
+        ""
+        if a["next_round_usd"] is None
+        else f"; the next round (about ${a['next_round_usd']:.2f}) does not fit"
+    )
+    out = [f"⏸ {a['rounds']} rounds of each version · {spent}{nxt}."]
+    if left:
+        out.append(
+            f"The rule on checks reads rounds 1–{a['k_c']}, so nothing is decided before round {a['k_c']}: {left} more "
+            f"round{'s' if left != 1 else ''}, about ${a['to_k_c_usd']:.2f}."
+        )
+    elif a["pass_rounds"] is None:
+        out.append(
+            "At the pace so far no pass is in sight: the runs point to a loss near δ or above."
+        )
+    else:
+        more = a["pass_rounds"] - a["rounds"]
+        out.append(
+            f"A pass needs about {more} more round{'s' if more != 1 else ''} at the pace so far, about "
+            f"${a['pass_usd']:.2f} (a forecast)."
+        )
+    here, twice = (
+        None if n is None else max(a["k_c"], n)
+        for n in (a["silent_rounds"], a["silent_rounds_twice"])
+    )
+    if here is not None and twice is not None and twice < here:
+        out.append(
+            f"More cases would shorten it: with {a['cases']} case{'s' if a['cases'] != 1 else ''} a candidate that "
+            f"scores like the base passes at round {here}, with {2 * a['cases']} cases at round {twice}."
+        )
+    out.append(
+        f"Re-run this job to buy up to ${a['max_spend_usd']:g} more; the rounds paid for count."
+    )
+    return out
 
 
 def alpha_line(alpha: float, betting: bool, checks_block: bool) -> str:
@@ -487,6 +634,7 @@ def markdown(
     lv: Levelled | None = None,
     run_cost: float | None = None,  # both versions, one run, reused base runs included
     bound: str | None = None,  # `alpha_line`
+    adaptive: dict | None = None,  # the adaptive gate's rounds and money (D-032)
 ) -> str:
     icon = {
         "pass": "✅",
@@ -525,7 +673,8 @@ def markdown(
             + (f", blocks below {-v.limit_pp:+.2f}" if mv is None else "")
             + f"); {v.rule}."
         ),
-        *(mean_lines(mv, run_cost) if mv else []),
+        *(mean_lines(mv, run_cost, adaptive is None) if mv else []),
+        *(adaptive_lines(adaptive) if adaptive else []),
         (
             f"{v.cases} cases, {'first run' if mv is None else f'{v.runs} run{"s" if v.runs != 1 else ""}'} of each version · config "
             f"{base.config_hash[:8]} → {candidate.config_hash[:8]} · set {base.set_hash[:8]}"
@@ -750,6 +899,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         default=0.95,
         help="quantile for --max-latency (default 0.95)",
     )
+    p.add_argument(
+        "--max-spend",
+        type=float,
+        help="adaptive runs (needs a betting --mean and --prices): read the rounds both versions finished, the checks "
+        "and budgets on rounds 1 to K_c only, and say in the JSON how many rounds fit in this many USD next",
+    )
     p.add_argument("--json", type=Path, help="write the verdict as JSON")
     p.add_argument("--markdown", type=Path, help="write the merge request comment")
     args = p.parse_args(argv)
@@ -775,8 +930,26 @@ def main(argv: Sequence[str] | None = None) -> int:
                 rescored(base, args.golden),
                 rescored(candidate, args.golden),
             )
-        full = pair(base, candidate)
         rules = levels.Levels.parse(args.levels)
+        whole, adaptive = (base, candidate), None
+        if args.max_spend is not None:
+            if args.mean == "naive" or not args.prices or not args.max_spend > 0:
+                raise ValueError(
+                    "--max-spend needs a positive limit, a betting --mean and --prices"
+                )
+            cases = {c for c, _ in base.records} | {c for c, _ in candidate.records}
+            rounds = min(complete(base, cases), complete(candidate, cases))
+            if not rounds:
+                raise ValueError("no round that every case finished in both versions")
+            kc = k_c(args.alpha, may_block(args.checks, rules))
+            base, candidate = (
+                first_rounds(base, rounds),
+                first_rounds(candidate, rounds),
+            )
+        early = (
+            args.max_spend is not None and rounds < kc
+        )  # nothing is decided before round K_c
+        full = pair(base, candidate)
         if (rules.minor or rules.cases) and not args.golden:
             raise ValueError(
                 "levels with minor checks or case levels need --golden: a case's score is rebuilt with its own aggregate"
@@ -788,12 +961,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         pairs, minor_cases = leveled(full, rules, how)
         runs = check_runs(full)  # minor cases too: their checks warn
-        blocking, reporting = (
-            families(runs, rules, args.checks)
+        # who may block depends on the settings and the set's checks, never on the results (`split`)
+        blocking = (
+            families(runs, rules, args.checks)[0]
             if rules
-            else (runs, ({}, {}))
+            else runs
             if args.checks == "block"
-            else (({}, {}), runs)
+            else ({}, {})
         )
         on_mean, on_checks = split(args.alpha, bool(blocking[0]))
         mv = None
@@ -813,30 +987,38 @@ def main(argv: Sequence[str] | None = None) -> int:
                 mean.DEFAULT if args.mean == "betting" else args.mean,
                 on_mean,
             )
-        lv = None
-        if rules:
-            checks = (
-                criterion.per_check(*blocking, alpha=on_checks, mode="block")
-                if blocking[0]
-                else None
+        checks, reported = (
+            (None, None)
+            if early
+            else look(
+                runs,
+                rules,
+                args.checks,
+                on_checks,
+                None if args.max_spend is None else kc,
             )
-            reported = (
-                criterion.per_check(*reporting, alpha=on_checks, mode="report")
-                if reporting[0]
-                else None
-            )
-            lv = Levelled(rules, reported, minor_cases, rules.unmatched(runs[0]))
-        else:
-            checks = (
-                criterion.per_check(*runs, alpha=on_checks, mode=args.checks)
-                if runs[0]
-                else None
-            )
+        )
+        lv = (
+            Levelled(rules, reported, minor_cases, rules.unmatched(runs[0]))
+            if rules
+            else None
+        )
         if v.exit_code != QUALITY_FAIL and checks and checks.outcome == "block":
             v = replace(v, outcome=VERDICTS[QUALITY_FAIL], exit_code=QUALITY_FAIL)
+        if early and v.exit_code != INCONCLUSIVE:
+            v = replace(v, outcome=VERDICTS[INCONCLUSIVE], exit_code=INCONCLUSIVE)
+            mv = replace(mv, outcome="inconclusive", decided_at=None, worse=False)
         prices = load_prices(args.prices) if args.prices else None
-        costs = (cost(base, prices), cost(candidate, prices)) if prices else None
-        spend = candidate_budget(candidate, prices, args)
+        costs = (cost(whole[0], prices), cost(whole[1], prices)) if prices else None
+        spend = (
+            None
+            if early
+            else candidate_budget(
+                candidate if args.max_spend is None else first_rounds(candidate, kc),
+                prices,
+                args,
+            )
+        )
         if v.exit_code == PASS and spend and spend.outcome == "over":
             v = replace(v, outcome=VERDICTS[BUDGET_FAIL], exit_code=BUDGET_FAIL)
         run_cost = None
@@ -849,9 +1031,40 @@ def main(argv: Sequence[str] | None = None) -> int:
                 runs_each = max(len(rs[side]) for rs in full.values())
                 per_arm.append(None if None in spent else sum(spent) / runs_each)
             run_cost = None if None in per_arm else sum(per_arm)
+        if args.max_spend is not None:
+            if None in costs:
+                raise ValueError(
+                    "a model in these runs has no price: max_spend_usd cannot be kept"
+                )
+            have = complete(whole[0], cases)
+            est_c, est_b = (
+                round_cost(whole[1], rounds - 1, prices),
+                round_cost(whole[0], have - 1, prices),
+            )
+
+            def cost_of(j: int) -> float:
+                return est_c + (est_b if j > have else 0.0)
+
+            decided = v.exit_code != INCONCLUSIVE
+            nxt = (
+                0 if decided else plan(rounds, kc, sum(costs), args.max_spend, cost_of)
+            )
+            need = (
+                None
+                if mv.pass_at is None or mv.runs_for_pass is None
+                else max(mv.pass_at, mv.runs_for_pass, kc)
+            )
+            adaptive = {
+                "max_spend_usd": args.max_spend, "spent_usd": sum(costs), "k_c": kc, "rounds": rounds,
+                "stop": "decided" if decided else None if nxt else "limit", "next_rounds": nxt,
+                "next_round_usd": None if decided else cost_of(rounds + 1),
+                "rounds_to_k_c": max(0, kc - rounds), "to_k_c_usd": sum(map(cost_of, range(rounds + 1, kc + 1))),
+                "pass_rounds": need, "pass_usd": None if need is None else sum(map(cost_of, range(rounds + 1, need + 1))),
+                "cases": mv.cases, "silent_rounds": mv.runs_for_pass, "silent_rounds_twice": mv.runs_for_pass_twice,
+            }  # fmt: skip
         bound = alpha_line(args.alpha, mv is not None, bool(blocking[0]))
         text = markdown(
-            v, base, candidate, costs, spend, checks, mv, lv, run_cost, bound
+            v, base, candidate, costs, spend, checks, mv, lv, run_cost, bound, adaptive
         )
         report = {
             **asdict(v),
@@ -893,6 +1106,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "base": max(len(b) for b, _ in pairs.values()),
                 "candidate": max(len(c) for _, c in pairs.values()),
             },
+            # the adaptive gate (D-032): this job's spend, why it stopped (None: it buys more), and its rounds
+            "spent_usd": adaptive and adaptive["spent_usd"],
+            "stop": adaptive and adaptive["stop"],
+            "adaptive": adaptive,
         }
         write_all({args.markdown: text, args.json: json.dumps(report, indent=2) + "\n"})
     except (Mismatch, ValueError, OSError) as e:

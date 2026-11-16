@@ -892,7 +892,7 @@ def test_the_table_of_alpha_follows_the_code(page):
         )
         default = " (default)" if alpha == 0.05 else ""
         need = criterion.runs_to_block(on_checks)
-        row = f"| {alpha:g}{default} | {on_checks:g} | `k: {need}` | {most} | {runs} |"
+        row = f"| {alpha:g}{default} | {on_checks:g} | `k: {need}` | {most} | {runs} | {gate.k_c(alpha, True)} |"
         assert row in text
 
 
@@ -902,5 +902,6 @@ def test_the_pass_floor_names_alpha_only_when_it_could_lower_it():
         return gate.mean_lines(mean.decide(same, same, 0.05), None)[0]
 
     assert "fewer with a larger `alpha` or δ" in floor(1)  # 96 runs
+    assert "; with 2 cases, 48)" in floor(1)  # what a larger set would need
     many = floor(60)  # 2 runs, the first look
     assert "A pass needs at least 2 runs" in many and "fewer with" not in many

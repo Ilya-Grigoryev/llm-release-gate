@@ -50,6 +50,11 @@ class MeanVerdict:
     nonzero: int  # paired case runs whose scores differ
     # 95 % normal interval over cases (Miller): for cases like these, report only
     similar_cases: tuple[float, float] | None  # None with one case
+    # runs of each version a pass takes if the capital for it keeps its average pace; None: it has not grown
+    pass_at: int | None = None
+    runs_for_pass_twice: int | None = (
+        None  # runs_for_pass with twice the cases: what a larger set would need
+    )
 
 
 def _check(
@@ -177,6 +182,17 @@ def runs_for_pass(
     return None
 
 
+def pace(steps: Sequence[tuple[float, float]], alpha: float) -> int | None:
+    """Runs of each version a pass takes if log K+ keeps growing at its average pace so far; None if it has not grown.
+    A forecast for the comment, not a bound: the bet shrinks as runs add up, and a loss near delta stalls the capital."""
+    goal, up, runs = math.log(1 / alpha), steps[-1][0], len(steps)
+    if up >= goal:
+        return runs
+    if up <= 0:
+        return None
+    return runs + math.ceil((goal - up) / (up / runs))
+
+
 def first(
     steps: Sequence[tuple[float, float]], alpha: float, min_runs: int = 2
 ) -> tuple[str, int | None]:
@@ -204,7 +220,8 @@ def decide(
     ys = observations(base, candidate)
     method = {"unit": unit, "bet": bet, "c": c}
     name = f"{bet} on {'case runs' if unit == 'case' else 'runs'}, c {c:g}"
-    outcome, at = first(capitals(ys, (1 - delta) / 2, alpha, **method), alpha, min_runs)
+    steps = capitals(ys, (1 - delta) / 2, alpha, **method)
+    outcome, at = first(steps, alpha, min_runs)
     looked = ys[
         : at or len(ys)
     ]  # the bounds of the look that decided: later looks cannot undo it
@@ -213,6 +230,7 @@ def decide(
         _bound(looked, alpha, -1, **method),
     )
     need = runs_for_pass(len(base), delta, alpha, **method)
+    need2 = runs_for_pass(2 * len(base), delta, alpha, **method)
     diff = sum(2 * y - 1 for r in ys for y in r) / sum(len(r) for r in ys)
     per_case = [sum(2 * r[i] - 1 for r in ys) / len(ys) for i in range(len(base))]
     n = len(per_case)
@@ -236,4 +254,6 @@ def decide(
         None if need is None else max(min_runs, need),
         sum(y != 0.5 for r in ys for y in r),
         None if se is None else (diff - 1.959964 * se, diff + 1.959964 * se),
+        pace(steps, alpha),
+        None if need2 is None else max(min_runs, need2),
     )

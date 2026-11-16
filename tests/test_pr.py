@@ -943,3 +943,143 @@ def test_alpha_comes_from_the_target_branch_and_reaches_the_gate(repo, capsys):
         "demo: ⚠️ With alpha 0.02 and k: 2 the rule on checks cannot block: it needs k: 5, "
         "or alpha 0.3334 at k: 2." in capsys.readouterr().err
     )
+
+
+# ---------- adaptive runs (max_spend_usd, D-032) ----------
+
+# one case at delta 50: a silent round multiplies the capital by 1.75, a pass takes 7 rounds; a call costs $0.000015
+ADAPTIVE = GATE + "mean: betting\ndelta: 50\nprices: prices.yaml\nmax_spend_usd: "
+
+
+def adaptive(repo, limit=0.001):
+    (repo / "prices.yaml").write_text("fake-model-2026-01-01: [1, 1]\n")
+    rules = f"{ADAPTIVE}{limit}\n"
+    commit_rules(repo, rules)
+    return rules
+
+
+def reps(path):
+    return {r["rep"]: r["run_id"] for r in records(path)}
+
+
+def test_adaptive_runs_buy_rounds_until_the_gate_decides(repo):
+    version(repo, "answer-again", adaptive(repo))
+    code, out = gate(repo)
+    verdict = json.loads((out / "verdict.json").read_text())
+    assert code == pr.PASS and verdict["runs"] == 7 and verdict["stop"] == "decided"
+    assert (
+        sorted(reps(out / "base.jsonl"))
+        == sorted(reps(out / "candidate.jsonl"))
+        == list(range(7))
+    )
+    assert verdict["spent_usd"] == pytest.approx(7 * 2 * 0.000015)
+    assert (
+        "7 rounds of each version (checks read on rounds 1–5)"
+        in (out / "comment.md").read_text()
+    )
+    assert not (out / "pinned.jsonl").exists()  # nothing to continue without a cache
+
+
+def test_adaptive_runs_block_a_broken_check_at_k_c(repo):
+    version(repo, "wrongdate", adaptive(repo))
+    code, out = gate(repo)
+    verdict = json.loads((out / "verdict.json").read_text())
+    assert code == pr.QUALITY_FAIL and verdict["runs"] == 5
+    assert [u["check"] for u in verdict["checks"]["broken"]] == ["date"]
+
+
+def test_a_limit_before_k_c_waits_and_a_rerun_continues_with_the_same_runs(repo):
+    # $0.0001 buys 3 rounds of both versions: no look before round 5, so not decided
+    version(repo, "answer-again", adaptive(repo, 0.0001))
+    code, out = cached_gate(repo)
+    first = json.loads((out / "verdict.json").read_text())
+    assert code == pr.INCONCLUSIVE and first["runs"] == 3 and first["stop"] == "limit"
+    assert (
+        first["checks"] is None
+        and "nothing is decided before round 5" in (out / "comment.md").read_text()
+    )
+    paid = {arm: reps(out / arm) for arm in ("base.jsonl", "candidate.jsonl")}
+    assert (
+        reps(out / "pinned.jsonl") == paid["base.jsonl"]
+    )  # uploaded with the candidate's runs
+    code, out = cached_gate(repo)  # the job runs again: this job's spend starts at 0
+    second = json.loads((out / "verdict.json").read_text())
+    assert (
+        code == pr.INCONCLUSIVE
+        and second["runs"] == 6
+        and second["spent_usd"] == pytest.approx(0.00009)
+    )
+    for arm, before in paid.items():
+        now = reps(out / arm)
+        assert all(now[k] == before[k] for k in before)
+        assert all(r["reused"] for r in records(out / arm) if r["rep"] < 3)
+    code, out = cached_gate(repo)
+    assert (
+        code == pr.PASS and json.loads((out / "verdict.json").read_text())["runs"] == 7
+    )
+
+
+def test_a_rerun_reads_the_base_runs_its_rounds_met_even_if_the_base_artifact_changed(
+    repo, monkeypatch
+):
+    version(repo, "answer-again", adaptive(repo, 0.0001))
+    _, out = cached_gate(repo)
+    names = dict(line.split() for line in (out / "shared.txt").read_text().splitlines())
+    job1 = repo.parent / "artifact"
+    job1.mkdir()
+    for name in ("candidate.jsonl", "pinned.jsonl"):
+        shutil.copy(out / name, job1 / name)
+    other = (
+        repo.parent / "other-job" / "base.jsonl"
+    )  # another request ran the same base afresh, later
+    other.parent.mkdir()
+    later = (datetime.now(UTC) + timedelta(seconds=30)).isoformat()
+    other.write_text(
+        "".join(
+            json.dumps({**r, "run_id": "OTHER", "timestamp": later}) + "\n"
+            for r in records(out / "base.jsonl")
+        )
+    )
+    met = reps(out / "base.jsonl")
+    shutil.rmtree(repo.parent / "cache")  # a new job starts without a cache
+
+    def fetch(name, keep, days, env):
+        for f in (
+            [job1 / "candidate.jsonl", job1 / "pinned.jsonl"]
+            if name == names["candidate"]
+            else [other]
+        ):
+            keep(f)
+        return f"earlier runs: {name}", None
+
+    monkeypatch.setattr(pr.shared, "fetch", fetch)
+    _, out = cached_gate(repo)
+    base = reps(out / "base.jsonl")
+    assert all(base[k] == met[k] for k in met) and "OTHER" not in base.values()
+
+
+def test_refresh_keeps_k_c_rounds_for_adaptive_runs(repo, capsys):
+    adaptive(repo)
+    cache, out = repo.parent / "cache", repo.parent / "refresh"
+    assert pr.main(["--refresh", "--cache", str(cache), "--out", str(out)]) == pr.PASS
+    assert sorted(reps(out / "demo" / "base.jsonl")) == list(range(5))
+
+
+def test_the_cache_keeps_a_recent_run_it_has_over_a_newer_one(tmp_path):
+    now, cache = datetime.now(UTC), tmp_path / "cache"
+    cache.mkdir()
+    (cache / "v-s.jsonl").write_text(
+        lines(record("a", 0, now - timedelta(hours=1), "R0"))
+    )
+    runs = tmp_path / "base.jsonl"
+    runs.write_text(lines(record("a", 0, now, "R1"), record("a", 1, now, "R1")))
+    pr.keep(cache, runs, 7)
+    assert [(r["rep"], r["run_id"]) for r in records(cache / "v-s.jsonl")] == [
+        (0, "R0"),
+        (1, "R1"),
+    ]
+    (cache / "v-s.jsonl").write_text(
+        lines(record("a", 0, now - timedelta(days=8), "R0"))
+    )
+    pr.keep(cache, runs, 7)  # an old one gives way
+    assert [r["run_id"] for r in records(cache / "v-s.jsonl")] == ["R1", "R1"]

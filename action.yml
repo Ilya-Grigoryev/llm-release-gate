@@ -107,9 +107,11 @@ runs:
       continue-on-error: true
       with:
         name: ${{ steps.shared.outputs.candidate }}
-        path: |
+        path: |  # pinned: the base runs these rounds met, so a re-run of an adaptive job reads the same (max_spend_usd)
           ${{ steps.pipeline.outputs.out }}/candidate.jsonl
           ${{ steps.pipeline.outputs.out }}/candidate.native.jsonl
+          ${{ steps.pipeline.outputs.out }}/pinned.jsonl
+          ${{ steps.pipeline.outputs.out }}/pinned.native.jsonl
         overwrite: true
         retention-days: ${{ inputs.runs-retention-days }}
     - name: comment

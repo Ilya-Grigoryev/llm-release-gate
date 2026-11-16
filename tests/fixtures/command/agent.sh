@@ -15,6 +15,7 @@ case "$request" in
   *'"mode": "badstep"'*) echo '{"output": {}, "trace": {"steps": [{"kind": "llm", "actor": "robot"}]}}'; exit 0 ;;
   *'"mode": "latin1"'*) printf 'caf\351 au lait\n' >&2; printf '{"output": {"note": "caf\351"}}\n'; exit 0 ;;
   *'"mode": "bare"'*) echo '{"output": {"total": "12.50"}}'; exit 0 ;;
+  *'"mode": "wrongdate"'*) echo '{"output": {"company": "TEST MART SDN BHD", "date": "02/02/2026", "address": "1 JALAN UJI, 50000 KUALA LUMPUR", "total": "12.50"}, "input_tokens": 12, "output_tokens": 3, "model": "fake-model-2026-01-01"}'; exit 0 ;;
   *'"mode": "details"'*) echo '{"output": {}, "fingerprint": "fp_1", "finish_reason": "stop", "request_id": "req-1", "reasoning_tokens": 7}'; exit 0 ;;
   *'"mode": "baddetails"'*) echo '{"output": {}, "fingerprint": 5}'; exit 0 ;;
   *'"mode": "halfbroken"'*) echo "{\"output\": {}, \"trace\": {\"steps\": [$step, {\"kind\": \"tool\", \"actor\": \"agent\"}]}}"; exit 0 ;;

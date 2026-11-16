@@ -9,6 +9,10 @@ With --cache, runs outlive the job (D-007): the gate reuses the target branch's 
 up to `base_max_age_days` old, from that directory and from other jobs' artifacts (`shared`), instead of running them
 again. OUT/NAME/shared.txt names the arms this job paid for, for the CI to upload; --refresh runs the target branch's
 version on its own.
+
+With `max_spend_usd` (D-032) the gate buys rounds, one run of every case by both versions, until it decides or the next
+round would not fit; a re-run of the job continues with the rounds paid for and the base runs they were compared with
+(OUT/NAME/pinned.jsonl, uploaded with the candidate's runs).
 """
 
 import argparse
@@ -25,15 +29,18 @@ from fractions import Fraction
 from pathlib import Path
 
 from llm_release_gate import criterion, project, shared
+from llm_release_gate.compare import Mismatch, load_arm
 from llm_release_gate.gate import (
     BUDGET_FAIL,
     INCONCLUSIVE,
     INFRA_ERROR,
     PASS,
     QUALITY_FAIL,
+    complete,
+    k_c,
     split,
 )
-from llm_release_gate.golden import check
+from llm_release_gate.golden import check, load_cases
 from llm_release_gate.runner import read_records
 from llm_release_gate.version import own_files
 
@@ -191,15 +198,16 @@ def cached(path: Path, version_hash: str, set_hash: str) -> dict[tuple[str, int]
 
 
 def reuse(
-    cache: Path, version_hash: str, set_hash: str, days: float, k: int, out: Path
+    cache: Path, version_hash: str, set_hash: str, days: float, k: int | None, out: Path
 ) -> int:
-    """Copy the cache's error-free runs of this version on this set, the first K per case, at most DAYS old, to OUT with
-    their raw responses, each marked `reused`; the runner then runs only the rest. Returns how many it copied."""
+    """Copy the cache's error-free runs of this version on this set, the first K per case (all if None), at most DAYS
+    old, to OUT with their raw responses, each marked `reused`; the runner then runs only the rest. Returns how many it
+    copied."""
     path = cache / f"{version_hash}-{set_hash}.jsonl"
     runs = [
         r
         for (_, rep), r in cached(path, version_hash, set_hash).items()
-        if rep < k and recent(r, days)
+        if (k is None or rep < k) and recent(r, days)
     ]
     raw, lines, raws = raw_lines(path), [], []
     for r in runs:
@@ -220,8 +228,9 @@ def reuse(
 
 
 def keep(cache: Path, runs: Path, days: float) -> None:
-    """Add RUNS' error-free runs to the cache, the newest per case and repetition, and delete files without a run from
-    the last DAYS."""
+    """Add RUNS' error-free runs to the cache, and delete files without a run from the last DAYS. Per case and repetition
+    a recent run already kept stays (D-032): a re-run that continues reads the records its first look read; within RUNS
+    the later line wins."""
     cache.mkdir(parents=True, exist_ok=True)
     for old in cache.glob("*.jsonl"):
         if not old.name.endswith(".native.jsonl") and not any(
@@ -242,9 +251,7 @@ def keep(cache: Path, runs: Path, days: float) -> None:
         merged, raw_old = cached(path, version_hash, set_hash), raw_lines(path)
         for at, r in cached(runs, version_hash, set_hash).items():
             old = merged.get(at)
-            if when(r) and (
-                old is None or not recent(old, days) or when(r) > when(old)
-            ):
+            if when(r) and (old is None or not recent(old, days)):
                 merged[at] = {k: v for k, v in r.items() if k != "reused"}
         lines = "".join(json.dumps(r) + "\n" for r in merged.values())
         kept = "".join(
@@ -263,6 +270,7 @@ def earlier(
     set_hash: str,
     out: Path,
     log: Path,
+    k: int | None,
 ) -> tuple[int, str | None]:
     """Put the version's recent runs, from CACHE and from other jobs, into OUT. Returns how many, and a note for the
     comment when the job cannot read other jobs' runs."""
@@ -273,7 +281,7 @@ def earlier(
             p.base_max_age_days,
             os.environ,
         )
-        reused = reuse(cache, version_hash, set_hash, p.base_max_age_days, p.k, out)
+        reused = reuse(cache, version_hash, set_hash, p.base_max_age_days, k, out)
     except Exception as e:  # noqa: BLE001 - reuse saves money and must never fail a check: the base runs
         line, note, reused = f"earlier runs: {type(e).__name__}: {e}", None, 0
         out.unlink(missing_ok=True)
@@ -382,6 +390,7 @@ def one(
     if not p.base_max_age_days:
         cache = None
     logs, note = (dest / "base.log", dest / "candidate.log"), None
+    adaptive = p.max_spend_usd is not None
     if base is not None and (may_skip or cache):
         hashes = both(
             lambda: version(base, base_config, logs[0]),
@@ -389,31 +398,35 @@ def one(
         )
         if may_skip and hashes[0] and hashes[0] == hashes[1]:
             return unchanged(p, hashes[0], set_hash, dest)
+        if (
+            cache and adaptive and hashes[1]
+        ):  # a re-run continues: this version's rounds and the base runs they met
+            earlier(
+                p, cache, hashes[1], set_hash, dest / "candidate.jsonl", logs[1], None
+            )
         if cache and base_as_usual and hashes[0]:
             _, note = earlier(
-                p, cache, hashes[0], set_hash, dest / "base.jsonl", logs[0]
+                p,
+                cache,
+                hashes[0],
+                set_hash,
+                dest / "base.jsonl",
+                logs[0],
+                None if adaptive else p.k,
             )
-    runs = [
-        *PYTHON,
-        "-m",
-        "llm_release_gate.runner",
-        "--golden",
-        str(golden),
-        "-k",
-        str(p.k),
-    ]
-    codes = both(
-        lambda: call([*runs, "--config", base_config, "--out", str(dest / "base.jsonl")], base, logs[0]) if base else 0,
-        lambda: call([*runs, "--config", p.config, "--out", str(dest / "candidate.jsonl")], candidate, logs[1]),
-    )  # fmt: skip
-    if cache:  # what was paid for is kept, a failed arm's finished runs too
-        arms = (
-            ("base.jsonl", "candidate.jsonl") if base_as_usual else ("candidate.jsonl",)
-        )
-        store(cache, dest, arms, p.name, p.base_max_age_days)
-    for arm, code, log in zip(("base version", "candidate"), codes, logs, strict=True):
-        if code != 0:
-            raise Infra(f"The {arm} did not finish its runs.", log)
+    runs = [*PYTHON, "-m", "llm_release_gate.runner", "--golden", str(golden), "-k"]
+
+    def run(k: int) -> None:
+        codes = both(
+            lambda: call([*runs, str(k), "--config", base_config, "--out", str(dest / "base.jsonl")], base, logs[0]) if base else 0,
+            lambda: call([*runs, str(k), "--config", p.config, "--out", str(dest / "candidate.jsonl")], candidate, logs[1]),
+        )  # fmt: skip
+        for arm, code, log in zip(
+            ("base version", "candidate"), codes, logs, strict=True
+        ):
+            if code != 0:
+                raise Infra(f"The {arm} did not finish its runs.", log)
+
     decide = [
         *PYTHON, "-m", "llm_release_gate.gate",
         *(["--base", str(dest / "base.jsonl")] if base else ["--no-base"]), "--candidate", str(dest / "candidate.jsonl"),
@@ -422,22 +435,89 @@ def one(
         "--markdown", str(dest / "comment.md"), "--json", str(dest / "verdict.json"),
         *(["--prices", prices] if prices else []),
         *(a for k, flag in BUDGETS.items() if k in p.budgets for a in (flag, str(p.budgets[k]))),
+        *(["--max-spend", str(p.max_spend_usd)] if adaptive and base else []),
     ]  # fmt: skip
-    code = call(decide, candidate, dest / "gate.log")
-    if code not in WORST or code == INFRA_ERROR or not (dest / "comment.md").is_file():
-        raise Infra("The gate could not compare the runs.", dest / "gate.log")
+
+    def verdict() -> int:
+        code = call(decide, candidate, dest / "gate.log")
+        if (
+            code not in WORST
+            or code == INFRA_ERROR
+            or not (dest / "comment.md").is_file()
+        ):
+            raise Infra("The gate could not compare the runs.", dest / "gate.log")
+        return code
+
+    try:
+        if adaptive and base:
+            code = buy(golden, dest, prices, run, verdict)
+        else:
+            run(
+                1 if adaptive else p.k
+            )  # no base: one round shows the candidate's score
+            code = verdict()
+    finally:
+        if cache:  # what was paid for is kept, a failed arm's finished runs too
+            if (
+                adaptive and (dest / "base.jsonl").is_file()
+            ):  # the base runs these rounds met, for a re-run
+                for src, dst in (
+                    (dest / "base.jsonl", dest / "pinned.jsonl"),
+                    (native(dest / "base.jsonl"), native(dest / "pinned.jsonl")),
+                ):
+                    if src.is_file():
+                        shutil.copyfile(src, dst)
+            arms = (
+                ("base.jsonl", "candidate.jsonl")
+                if base_as_usual
+                else ("candidate.jsonl",)
+            )
+            store(cache, dest, arms, p.name, p.base_max_age_days)
     if note:
         with (dest / "comment.md").open("a") as f:
             f.write(f"\n{note}\n")
     return code
 
 
+def rounds_done(path: Path, cases: list[str]) -> int:
+    try:
+        return complete(load_arm(path), cases)
+    except Mismatch:  # no file or no error-free run
+        return 0
+
+
+def buy(golden: Path, dest: Path, prices: str | None, run, verdict) -> int:
+    """The adaptive gate (D-032): buy rounds until the gate decides or the next round does not fit in `max_spend_usd`.
+    The gate reads what both versions finished after every step and says in its JSON how many rounds to buy next; before
+    a candidate round is priced, one round runs to learn the price."""
+    if not prices:
+        raise Infra(
+            "max_spend_usd needs prices in gate.yaml: without them the gate cannot tell what a round costs."
+        )
+    cases = [c.id for c in load_cases(golden)]
+    if not min(
+        rounds_done(dest / arm, cases) for arm in ("base.jsonl", "candidate.jsonl")
+    ):
+        run(1)
+    done = 0
+    while True:
+        code = verdict()
+        a = json.loads((dest / "verdict.json").read_text())["adaptive"]
+        if not a["next_rounds"]:
+            return code
+        if a["rounds"] <= done:
+            raise Infra(
+                "The rounds did not grow: the gate stopped to avoid a loop.",
+                dest / "gate.log",
+            )
+        done = a["rounds"]
+        run(a["rounds"] + a["next_rounds"])
+
+
 def too_few_runs(p: project.Pipeline) -> str | None:
     """Before any run: a warning if not even one check broken in every run can block with these `k` and `alpha`,
     although the settings let checks block; it names the `k` and the `alpha` that would."""
-    levels = p.levels or {}
-    critical = levels.get("critical") or "critical" in levels.get("cases", {}).values()
-    if p.checks != "block" and not critical:
+    if not p.checks_block or p.max_spend_usd is not None:  # adaptive: K_c covers it
         return None
     need = criterion.runs_to_block(split(p.alpha, True)[1])
     if p.k >= need:
@@ -572,13 +652,20 @@ def refresh(
             if not p.base_max_age_days:
                 print(f"{name}: not cached, base_max_age_days is 0")
                 continue
+            k = k_c(p.alpha, p.checks_block) if p.max_spend_usd is not None else p.k
             reused, note = earlier(
-                p, cache / name, here, set_hash, dest / "base.jsonl", dest / "base.log"
+                p,
+                cache / name,
+                here,
+                set_hash,
+                dest / "base.jsonl",
+                dest / "base.log",
+                k,
             )
             if note:
                 print(f"{name}: {note}")
             done = call(
-                [*PYTHON, "-m", "llm_release_gate.runner", "--golden", str(golden), "-k", str(p.k),
+                [*PYTHON, "-m", "llm_release_gate.runner", "--golden", str(golden), "-k", str(k),
                  "--config", p.config, "--out", str(dest / "base.jsonl")],
                 tree,
                 dest / "base.log",
