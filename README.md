@@ -265,9 +265,9 @@ max_spend_usd: 5   # per pipeline and job; give it room, see below
 How much to set: five rounds of both versions at their cost per round, or of the candidate alone when the base comes
 from the cache, plus room for prices that vary. In a simulation on recorded runs of the three applications below that
 drew every run independently, the gate kept `alpha` at every limit; with 20 % of room, round 5 did not fit in one of
-20 000 simulated requests, because the estimate from round 4 ran over what was left. Runs of one job turned out alike
-(16.11.2026: 19 of 30 receipts got the same answer in all 5 runs of a job, and one of them another answer in all 5
-runs the evening before), so treat that
+20 000 simulated requests, because the estimate from round 4 ran over what was left. The chance of an answer may move
+between sessions (16.11.2026: twice a check on a receipt passed in all 5 runs of one job and failed in all 5 of a job
+hours later, on an unchanged version); runs of one job then share it, so treat that
 bound as optimistic until it is measured. A set with few cases needs many rounds for a pass when nothing changed (the
 table above), so give such a set more money or more cases. `max_spend_usd` needs `mean: betting` and a price for
 every model the runs call.

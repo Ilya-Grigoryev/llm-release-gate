@@ -51,9 +51,9 @@ The default naive rule compares each version's mean score over the first run of 
 candidate's is lower by more than `delta` points. In the author's measurement on a support agent, one unchanged version on the same 10 tasks
 had a spread of 30 points over 11 runs, and twice the same version, run as base and as candidate in one job, differed by
 10 points. So a block or a pass can be noise. With `base_max_age_hours` above 0, requests within the age limit compare
-with the same base runs, so one noisy base run moves all their verdicts. Runs of one job are also more alike than
-independent repeats would be: on 16.11.2026 19 of 30 receipts got the same answer in all 5 runs of a job, and one
-of them another answer in all 5 runs the evening before. The rules count each run as fresh evidence, so their bounds on wrong verdicts are
+with the same base runs, so one noisy base run moves all their verdicts. The chance of an answer may also move between
+sessions: on 16.11.2026 a check on a receipt passed in all 5 runs of one job and failed in all 5 of a job hours
+later, twice, on an unchanged version, and runs of one job then share that chance. The rules count each run as fresh evidence, so their bounds on wrong verdicts are
 optimistic until that is measured. A loss smaller than `delta` passes, so small losses add up unseen. The
 rule on checks reads every run but cannot block on one run per version: at the default `alpha` a single broken check needs 4 runs of each.
 
