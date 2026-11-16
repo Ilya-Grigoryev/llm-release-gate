@@ -67,18 +67,18 @@ These answer the second research question. By default the gate uses the naive ru
 by default, and the rule on checks; `mean: betting` turns on the statistical rule. The anchor and running more on its
 own are planned; the rest is built.
 
-- **Both versions run on the same cases** (D-007, D-018, built), so a case's difficulty cancels out. The base's runs
-  come from earlier jobs for up to `base_max_age_days` (7 by default), so a shift in the service within that window
-  counts as an effect and the requests in it share one base sample; `0` runs both versions together, as the experiments
-  that count the gate's errors do
+- **Both versions run on the same cases, in the same job** (D-007, D-018, D-033, built), so a case's difficulty and a
+  shift in the service between sessions cancel out. With `base_max_age_hours` above 0 the base's runs come from earlier
+  jobs within that many hours, so a shift in the service within that window counts as an effect and the requests in it
+  share one base sample
   ([Where the base's runs come from](/docs/how-it-decides#where-the-bases-runs-come-from)).
 - **A pass speaks for these cases** (D-004, built), as a test suite does, not for inputs like these.
 - **δ is the loss you accept** (D-004, built), specified in advance and not tuned to the noise.
 - **Three outcomes** (D-004, D-026, built): pass, block, or "not sure yet" (`inconclusive`) with the runs and the money
   a pass needs, as the figure below shows.
 - **A money limit instead of `k`** (D-026, D-032, built): with `max_spend_usd` the gate buys rounds until it decides
-  or the next round would not fit; it reads the checks once, on rounds 1 to 5, and a re-run of the job continues with
-  the same runs ([Adaptive runs](/docs/how-it-decides#adaptive-runs-a-money-limit-instead-of-k)).
+  or the next round would not fit; it reads the checks once, on rounds 1 to 5 (1 to 2 when no check can block), and
+  a re-run of the job continues with the same pairs of runs ([Adaptive runs](/docs/how-it-decides#adaptive-runs-a-money-limit-instead-of-k)).
 
 <Fig id="method-2" caption={"With few runs the interval is wide. A rule that must prove harm then passes, a rule that must prove harmlessness blocks, and neither says it is guessing. The betting rule says \"not sure yet\"; more runs narrow the interval."} alt={"Four example intervals against the margin \u2212\u03b4. A narrow interval around 0, above \u2212\u03b4: all three rules pass. A narrow interval below \u2212\u03b4: all three block. A wide interval across \u2212\u03b4: 'prove harm' passes, 'prove harmlessness' blocks, the betting rule answers 'not sure yet', and more runs would narrow the interval. A narrow interval between \u2212\u03b4 and 0: all pass; the betting rule adds a warning."} />
 

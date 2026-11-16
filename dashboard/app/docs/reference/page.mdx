@@ -27,7 +27,7 @@ mean, naive by default or betting, and the rule on checks ([How it decides](/doc
 It lives in the project's directory: the repository's root, or the one you pass as `--project` (`project-dir` in the
 action). Top-level
 settings apply to every pipeline; a pipeline's own setting replaces them. The rules (`k`, `delta`, `alpha`, `mean`, `checks`,
-`levels`, `prices`, `budgets`, `base_max_age_days`, `max_spend_usd`) come from the target branch, so a request that edits them runs under the old ones, unless
+`levels`, `prices`, `budgets`, `base_max_age_hours`, `max_spend_usd`) come from the target branch, so a request that edits them runs under the old ones, unless
 the target branch has none or a broken one ([Whose rules apply](/docs/how-it-works#whose-rules-apply)).
 
 ```yaml
@@ -80,15 +80,17 @@ What the schema does not say:
 
 - **Names**: letters, digits, `_`, `-` and `.`, not starting with `.`; the name also labels `OUT/NAME`.
 - **`golden`**: both versions run on the request's test set.
-- **`base_max_age_days`**: comes from the target branch, like `delta`; 7 by default. The gate never reuses runs when the
-  request changes `prepare` or when the target branch has no valid `gate.yaml`.
+- **`base_max_age_hours`**: comes from the target branch, like `delta`; 0 by default: the base runs next to the
+  candidate in every job. The older `base_max_age_days` still reads, in days; set one of the two. The gate never reuses
+  runs from other requests when the request changes `prepare` or when the target branch has no valid `gate.yaml`.
   ([Why](/docs/how-it-decides#where-the-bases-runs-come-from))
 - **`alpha`**: comes from the target branch, like `delta`. Below 0.5 so that the rule on the mean, which may get all of
   it, keeps a share below 0.5 ([How it decides](/docs/how-it-decides#how-often-the-gate-may-be-wrong)).
 - **`max_spend_usd`**: comes from the target branch, like `delta`; per pipeline and job. It needs `mean: betting` and
   `prices` with a price for every model the runs call; otherwise the job ends in `infra error` and says why. The first
-  round always runs, to learn its price, so a limit below one round still buys one. With `base_max_age_days: 0` a re-run
-  starts over ([Adaptive runs](/docs/how-it-decides#adaptive-runs-a-money-limit-instead-of-k)).
+  round always runs, to learn its price, so a limit below one round still buys one. A re-run continues with the
+  request's own pairs of runs for 14 days, with or without `base_max_age_hours`; without `--cache`, the action's
+  artifacts or `actions: read` it starts over, and the comment says so ([Adaptive runs](/docs/how-it-decides#adaptive-runs-a-money-limit-instead-of-k)).
 - **`delta`**: points out of 100; under the naive rule a drop of exactly `delta` passes. Only `gate --relative` makes it
   relative, and only for the naive rule.
 - **`mean`**: `betting` takes its first look after 2 runs of each version, so with `k: 1` it can only answer
@@ -368,7 +370,7 @@ are recent ([where from](/docs/how-it-decides#where-the-bases-runs-come-from)).
 | `--project DIR` | the project's directory, with `gate.yaml`; default `.` |
 | `--pipeline NAME` | gate only this pipeline |
 | `--list` | check `gate.yaml` and print its pipelines; runs nothing |
-| `--cache DIR` | a directory for earlier jobs' runs: the base's runs of the same version on the same set, at most `base_max_age_days` old, are reused from it and, on GitHub, from other jobs' artifacts |
+| `--cache DIR` | a directory for earlier jobs' runs: the base's runs of the same version on the same set, at most `base_max_age_hours` old, are reused from it and, on GitHub, from other jobs' artifacts; with `max_spend_usd` it also keeps the request's own rounds for a re-run |
 | `--refresh` | with `--cache` and `--out`, on the target branch itself: reuse its version's recent runs, run what is missing and name them for upload; compares nothing |
 
 ```sh
@@ -481,7 +483,7 @@ a cached directory.
 | `github-token` | `${{ github.token }}` | writes the comment (`pull-requests: write`) and finds earlier runs (`actions: read`) |
 | `cases` | `true` | upload the test set's text files as a second artifact, for the dashboard |
 | `cases-retention-days` | `30` | days GitHub keeps that artifact |
-| `runs-retention-days` | `14` | days GitHub keeps each version's runs for later jobs; at least `base_max_age_days` |
+| `runs-retention-days` | `14` | days GitHub keeps each version's runs for later jobs; at least `base_max_age_hours` in days, and 14 for re-runs under `max_spend_usd` |
 
 ## Exit codes
 

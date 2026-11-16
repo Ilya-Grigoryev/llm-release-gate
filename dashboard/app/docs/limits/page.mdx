@@ -12,7 +12,7 @@ The gate runs the request's code, workflow file and lock file, with the model pr
 in. A request can change any of these, so the gate catches mistakes, not an author who wants to get past it. It
 does stop a request loosening its own rules:
 
-- `delta`, `alpha`, `k`, `mean`, `checks`, `levels`, `budgets`, `prices` and `base_max_age_days` come from the target branch's
+- `delta`, `alpha`, `k`, `mean`, `checks`, `levels`, `budgets`, `prices`, `base_max_age_hours` and `max_spend_usd` come from the target branch's
   `gate.yaml`; a new value applies after merge.
 - A request that changes `ignore`, or which files belong to which pipeline, runs every pipeline.
 - A request that removes or renames a pipeline fails as `inconclusive` (exit 11).
@@ -50,8 +50,11 @@ too ([What it catches](/docs/what-it-catches#what-it-cannot-see)).
 The default naive rule compares each version's mean score over the first run of each case and blocks when the
 candidate's is lower by more than `delta` points. In the author's measurement on a support agent, one unchanged version on the same 10 tasks
 had a spread of 30 points over 11 runs, and twice the same version, run as base and as candidate in one job, differed by
-10 points. So a block or a pass can be noise. Requests within `base_max_age_days` compare with the same base runs, so
-one noisy base run moves all their verdicts. A loss smaller than `delta` passes, so small losses add up unseen. The
+10 points. So a block or a pass can be noise. With `base_max_age_hours` above 0, requests within the age limit compare
+with the same base runs, so one noisy base run moves all their verdicts. Runs of one job are also more alike than
+independent repeats would be: on 16.11.2026 up to 19 of 30 receipts got the same answer in all 5 runs, and a
+different one the day before. The rules count each run as fresh evidence, so their bounds on wrong verdicts are
+optimistic until that is measured. A loss smaller than `delta` passes, so small losses add up unseen. The
 rule on checks reads every run but cannot block on one run per version: at the default `alpha` a single broken check needs 4 runs of each.
 
 `mean: betting` reads every run and answers `inconclusive` when the runs show neither a pass nor a block. The comment
@@ -63,11 +66,11 @@ person moves.
 
 ## How it differs from other tools
 
-The gate runs each version from its own checkout. It reuses the target branch's runs for up to `base_max_age_days`
-(7 by default; `0` runs both versions in the same job) and refuses to compare runs on different test sets or scored by
+The gate runs each version from its own checkout. It runs both versions in the same job by default and reuses the
+target branch's runs only within `base_max_age_hours` and refuses to compare runs on different test sets or scored by
 different scorers (`infra error`, exit 20).
 
-<Fig id="limits-2" caption={"When the base ran earlier, anything that changed at the provider in between counts as an effect of your change. When both versions run together (`base_max_age_days: 0`), a shift that hits both cancels out in the difference; run-to-run noise remains in both cases."} alt={"Two timelines. In the first, the base version ran last week and the candidate runs today; the difference between them mixes the effect of the change with anything that changed at the provider in between, plus run-to-run noise. In the second, both versions run in the same job at the same time, so a shift at the provider affects both, and the difference shows the change plus run-to-run noise, without the drift."} />
+<Fig id="limits-2" caption={"When the base ran earlier, anything that changed at the provider in between counts as an effect of your change. When both versions run together (`base_max_age_hours: 0`, the default), a shift that hits both cancels out in the difference; run-to-run noise remains in both cases."} alt={"Two timelines. In the first, the base version ran last week and the candidate runs today; the difference between them mixes the effect of the change with anything that changed at the provider in between, plus run-to-run noise. In the second, both versions run in the same job at the same time, so a shift at the provider affects both, and the difference shows the change plus run-to-run noise, without the drift."} />
 
 The table compares only how each tool decides that a new version is worse, as documented in October 2026.
 

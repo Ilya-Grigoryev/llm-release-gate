@@ -10,7 +10,7 @@ The gate runs each case several times and compares the two versions case by case
 
 ## Status
 
-Work in progress. Built: two rules on the mean, the naive one (one run per version against a fixed threshold, the default) and a betting rule over all runs that passes, blocks or stays inconclusive and says how many runs a pass would need; the rule on checks over all runs, with critical and minor checks; a comment on every pull or merge request, cost and latency budgets, traces of agent runs, checks over the answer and the trace, any program as a pipeline, and a [dashboard](#dashboard) of the runs. Three projects use the gate, each in its own repository: [receipt-intake](https://github.com/Ilya-Grigoryev/receipt-intake) reads seller, date, address and total from receipt scans for a bookkeeping team (test receipts from [SROIE](https://rrc.cvc.uab.es/?ch=13), ICDAR 2019), from the OCR text or from the scan; [workbench-support](https://github.com/Ilya-Grigoryev/workbench-support) is the support agent of a coworking space, with tools on its booking system and its own test cases, alone on a ticket or in a chat with a simulated user; [telecom-support](https://github.com/Ilya-Grigoryev/telecom-support) is a mobile carrier's support agent built on the telecom domain of [tau2-bench](https://github.com/sierra-research/tau2-bench): tau2's agent, tools, tasks and evaluator, unchanged.
+Work in progress. Built: two rules on the mean, the naive one (one run per version against a fixed threshold, the default) and a betting rule over all runs that passes, blocks or stays inconclusive and says how many runs a pass would need, or buys rounds up to a money limit (`max_spend_usd`); the rule on checks, read once, with critical and minor checks; a comment on every pull or merge request, cost and latency budgets, traces of agent runs, checks over the answer and the trace, any program as a pipeline, and a [dashboard](#dashboard) of the runs. Three projects use the gate, each in its own repository: [receipt-intake](https://github.com/Ilya-Grigoryev/receipt-intake) reads seller, date, address and total from receipt scans for a bookkeeping team (test receipts from [SROIE](https://rrc.cvc.uab.es/?ch=13), ICDAR 2019), from the OCR text or from the scan; [workbench-support](https://github.com/Ilya-Grigoryev/workbench-support) is the support agent of a coworking space, with tools on its booking system and its own test cases, alone on a ticket or in a chat with a simulated user; [telecom-support](https://github.com/Ilya-Grigoryev/telecom-support) is a mobile carrier's support agent built on the telecom domain of [tau2-bench](https://github.com/sierra-research/tau2-bench): tau2's agent, tools, tasks and evaluator, unchanged.
 
 [`docs/design.md`](docs/design.md) describes the parts, the flow of a merge request and the record of a run.
 
@@ -42,8 +42,8 @@ Claude 4.6 on are fixed snapshots; other providers' names without a date, such a
 newer snapshot). For a name without a date every record keeps the requested model next to the one the provider reports,
 the gate's comment warns, and the gate refuses to compare two versions that asked for the same model and got different
 ones from the provider (or runs that do not say which one they got: report `model`). If the provider moves such a name to
-another model, requests get `infra error` until the target branch's cached runs are older than `base_max_age_days`; set
-it to `0` on the target branch until then.
+another model, requests get `infra error` until the target branch's cached runs are older than `base_max_age_hours`;
+set it to `0` (the default) on the target branch until then.
 
 The gate imports no application code, only the module of a `function` check. [receipt-intake](https://github.com/Ilya-Grigoryev/receipt-intake) is a whole project set up this way.
 
@@ -203,7 +203,7 @@ apply to every pipeline, and a pipeline's own win:
 | `levels` | `critical: [ids]` block even under `checks: report` and lead the comment; `minor: [ids]` stay out of the case score and only warn (⚠️ in the title, a CI annotation) when significantly worse, as normal checks under `checks: report` do once `levels` is set; `cases: {pattern: level}` for a case's checks, and a `minor` case leaves the mean. Ids take shell patterns (`assert-*`); a pattern that matches no check is named in the comment |
 | `prices` | YAML of `model: [input, output]` USD per 1M tokens, for costs and the cost budget |
 | `budgets` | `cost_per_run_usd` (needs `prices`), `latency_s` and `latency_quantile` (default 0.95) |
-| `base_max_age_days` | the gate reuses the target branch's runs from earlier jobs up to this many days old, default 7; `0` runs both versions in every job |
+| `base_max_age_hours` | `0` (default): the base runs next to the candidate in every job; above 0, such as `24` or `48`, the gate reuses the target branch's runs from earlier jobs up to this many hours old ([below](#how-runs-are-shared)); `base_max_age_days` still reads, in days |
 | `prepare` | a command that readies the project in both trees before their runs, such as `[npm, ci]` |
 | `ignore` | glob patterns, from the project's directory, of files that never change what the model gets, such as `web/` (a trailing `/` takes the directory, `**` crosses directories); on top of documentation and CI; `!docs/kb/` takes files back, for an app that reads them |
 
@@ -243,45 +243,54 @@ max_spend_usd: 5   # per pipeline and job; give it room, see below
 ```
 
 - **Round 5 reads the checks, once.** The rule on checks is a test with one look, so the gate reads it on rounds 1 to
-  5 (more when `alpha` is below 0.008) and never again; rounds bought later go to the rule on the mean, which stays
+  5 (more when `alpha` is below about 0.008, 2 when no check can block) and never again; rounds bought later go to the rule on the mean, which stays
   valid however many rounds it reads. A pass therefore comes at round 5 at the earliest while checks may block; under
   `checks: report` without `critical` levels the gate can pass from round 2, and Fisher on 2 + 2 runs cannot flag a
   reported or `minor` check. Cost and latency budgets read rounds 1 to 5 as well.
-- **How rounds are bought.** The first round runs alone to learn what a round costs. Rounds 2 to 5 follow as one
-  batch, then one at a time. A round runs only if its estimate, the last round's cost (and the base's while the cache
-  has no runs of it), fits in what the job has left, so a round dearer than the last can take the job slightly past
-  the limit.
+- **How rounds are bought.** A round is one run of every case by both versions, the two in the same job. The first
+  round runs alone to learn what a round costs. Rounds 2 to 5 follow as one batch, then one at a time, up to 60. A
+  round runs only if its estimate, the last round's cost, fits in what the job has left, so a round dearer than the
+  last can take the job slightly past the limit.
 - **Not decided within the limit.** The comment says how many rounds the job bought and what it spent, and how many
-  more rounds a pass needs at the pace so far, with their cost. Re-run the job to continue: it reuses the runs paid
-  for, and the base runs they were compared with, so the checks never get a second look at other data. The limit
-  holds per job. A new push is a new version and starts over.
-- **The target branch** keeps 5 rounds of its version in the cache. A request that needs more pays for both versions
-  from round 6 on, and shares what it paid for.
+  more rounds a pass needs at the pace so far, with their cost. Re-run the job to continue: it takes back the rounds
+  paid for as pairs, the candidate's runs with the base runs they met, and buys more, so the checks never read other
+  data for the rounds they read. The limit holds per job. A re-run continues for 14 days (the artifacts' default
+  retention); it needs the action's artifacts and `actions: read`, and the comment says when a re-run would start
+  over instead. A push that changes the version starts over, and so does a re-run after the target branch moved.
+- **With `base_max_age_hours` above 0** the target branch keeps 5 rounds of its version; a request that needs more
+  pays for both versions from round 6 on, so one comparison mixes base runs from an earlier job with fresh ones.
 
-How much to set: five rounds of the candidate at its cost per round, plus room for prices that vary. In a simulation
-on recorded runs of the three applications below, the gate kept `alpha` at every limit, and 20 % of room covered the
-noisiest prices: in one of 20 000 simulated requests round 5 did not fit, because round 4 had cost more than the rest. A set with
-few cases needs many rounds for a pass when nothing changed (the table above), so give such a set more money or
-more cases. `max_spend_usd` needs `mean: betting` and a price for every model the runs call.
+How much to set: five rounds of both versions at their cost per round, or of the candidate alone when the base comes
+from the cache, plus room for prices that vary. In a simulation on recorded runs of the three applications below that
+drew every run independently, the gate kept `alpha` at every limit; with 20 % of room, round 5 did not fit in one of
+20 000 simulated requests, because the estimate from round 4 ran over what was left. Runs of one job turned out alike
+(16.11.2026: up to 19 of 30 receipts answered the same in all 5 runs, and differently the day before), so treat that
+bound as optimistic until it is measured. A set with few cases needs many rounds for a pass when nothing changed (the
+table above), so give such a set more money or more cases. `max_spend_usd` needs `mean: betting` and a price for
+every model the runs call.
 
 `setup` installs Python, uv and the project's locked environment. The gate action first comments that it is running (which also proves it can
 comment), checks the golden set (against its manifest, if any), and compares the version from the target branch with the one from the
-request, each with its own code; the base runs next to the candidate unless recent runs of it exist (below). A request that leaves a pipeline's version as it is (config,
+request, each with its own code; the base runs next to the candidate unless `base_max_age_hours` lets it reuse recent runs (below). A request that leaves a pipeline's version as it is (config,
 prompts and code, see [Running a version](#running-a-version)) gets `unchanged` and costs nothing; a pipeline's own
 files (another pipeline's prompt, say) do not count for the others. A request that changes `ignore` or which files
 belong to which pipeline (the prompts its configs name included) runs every pipeline, so it cannot hide new code from
 its own gate. The verdict replaces that note in the same comment, edited again on later pushes.
 
-A version is the same in any commit, so the gate runs it once and shares the runs. Each job uploads the runs it paid
-for as an artifact named after the version and the test set (`llm-release-gate-runs-NAME-VERSION-SET`); before running
-the base, a later job reuses such runs if they are at most `base_max_age_days` old. A merged request's candidate is the
-target branch's new version, so the next request usually finds its base already run, and the comment's cost counts
-only what this job paid for. The price: within the age limit, a shift at the provider counts as an effect of the change, and every
-request compares with the same base runs, so one noisy base run moves all their verdicts; `base_max_age_days: 0` runs
-both versions together, as an experiment that counts the gate's errors should. The gate never reuses runs when the request changes `prepare` or when the target branch has no valid `gate.yaml`. The job needs `actions: read` to find earlier runs;
+#### How runs are shared
+
+By default (`base_max_age_hours: 0`) both versions run in the same job, so a change at the provider between sessions
+hits both and cancels out. Above 0 the gate runs a version once and shares the runs: each job uploads the runs it paid
+for as an artifact named after the version and the test set (`llm-release-gate-runs-NAME-VERSION-SET`), and before
+running the base a later job reuses such runs if they are at most that many hours old. A merged request's candidate is
+the target branch's new version, so the next request usually finds its base already run, and the comment's cost counts
+only what this job paid for. The price: a shift at the provider within the age limit counts as an effect of the
+change, and every request compares with the same base runs, so one noisy base run moves all their verdicts. On
+16.11.2026 two requests that changed nothing but the gate's version were blocked that way, against base runs 16 hours
+old. The gate never reuses runs when the request changes `prepare` or when the target branch has no valid `gate.yaml`. The job needs `actions: read` to find earlier runs;
 without it the base runs again and the comment says so.
 
-The rules (`delta`, `alpha`, `k`, `max_spend_usd`, `budgets`, `prices`, `base_max_age_days`) come from the target branch's `gate.yaml`, so editing the rules in a
+The rules (`delta`, `alpha`, `k`, `max_spend_usd`, `budgets`, `prices`, `base_max_age_hours`) come from the target branch's `gate.yaml`, so editing the rules in a
 request does not loosen that request's gate: new rules apply after merge, and the comment says when a request changes
 them, adds a pipeline or changes a test set. A request that removes a pipeline (or renames it, which looks the same)
 fails as inconclusive (exit 11; the other pipelines keep their verdicts): no version of it was compared, so a
