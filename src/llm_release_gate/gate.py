@@ -343,15 +343,19 @@ def look(
 
 def adaptive_lines(a: dict) -> list[str]:
     """The adaptive gate's lines (D-032): rounds and money, and why it stopped."""
+
+    def rounds(n: int) -> str:
+        return f"{n} round{'s' if n != 1 else ''}"
+
     left = a["rounds_to_k_c"]
     spent = f"${a['spent_usd']:.2f} of max_spend_usd ${a['max_spend_usd']:g} spent in this job"
     if a["stop"] == "decided":
         return [
-            f"{a['rounds']} rounds of each version (checks read on rounds 1–{a['k_c']}) · {spent}."
+            f"{rounds(a['rounds'])} of each version (checks read on rounds 1–{a['k_c']}) · {spent}."
         ]
     if a["stop"] is None:  # the loop buys more; a later comment replaces this one
         return [
-            f"{a['rounds']} rounds of each version so far · {spent}; buying {a['next_rounds']} more."
+            f"{rounds(a['rounds'])} of each version so far · {spent}; buying {a['next_rounds']} more."
         ]
     nxt = (
         ""
@@ -361,11 +365,11 @@ def adaptive_lines(a: dict) -> list[str]:
     if a["stop"] == "rounds":
         return [
             (
-                f"⏸ {a['rounds']} rounds of each version, the most the gate buys · {spent}. More rounds will not "
+                f"⏸ {rounds(a['rounds'])} of each version, the most the gate buys · {spent}. More rounds will not "
                 "settle it: a person decides, or the set needs more cases."
             )
         ]
-    out = [f"⏸ {a['rounds']} rounds of each version · {spent}{nxt}."]
+    out = [f"⏸ {rounds(a['rounds'])} of each version · {spent}{nxt}."]
     if left:
         out.append(
             f"The rule on checks reads rounds 1–{a['k_c']}, so nothing is decided before round {a['k_c']}: {left} more "
@@ -392,6 +396,8 @@ def adaptive_lines(a: dict) -> list[str]:
         )
     out.append(
         f"Re-run this job to buy up to ${a['max_spend_usd']:g} more; the rounds paid for count."
+        if a["resume"] and (a["next_round_usd"] or 0) <= a["max_spend_usd"]
+        else f"One round costs more than max_spend_usd ${a['max_spend_usd']:g}: raise it on the target branch."
         if a["resume"]
         else "A re-run of this job starts over, as a new test: it finds none of these runs (no cache directory, no "
         "`actions: read`, or `pull_request_target`). Raise max_spend_usd on the target branch instead."
@@ -502,9 +508,10 @@ def checks_report(
 
 
 def checks_lines(
-    c: criterion.CheckVerdict, label: str = "Checks"
+    c: criterion.CheckVerdict, label: str = "Checks", once: bool = False
 ) -> tuple[str, list[str]]:
-    """The comment's line on the rule on checks, and its table of broken checks."""
+    """The comment's line on the rule on checks, and its table of broken checks (`once`: the adaptive gate read them on
+    rounds 1 to K_c and reads no more)."""
     left = (
         f" {len(c.one_sided)} checks scored in one version only are left out."
         if c.one_sided
@@ -551,6 +558,8 @@ def checks_lines(
             f"{label}: with {kb} + {kc} runs no break can be significant; {which} can block from {need} runs of each "
             f"version ({name}).{fewer}{left}"
         )
+        if once:  # the adaptive gate reads the checks once, on these runs: more rounds will not change it
+            line = f"{label}: read once, on {kb} + {kc} runs, too few for any break to be significant ({name}).{fewer}{left}"
         return line, []
     if worse:
         line = (
@@ -694,13 +703,16 @@ def markdown(
         ),
         *([bound] if bound else []),
     ]
-    line, broken = checks_lines(checks) if checks else (None, [])
+    line, broken = (
+        checks_lines(checks, once=adaptive is not None) if checks else (None, [])
+    )
     if line:
         lines.append(line)
     if lv and lv.reported:
         line, more = checks_lines(
             lv.reported,
             "Checks that only report (minor; normal under `checks: report`)",
+            once=adaptive is not None,
         )
         lines.append(line)
         broken = [*broken, *more]

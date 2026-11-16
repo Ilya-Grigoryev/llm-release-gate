@@ -1157,3 +1157,59 @@ def test_without_a_cache_directory_the_comment_does_not_offer_a_rerun(repo):
     code, out = gate(repo)
     assert code == pr.INCONCLUSIVE
     assert "A re-run of this job starts over" in (out / "comment.md").read_text()
+
+
+def test_a_rerun_pairs_the_candidate_runs_with_the_base_they_met_when_the_base_moved(
+    repo,
+):
+    rules = adaptive(repo, 0.0002)  # 6 rounds: the checks are read, no pass yet
+    version(repo, "answer-again", rules)
+    cached_gate(repo)  # against the target branch's version X
+    version(
+        repo, "answer-x", rules
+    )  # the target branch moves to another version Y; the request's stays
+    git(repo, "commit", "-q", "-am", "another version on the target branch")
+    version(repo, "answer-again", rules)
+    _, out = cached_gate(repo)  # against Y: every round anew
+    second = {arm: reps(out / arm) for arm in ("base.jsonl", "candidate.jsonl")}
+    assert json.loads((out / "verdict.json").read_text())["runs"] == 6
+    _, out = cached_gate(repo)  # the re-run of that job
+    for arm, before in second.items():
+        now = reps(out / arm)
+        assert all(
+            now[k] == before[k] for k in before
+        )  # the pairs of the job it continues, not of the first
+
+
+def test_a_rerun_keeps_its_base_runs_past_the_cache_age(repo):
+    rules = adaptive(repo, 0.0001).replace(CACHE, "base_max_age_hours: 1\n")
+    commit_rules(repo, rules)
+    version(repo, "answer-again", rules)
+    _, out = cached_gate(repo)
+    met = reps(out / "base.jsonl")
+    age(
+        repo.parent / "cache", 2 / 24
+    )  # older than the hour the cache keeps the base for
+    _, out = cached_gate(repo)
+    base = reps(out / "base.jsonl")
+    assert all(base[k] == met[k] for k in met)
+
+
+@pytest.mark.parametrize("why", ["403", "pull_request_target"])
+def test_a_job_whose_runs_a_rerun_cannot_find_says_it_starts_over(
+    repo, monkeypatch, why
+):
+    if why == "403":
+        monkeypatch.setattr(
+            pr.shared,
+            "fetch",
+            lambda *a: (
+                "earlier runs: GitHub answered 403",
+                "Give it `actions: read`.",
+            ),
+        )
+    else:
+        monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request_target")
+    version(repo, "answer-again", adaptive(repo, 0.0001))
+    _, out = cached_gate(repo)
+    assert "A re-run of this job starts over" in (out / "comment.md").read_text()
