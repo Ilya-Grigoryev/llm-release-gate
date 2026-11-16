@@ -3,7 +3,7 @@ import { Arrow, FigureHead, LampDot, Node, type Lamp } from "./kit";
 
 /*
  * Top to bottom. From @lg the three outcomes sit side by side, and a rail in a fourth column carries "run more" back
- * up to the interval; when the figure stacks, an up arrow under "run more" says the same.
+ * up to the interval; when the figure stacks, an up arrow under "buy another round" says the same.
  */
 
 const Said = ({ lamp, children }: { lamp: Lamp; children: ReactNode }) => (
@@ -38,7 +38,7 @@ const centre = "@lg:col-[1/4] @lg:mx-auto @lg:w-full @lg:max-w-sm";
 export default function HowItDecides3({}: { alt: string }) {
   return (
     <div className="@container">
-      <FigureHead tag="The betting rule; running more on its own is planned" />
+      <FigureHead tag="The betting rule with max_spend_usd" />
       <div className="grid @lg:grid-cols-[repeat(3,minmax(0,1fr))_6.5rem] @lg:gap-x-3">
         <Node title="Runs of both versions on the same cases" className={`${centre} @lg:row-start-1`} />
         <div className="@lg:col-[1/4] @lg:row-start-2">
@@ -71,15 +71,15 @@ export default function HowItDecides3({}: { alt: string }) {
         <div className="@lg:col-start-3 @lg:row-start-7">
           <Arrow down />
         </div>
-        <Node title="Run more" className="@lg:col-start-3 @lg:row-start-8 @lg:self-center" />
+        <Node title="Buy another round" className="@lg:col-start-3 @lg:row-start-8 @lg:self-center" />
         <p className="flex items-center justify-center gap-1 py-1 text-sm text-ink-2 @lg:hidden">
           <Head className="-rotate-90" />
-          back to the interval, up to the maximum number of runs
+          back to the interval, while the next round fits in the limit
         </p>
         <div className="@lg:col-start-3 @lg:row-start-9">
-          <Arrow down label="still not sure at the maximum" />
+          <Arrow down label="the next round does not fit" />
         </div>
-        <Node title="Red until a person approves the merge" className="@lg:col-start-3 @lg:row-start-10" />
+        <Node title="Inconclusive: re-run the job to continue" className="@lg:col-start-3 @lg:row-start-10" />
 
         {/* The rail back to the interval, wide layout only. */}
         <span aria-hidden className="relative hidden @lg:col-start-4 @lg:row-start-3 @lg:block">
@@ -89,7 +89,7 @@ export default function HowItDecides3({}: { alt: string }) {
         <span className="relative hidden @lg:col-start-4 @lg:row-[4/8] @lg:block">
           <span aria-hidden className={`${rail} inset-y-0 left-3 border-l-[1.5px]`} />
           <span className="absolute top-1/2 right-0 left-5 -translate-y-1/2 text-sm leading-tight text-ink-2">
-            up to the maximum number of runs
+            while the next round fits in the limit
           </span>
         </span>
         <span aria-hidden className="relative hidden @lg:col-start-4 @lg:row-start-8 @lg:block">

@@ -56,8 +56,10 @@ rule on checks reads every run but cannot block on one run per version: at the d
 
 `mean: betting` reads every run and answers `inconclusive` when the runs show neither a pass nor a block. The comment
 then says how many runs a pass needs at least. With few cases that number is large, noise adds more, and every run
-costs model calls. Planned: the gate buys the missing runs itself, up to a money limit, and an anchor version that only a person
-moves ([How it decides](/docs/how-it-decides#the-betting-rule-every-run-three-answers)).
+costs model calls. With `max_spend_usd` the gate buys those runs itself until the limit is spent; a pass still needs round
+5 while checks may block, and a set of 10 cases needs about 10 rounds when nothing changed
+([Adaptive runs](/docs/how-it-decides#adaptive-runs-a-money-limit-instead-of-k)). Planned: an anchor version that only a
+person moves.
 
 ## How it differs from other tools
 

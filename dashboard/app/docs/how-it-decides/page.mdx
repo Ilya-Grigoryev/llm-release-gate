@@ -99,19 +99,49 @@ guarantee when cases differ in difficulty.
 The runs a pass needs depend on the number of cases and on `delta`, and few cases need many. The comment states the
 number for your set: what a candidate that scores like the base in every run would need. Noise adds more. Outside CI,
 a second `run` with a larger `-k` appends only the missing runs, and `gate` decides again over all of them: that keeps
-the bound. A new CI job is different: it runs the candidate again from the start, so it is a new test, and running jobs
-until one passes makes a wrong pass more likely than the bound. To use more runs in CI, raise `k` in the target branch's
-`gate.yaml`, in a request of its own, before the job. Continuing a request with the runs it already paid for is planned
-([Reference](/docs/reference#gate)).
+the bound. With a fixed `k`, a new CI job runs the candidate again from the start, so it is a new test, and running jobs
+until one passes makes a wrong pass more likely than the bound. To let the gate run more on its own and continue
+with the runs paid for, set a money limit instead of `k` ([Adaptive runs](#adaptive-runs-a-money-limit-instead-of-k)).
 
-<Fig id="how-it-decides-3" caption={"The betting rule: pass, block or not sure yet, which the gate reports as `inconclusive`. Today you add the runs yourself; running more on its own, up to a limit, is planned. Until then, a person decides."} alt={"The gate's betting rule; only the loop that runs more on its own is planned. The gate puts an interval around the difference between the two versions and compares it with −δ. If the whole interval lies above −δ, the request passes, with a warning when a smaller loss is shown. If the whole interval lies below −δ, the request is blocked. If the interval reaches across −δ, the answer is 'not sure yet': more runs narrow the interval, up to a maximum number of runs. If it is still not sure then, the check stays red until a person approves the merge."} />
+<Fig id="how-it-decides-3" caption={"The betting rule: pass, block or not sure yet, which the gate reports as `inconclusive`. With `max_spend_usd` the gate buys rounds until it decides or the limit is spent; with a fixed `k` it answers after `k` runs."} alt={"The gate's betting rule. The gate puts an interval around the difference between the two versions and compares it with −δ. If the whole interval lies above −δ, the request passes, with a warning when a smaller loss is shown. If the whole interval lies below −δ, the request is blocked. If the interval reaches across −δ, the answer is 'not sure yet': with max_spend_usd the gate buys another round while the next one fits in the limit, and the interval narrows. When the limit is spent, the answer is inconclusive, and re-running the job continues with the runs paid for."} />
 
 <Fig id="how-it-decides-4" caption={"Simulation with a simpler interval than the gate's. Each step of the slider adds runs, as you would after `inconclusive`. A noisy application with few cases needs many runs before it can say \"pass\"; more cases help as much as more runs."} alt={"A simulation of an interval rule, simpler than the gate's betting rule, on a support agent modelled from the author's measurement, with δ = 5 points and both versions running K times per case. With 10 cases, the 95 % interval around the difference is about 26 points either side at 2 runs per version, 12 at 10 runs and 5 at 50 runs. A change that breaks two always-passing cases (−20 points) is blocked once the whole interval lies below −5, at around 10 runs. A harmless change is still on the edge at 50 runs, because the interval is about as wide as δ. With 40 cases the widths halve: the breaking change is blocked from about 3 runs and the harmless change passes at around 20. The gate's own range is wider, so it needs more runs."} />
 
-Planned: when the answer is `inconclusive`, the gate buys the missing runs itself, up to a money limit you set, and
-continues in the same request. Also planned: a second comparison against an anchor, a fixed earlier version that only a
-person moves, so that small losses cannot pile up. Until experiments measure the rules on recorded runs, this site
-states no measured error rates.
+Planned: a second comparison against an anchor, a fixed earlier version that only a person moves, so that small
+losses cannot pile up.
+
+## Adaptive runs: a money limit instead of `k`
+
+With `max_spend_usd` you stop choosing `k`. The gate buys rounds, one run of every case by both versions, until it
+decides or until the next round would not fit in the limit:
+
+```yaml
+mean: betting
+prices: prices.yaml
+max_spend_usd: 5   # per pipeline and job; give it room, see below
+```
+
+- **Round 5 reads the checks, once.** The rule on checks is a test with one look, so the gate reads it on rounds 1 to
+  5 (more when `alpha` is below 0.008) and never again; rounds bought later go to the rule on the mean, which stays
+  valid however many rounds it reads. A pass therefore comes at round 5 at the earliest while checks may block. Under
+  `checks: report` without `critical` levels the gate can pass from round 2, and Fisher on 2 + 2 runs cannot flag a
+  reported or `minor` check. Cost and latency budgets read rounds 1 to 5 as well.
+- **How rounds are bought.** The first round runs alone to learn what a round costs. Rounds 2 to 5 follow as one
+  batch, then one at a time. A round runs only if its estimate, the last round's cost (and the base's while the cache
+  has no runs of it), fits in what the job has left, so a round dearer than the last can take the job slightly past
+  the limit.
+- **Not decided within the limit.** The comment says how many rounds the job bought and what it spent, and how many
+  more rounds a pass needs at the pace so far, with their cost. Re-run the job to continue: it reuses the runs paid
+  for, and the base runs they were compared with, so the checks never get a second look at other data. The limit
+  holds per job. A new push is a new version and starts over.
+- **The target branch** keeps 5 rounds of its version in the cache ([Where the base's runs come from](#where-the-bases-runs-come-from)).
+  A request that needs more pays for both versions from round 6 on, and shares what it paid for.
+
+How much to set: five rounds of the candidate at its cost per round, plus room for prices that vary. In a simulation
+on recorded runs of three applications, the gate kept `alpha` at every limit, and 20 % of room covered the noisiest
+prices: in one of 20 000 simulated requests round 5 did not fit, because round 4 had cost more than the rest. A set
+with few cases needs many rounds for a pass when nothing changed ([the table](#how-often-the-gate-may-be-wrong)): a
+telecom agent with 10 tasks passes at round 10 at best. Give such a set more money or more cases.
 
 ## How often the gate may be wrong
 
@@ -132,17 +162,17 @@ The comment says how the gate spent its `alpha`, for example "False blocks: at m
 rule on the mean and 0.025 for the rule on checks." A lower `alpha` needs more runs before the gate decides. At
 `delta` 5:
 
-| `alpha` | Each rule's share: false blocks, and missed losses for the betting rule | A check broken in every run can block from | Fully broken checks that can still block at `k: 5` | Runs of each version a pass needs when nothing changed, 10 / 30 / 50 cases |
-|---|---|---|---|---|
-| 0.01 | 0.005 | `k: 5` | 1 | 14 / 5 / 3 |
-| 0.025 | 0.0125 | `k: 5` | 3 | 12 / 4 / 3 |
-| 0.05 (default) | 0.025 | `k: 4` | 6 | 10 / 4 / 2 |
-| 0.1 | 0.05 | `k: 3` | 12 | 8 / 3 / 2 |
+| `alpha` | Each rule's share: false blocks, and missed losses for the betting rule | A check broken in every run can block from | Fully broken checks that can still block at `k: 5` | Runs of each version a pass needs when nothing changed, 10 / 30 / 50 cases | With `max_spend_usd`, the round that reads the checks |
+|---|---|---|---|---|---|
+| 0.01 | 0.005 | `k: 5` | 1 | 14 / 5 / 3 | 5 |
+| 0.025 | 0.0125 | `k: 5` | 3 | 12 / 4 / 3 | 5 |
+| 0.05 (default) | 0.025 | `k: 4` | 6 | 10 / 4 / 2 | 5 |
+| 0.1 | 0.05 | `k: 3` | 12 | 8 / 3 / 2 | 5 |
 
 The table assumes checks that may block. With none, the rule on the mean gets all of `alpha`: its runs are in the row
 whose share equals your `alpha`, the 0.1 row at the default. The fourth column is a limit of Tarone's correction: when more checks than that break in every run, it blocks none of
 them, and the rule on the mean has to catch the break. If the pipeline's `k` is too small for any check to block at its
-`alpha`, `pr` says so in the job's log before the runs start and names the `k` or `alpha` that would let one block. Like `delta`, `alpha` comes from the target branch's `gate.yaml`.
+`alpha`, `pr` says so in the job's log before the runs start and names the `k` or `alpha` that would let one block. Like `delta`, `alpha` comes from the target branch's `gate.yaml`. The last column is for [adaptive runs](#adaptive-runs-a-money-limit-instead-of-k).
 
 ## Critical and minor checks
 

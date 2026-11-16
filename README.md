@@ -194,7 +194,8 @@ apply to every pipeline, and a pipeline's own win:
 | `pipelines.NAME.config`, `.golden` | the version's config and the test set's directory, relative to the project |
 | `pipelines.NAME.manifest` | ids and hash the set must match, for a set built or fetched outside git |
 | `pipelines.NAME.inputs-url` | where the dashboard finds the set's other files (images): a URL with `{path}` or `{name}` |
-| `k` | runs per case and version, default 1; the naive rule reads the first run, the betting rule, the rule on checks and budgets all |
+| `k` | runs per case and version, default 1; the naive rule reads the first run, the betting rule, the rule on checks and budgets all; ignored with `max_spend_usd` |
+| `max_spend_usd` | instead of `k`, with `mean: betting` and `prices`: the gate buys rounds until it decides or the next one would not fit in this many USD per job ([below](#adaptive-runs-a-money-limit-instead-of-k)) |
 | `delta` | points of mean score the candidate may lose, default 5 |
 | `alpha` | the bound on how often the gate blocks a candidate that is no worse, default 0.05, split between the rules; the naive rule has none ([below](#how-often-the-gate-may-be-wrong)) |
 | `mean` | `naive` (default): block when the first run's mean drops by more than `delta`; `betting`: pass when the runs show the loss is under `delta`, block when they show it is over, otherwise inconclusive with the number of runs a pass needs (from 2 runs; with δ 5 and 50 cases, a candidate that never differs from the base passes after 2, and noise needs more) |
@@ -217,18 +218,51 @@ the rule on checks gets its half and the rest goes unused.
 
 A lower `alpha` means fewer wrong blocks and wrong passes, and more runs before the gate decides. At `delta` 5:
 
-| `alpha` | Each rule's share: false blocks, and missed losses for the betting rule | A check broken in every run can block from | Fully broken checks that can still block at `k: 5` | Runs of each version a pass needs when nothing changed, 10 / 30 / 50 cases |
-|---|---|---|---|---|
-| 0.01 | 0.005 | `k: 5` | 1 | 14 / 5 / 3 |
-| 0.025 | 0.0125 | `k: 5` | 3 | 12 / 4 / 3 |
-| 0.05 (default) | 0.025 | `k: 4` | 6 | 10 / 4 / 2 |
-| 0.1 | 0.05 | `k: 3` | 12 | 8 / 3 / 2 |
+| `alpha` | Each rule's share: false blocks, and missed losses for the betting rule | A check broken in every run can block from | Fully broken checks that can still block at `k: 5` | Runs of each version a pass needs when nothing changed, 10 / 30 / 50 cases | With `max_spend_usd`, the round that reads the checks |
+|---|---|---|---|---|---|
+| 0.01 | 0.005 | `k: 5` | 1 | 14 / 5 / 3 | 5 |
+| 0.025 | 0.0125 | `k: 5` | 3 | 12 / 4 / 3 | 5 |
+| 0.05 (default) | 0.025 | `k: 4` | 6 | 10 / 4 / 2 | 5 |
+| 0.1 | 0.05 | `k: 3` | 12 | 8 / 3 / 2 | 5 |
 
 The table assumes checks that may block. With none, the rule on the mean gets all of `alpha`: its runs are in the row
 whose share equals your `alpha`, the 0.1 row at the default. The fourth column is a limit of Tarone's correction: when more checks than that break in
 every run, it blocks none of them, and the rule on the mean has to catch the break. The comment states the split and
 the range's level. If no check could block with the pipeline's `k` and `alpha`, `pr` says so before the runs and names
 the `k` or `alpha` that would let it.
+
+### Adaptive runs: a money limit instead of `k`
+
+With `max_spend_usd` you stop choosing `k`. The gate buys rounds, one run of every case by both versions, until it
+decides or until the next round would not fit in the limit:
+
+```yaml
+mean: betting
+prices: prices.yaml
+max_spend_usd: 5   # per pipeline and job; give it room, see below
+```
+
+- **Round 5 reads the checks, once.** The rule on checks is a test with one look, so the gate reads it on rounds 1 to
+  5 (more when `alpha` is below 0.008) and never again; rounds bought later go to the rule on the mean, which stays
+  valid however many rounds it reads. A pass therefore comes at round 5 at the earliest while checks may block; under
+  `checks: report` without `critical` levels the gate can pass from round 2, and Fisher on 2 + 2 runs cannot flag a
+  reported or `minor` check. Cost and latency budgets read rounds 1 to 5 as well.
+- **How rounds are bought.** The first round runs alone to learn what a round costs. Rounds 2 to 5 follow as one
+  batch, then one at a time. A round runs only if its estimate, the last round's cost (and the base's while the cache
+  has no runs of it), fits in what the job has left, so a round dearer than the last can take the job slightly past
+  the limit.
+- **Not decided within the limit.** The comment says how many rounds the job bought and what it spent, and how many
+  more rounds a pass needs at the pace so far, with their cost. Re-run the job to continue: it reuses the runs paid
+  for, and the base runs they were compared with, so the checks never get a second look at other data. The limit
+  holds per job. A new push is a new version and starts over.
+- **The target branch** keeps 5 rounds of its version in the cache. A request that needs more pays for both versions
+  from round 6 on, and shares what it paid for.
+
+How much to set: five rounds of the candidate at its cost per round, plus room for prices that vary. In a simulation
+on recorded runs of the three applications below, the gate kept `alpha` at every limit, and 20 % of room covered the
+noisiest prices: in one of 20 000 simulated requests round 5 did not fit, because round 4 had cost more than the rest. A set with
+few cases needs many rounds for a pass when nothing changed (the table above), so give such a set more money or
+more cases. `max_spend_usd` needs `mean: betting` and a price for every model the runs call.
 
 `setup` installs Python, uv and the project's locked environment. The gate action first comments that it is running (which also proves it can
 comment), checks the golden set (against its manifest, if any), and compares the version from the target branch with the one from the
@@ -247,7 +281,7 @@ request compares with the same base runs, so one noisy base run moves all their 
 both versions together, as an experiment that counts the gate's errors should. The gate never reuses runs when the request changes `prepare` or when the target branch has no valid `gate.yaml`. The job needs `actions: read` to find earlier runs;
 without it the base runs again and the comment says so.
 
-The rules (`delta`, `alpha`, `k`, `budgets`, `prices`, `base_max_age_days`) come from the target branch's `gate.yaml`, so editing the rules in a
+The rules (`delta`, `alpha`, `k`, `max_spend_usd`, `budgets`, `prices`, `base_max_age_days`) come from the target branch's `gate.yaml`, so editing the rules in a
 request does not loosen that request's gate: new rules apply after merge, and the comment says when a request changes
 them, adds a pipeline or changes a test set. A request that removes a pipeline (or renames it, which looks the same)
 fails as inconclusive (exit 11; the other pipelines keep their verdicts): no version of it was compared, so a

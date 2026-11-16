@@ -55,8 +55,10 @@ delta: 5                          # block when the mean score drops by more than
 
 A case scores from 0 to 1 and the mean score is read in points out of 100, so with `delta: 5` a drop from 0.82 to 0.76
 blocks. Each version runs once per case, so a request can block or pass by chance ([How it
-decides](/docs/how-it-decides)). Other fields are optional ([Reference](/docs/reference#gate-yaml)), and the rules come
-from the target branch's `gate.yaml`. **Check:**
+decides](/docs/how-it-decides)). To let the gate run each version until it can tell, add `mean: betting`, a price file
+and a money limit per request, `max_spend_usd` ([Adaptive runs](/docs/how-it-decides#adaptive-runs-a-money-limit-instead-of-k)).
+Other fields are optional ([Reference](/docs/reference#gate-yaml)), and the rules come from the target branch's
+`gate.yaml`. **Check:**
 
 ```sh
 uv run llm-release-gate pr --list

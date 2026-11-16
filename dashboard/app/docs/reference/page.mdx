@@ -27,7 +27,7 @@ mean, naive by default or betting, and the rule on checks ([How it decides](/doc
 It lives in the project's directory: the repository's root, or the one you pass as `--project` (`project-dir` in the
 action). Top-level
 settings apply to every pipeline; a pipeline's own setting replaces them. The rules (`k`, `delta`, `alpha`, `mean`, `checks`,
-`levels`, `prices`, `budgets`, `base_max_age_days`) come from the target branch, so a request that edits them runs under the old ones, unless
+`levels`, `prices`, `budgets`, `base_max_age_days`, `max_spend_usd`) come from the target branch, so a request that edits them runs under the old ones, unless
 the target branch has none or a broken one ([Whose rules apply](/docs/how-it-works#whose-rules-apply)).
 
 ```yaml
@@ -44,6 +44,11 @@ pipelines:
     mean: betting                         # reads all 3 runs; can answer inconclusive
     levels: {critical: [no-fee-waiver], minor: [steps]}
     budgets: {cost_per_run_usd: 0.02, latency_s: 30}  # replaces the top-level budgets as a whole
+  support:
+    config: configs/support.yaml
+    golden: golden/support
+    mean: betting
+    max_spend_usd: 4                      # instead of k: rounds until it decides or $4 per job is spent
 k: 1
 delta: 5
 prices: prices.yaml
@@ -80,6 +85,10 @@ What the schema does not say:
   ([Why](/docs/how-it-decides#where-the-bases-runs-come-from))
 - **`alpha`**: comes from the target branch, like `delta`. Below 0.5 so that the rule on the mean, which may get all of
   it, keeps a share below 0.5 ([How it decides](/docs/how-it-decides#how-often-the-gate-may-be-wrong)).
+- **`max_spend_usd`**: comes from the target branch, like `delta`; per pipeline and job. It needs `mean: betting` and
+  `prices` with a price for every model the runs call; otherwise the job ends in `infra error` and says why. The first
+  round always runs, to learn its price, so a limit below one round still buys one. With `base_max_age_days: 0` a re-run
+  starts over ([Adaptive runs](/docs/how-it-decides#adaptive-runs-a-money-limit-instead-of-k)).
 - **`delta`**: points out of 100; under the naive rule a drop of exactly `delta` passes. Only `gate --relative` makes it
   relative, and only for the naive rule.
 - **`mean`**: `betting` takes its first look after 2 runs of each version, so with `k: 1` it can only answer
@@ -403,6 +412,7 @@ one side only, different scorer versions (unless `--golden` rescores both) and, 
 | `--golden DIR` | rescore both versions' saved answers with the current scorer, without calling the model |
 | `--prices FILE` | add the cost of the decision |
 | `--max-cost-per-run USD` | budget: the candidate's mean cost per run; needs `--prices` |
+| `--max-spend USD` | adaptive runs (`pr` passes `max_spend_usd`): reads the rounds both versions finished, the checks and budgets on rounds 1 to 5 only, and writes `spent_usd`, `stop` and `adaptive.next_rounds` to the JSON; needs a betting `--mean` and `--prices` |
 | `--max-latency S` | budget: seconds for the candidate's latency quantile; blocks only when its whole interval lies above |
 | `--latency-quantile Q` | the quantile for `--max-latency`; default 0.95 |
 | `--json FILE` | write the verdict as JSON |
