@@ -32,7 +32,7 @@ These are drafts.
 **1. The tool.** A release gate that a team sets up with a few files: how to run the application, its cases with
 checks, and one `gate.yaml` with the rules. Built today: the runner, traces, 16 kinds of checks, one JSON protocol for
 any program, the naive rule and a betting rule on the mean, the rule on checks with critical and minor checks, budgets,
-and a GitHub Action that comments the verdict. Planned: adaptive extra runs and an anchor comparison.
+and a GitHub Action that comments the verdict. Adaptive runs up to a money limit are built; an anchor comparison is planned.
 
 **2. Evidence for the decision rules (planned, stage D):** how often each rule blocks a harmless change, misses a
 regression or leaves the decision open, and what one decision costs, on recorded runs of real applications, not on

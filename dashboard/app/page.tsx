@@ -28,7 +28,7 @@ const ANSWERS: { lamp: Lamp; name: string; today: ReactNode; planned: ReactNode 
     lamp: "wait",
     name: "Not sure yet",
     today: null,
-    planned: "The runs cannot tell a loss of δ from noise yet. The comment says how many runs a pass needs; buying them on its own is planned.",
+    planned: "The runs cannot tell a loss of δ from noise yet. The comment says how many runs a pass needs; with max_spend_usd the gate buys them up to that limit.",
   },
 ];
 

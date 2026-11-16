@@ -165,7 +165,10 @@ runner's scorer is `hits(case, answer, trace=None)` (by default the run's trace,
   naive rule has no bound; under it `alpha` covers the rule on checks. The betting rule's share also bounds its wrong
   pass. The comment states the split (`alpha_line`); `pr` warns before the runs when `k` is below `runs_to_block` at
   the checks' share.
-- **Planned.** Buying more runs up to a money limit and continuing in the request; a second comparison against an
+- **Built (D-032).** With `max_spend_usd` the gate buys rounds (`gate.plan`) until it decides or the next round does not
+  fit, reads the checks once on rounds 1 to K_c (`gate.k_c`, `gate.look`), and a re-run continues with the request's
+  own pairs of runs (`pr.resume`, `pinned.jsonl`, the cache's `-met-` files).
+- **Planned.** A second comparison against an
   anchor version, so that many small losses cannot add up unseen;
   an adaptive runner that pays for repeated runs only where the versions disagree. Each takes a seed as an argument and
   reports it in the verdict.
@@ -199,7 +202,7 @@ runner's scorer is `hits(case, answer, trace=None)` (by default the run's trace,
 
 A project says what to gate in `gate.yaml` (`project.schema.json`, `project.load`): named pipelines, each a version's
 config and a golden set (with an optional manifest and `inputs-url`), and the settings `k`, `delta`, `alpha`, `mean`, `checks`, `levels`, `prices`,
-`budgets` and `base_max_age_days`, which a pipeline may override, plus a `prepare` command. Its pull request job (on GitHub: `uses:
+`budgets`, `base_max_age_hours` and `max_spend_usd`, which a pipeline may override, plus a `prepare` command. Its pull request job (on GitHub: `uses:
 Ilya-Grigoryev/llm-release-gate@<tag>` after its `setup` action) gets the golden set (from
 the repository, a GitHub release or a GitLab package; on GitHub in a step before the action), comments that it is running
 with the number of cases (proving it can comment), then runs `llm-release-gate pr --base REV --out OUT` from the
@@ -207,7 +210,7 @@ repository's root. For each pipeline `pr` first copies the golden set's text fil
 images; links followed) to `OUT/NAME/cases`, so even a run without a verdict shows what it was given, and checks the set
 against its manifest. It checks out the target branch in a worktree, runs `prepare` and syncs the environment in both
 trees, and asks each tree's own gate for the version's hash. The rules (`delta`, `alpha`, `k`, `mean`, `checks`, `levels`, `budgets`, `prices`,
-`base_max_age_days`) come
+`base_max_age_hours`, `max_spend_usd`) come
 from the target branch's `gate.yaml` when it has one (D-024); price files are copied before the request's `prepare`
 runs in that tree. Pipelines are matched by name, and the base arm runs the target branch's config of the pipeline, so
 renaming a config file keeps the base. A pipeline the target branch lacks gives `no base version`: only the candidate
@@ -222,9 +225,11 @@ request from a fork GitHub passes no secrets: the action runs nothing and fails 
 never passes an unchecked request.
 
 **Shared runs** (D-007). A version is the same in any commit (config, prompts, tracked code), so the gate runs it once.
-`pr --cache DIR` keeps each version's error-free runs in `DIR/NAME/VERSION-SET.jsonl` (the newest run per case and
-repetition, raw responses next to them) and, before running the base, copies that version's runs on that set into
-`base.jsonl`, the first `k` per case and at most `base_max_age_days` old (default 7), each marked `reused`; the runner
+With `base_max_age_hours` above 0 (default 0, D-033: the base runs next to the candidate in every job),
+`pr --cache DIR` keeps each version's error-free runs in `DIR/NAME/VERSION-SET.jsonl` (per case and repetition the run
+kept first stays until it is older than the limit; raw responses next to them) and, before running the base, copies
+that version's runs on that set into `base.jsonl`, the first `k` per case and at most that many hours old, each marked
+`reused`; the runner
 then runs only what is missing. On GitHub the directory starts empty: `shared.fetch` asks the REST API for the newest
 artifact `llm-release-gate-runs-NAME-VERSION16-SET16` of this repository's own runs (not a fork's) within the age limit,
 downloads it (the redirect to storage gets no token) and adds its runs to the directory; `pr` names the versions this
@@ -238,7 +243,7 @@ of the runs this job paid for and reports `base_reused` (how many, how much olde
 runs the default branch's version on a push, a manual run or a schedule, for later requests; it reuses recent runs too,
 so a drift series needs a separate job. The price of reuse:
 drift at the provider within the age limit counts as an effect, and all requests in the window share one base sample,
-so their verdicts are not independent (`base_max_age_days: 0` for experiments that count errors). The environment of a
+so their verdicts are not independent (`base_max_age_hours: 0`, the default, for experiments that count errors). The environment of a
 request's workflow is not part of the version.
 
 ```mermaid

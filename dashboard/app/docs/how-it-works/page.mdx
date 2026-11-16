@@ -20,7 +20,7 @@ rewrites the cancellation rule in its system prompt.
    their own locked dependencies, so a request that updates an SDK is compared with the old SDK.
 3. **Each tree works out its version.** If the two [version](#what-a-version-is) hashes are equal, the pipeline is
    `unchanged` and nothing runs.
-4. **Both versions run.** The candidate (the request's version) runs `k` times on each [case](#cases) of the
+4. **Both versions run.** The candidate (the request's version) runs `k` times (or in rounds up to `max_spend_usd`) on each [case](#cases) of the
    request's test set, and the base (the target branch's version) next to it in the same job. With `base_max_age_hours`
    above 0 the gate [reuses](/docs/how-it-decides#where-the-bases-runs-come-from) an earlier job's runs of that
    version on the same set within that many hours instead.

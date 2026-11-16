@@ -256,15 +256,18 @@ max_spend_usd: 5   # per pipeline and job; give it room, see below
   paid for as pairs, the candidate's runs with the base runs they met, and buys more, so the checks never read other
   data for the rounds they read. The limit holds per job. A re-run continues for 14 days (the artifacts' default
   retention); it needs the action's artifacts and `actions: read`, and the comment says when a re-run would start
-  over instead. A push that changes the version starts over, and so does a re-run after the target branch moved.
-- **With `base_max_age_hours` above 0** the target branch keeps 5 rounds of its version; a request that needs more
+  over instead. A push that changes the version starts over, and so does a re-run after the target branch's version of the
+  pipeline changed.
+- **With `base_max_age_hours` above 0** the target branch keeps K_c rounds of its version (5, or 2 when no check can
+  block); a request that needs more
   pays for both versions from round 6 on, so one comparison mixes base runs from an earlier job with fresh ones.
 
 How much to set: five rounds of both versions at their cost per round, or of the candidate alone when the base comes
 from the cache, plus room for prices that vary. In a simulation on recorded runs of the three applications below that
 drew every run independently, the gate kept `alpha` at every limit; with 20 % of room, round 5 did not fit in one of
 20 000 simulated requests, because the estimate from round 4 ran over what was left. Runs of one job turned out alike
-(16.11.2026: up to 19 of 30 receipts answered the same in all 5 runs, and differently the day before), so treat that
+(16.11.2026: 19 of 30 receipts got the same answer in all 5 runs of a job, and one of them another answer in all 5
+runs the evening before), so treat that
 bound as optimistic until it is measured. A set with few cases needs many rounds for a pass when nothing changed (the
 table above), so give such a set more money or more cases. `max_spend_usd` needs `mean: betting` and a price for
 every model the runs call.

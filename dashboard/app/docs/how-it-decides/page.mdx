@@ -135,8 +135,9 @@ max_spend_usd: 5   # per pipeline and job; give it room, see below
   paid for as pairs, the candidate's runs with the base runs they met, and buys more, so the checks never read other
   data for the rounds they read. The limit holds per job. A re-run continues for 14 days (the artifacts' default
   retention); it needs the action's artifacts and `actions: read`, and the comment says when a re-run would start
-  over instead. A push that changes the version starts over, and so does a re-run after the target branch moved.
-- **With `base_max_age_hours` above 0** the target branch keeps 5 rounds of its version
+  over instead. A push that changes the version starts over, and so does a re-run after the target branch's version of the
+  pipeline changed.
+- **With `base_max_age_hours` above 0** the target branch keeps K_c rounds of its version (5, or 2 when no check can block)
   ([Where the base's runs come from](#where-the-bases-runs-come-from)); a request that needs more pays for both
   versions from round 6 on, so one comparison mixes base runs from an earlier job with fresh ones.
 
@@ -144,7 +145,8 @@ How much to set: five rounds of both versions at their cost per round, or of the
 from the cache, plus room for prices that vary. In a simulation on recorded runs of three applications that drew every
 run independently, the gate kept `alpha` at every limit; with 20 % of room, round 5 did not fit in one of 20 000
 simulated requests, because the estimate from round 4 ran over what was left. Runs of one job turned out alike
-(16.11.2026: up to 19 of 30 receipts answered the same in all 5 runs, and differently the day before), so treat that
+(16.11.2026: 19 of 30 receipts got the same answer in all 5 runs of a job, and one of them another answer in all 5
+runs the evening before), so treat that
 bound as optimistic until it is measured. A set with few cases needs many rounds for a pass when nothing changed
 ([the table](#how-often-the-gate-may-be-wrong)): a telecom agent with 10 tasks passes at round 10 at best. Give such
 a set more money or more cases.
@@ -216,8 +218,8 @@ Without `levels` nothing changes.
 
 By default (`base_max_age_hours: 0`) the base runs next to the candidate in every job, so a change at the provider
 between sessions hits both versions and cancels out. On 16.11.2026 two requests that changed nothing but the gate's
-version were blocked by a check that answered one way in all 5 base runs of the evening before and the other way in all
-5 candidate runs of the next afternoon; with both versions in one job that cannot happen.
+version were blocked by checks that passed in the base runs of the evening before (5 of 5 and 4 of 5) and failed in
+all 5 candidate runs of the next afternoon; with both versions in one job that cannot happen.
 
 A version stays the same version in any commit ([What a version is](/docs/how-it-works#what-a-version-is)), so with
 `base_max_age_hours` above 0, such as `24` or `48`, the gate runs it once and shares the runs. Each job uploads the runs
