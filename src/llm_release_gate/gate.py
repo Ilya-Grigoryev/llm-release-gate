@@ -559,7 +559,10 @@ def checks_lines(
             f"version ({name}).{fewer}{left}"
         )
         if once:  # the adaptive gate reads the checks once, on these runs: more rounds will not change it
-            line = f"{label}: read once, on {kb} + {kc} runs, too few for any break to be significant ({name}).{fewer}{left}"
+            line = (
+                f"{label}: read once, on {kb} + {kc} runs; {which} can block only from {need} runs of each version "
+                f"({name}).{fewer}{left}"
+            )
         return line, []
     if worse:
         line = (

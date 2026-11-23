@@ -264,3 +264,15 @@ def test_without_a_way_to_continue_the_comment_says_a_rerun_starts_over(
         "A re-run of this job starts over, as a new test" in comment
         and "Re-run this job to buy" not in comment
     )
+
+
+def test_the_checks_line_says_why_no_break_can_block_at_k_c():
+    base = {(f"c{i}", "x"): [True] * 5 for i in range(30)}
+    broken = {
+        key: [False] * 5 for key in base
+    }  # 30 fully broken: Tarone's m outgrows what 5 + 5 runs can reach
+    line, _ = gate.checks_lines(criterion.per_check(base, broken), once=True)
+    assert line.startswith(
+        "Checks: read once, on 5 + 5 runs; Tarone counts 7 checks that changed or vary"
+    )
+    assert "can block only from" in line
