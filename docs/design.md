@@ -241,7 +241,7 @@ D-029); it needs `actions:
 read`, and without it the comment says so. The verdict counts the cost
 of the runs this job paid for and reports `base_reused` (how many, how much older than the candidate). `pr --refresh`
 runs the default branch's version on a push, a manual run or a schedule, for later requests; it reuses recent runs too,
-so a drift series needs a separate job. The price of reuse:
+so a drift series needs a separate job: `pr --base HEAD --rounds K` runs a version against itself, `K` rounds in one job. The price of reuse:
 drift at the provider within the age limit counts as an effect, and all requests in the window share one base sample,
 so their verdicts are not independent (`base_max_age_hours: 0`, the default, for experiments that count errors). The environment of a
 request's workflow is not part of the version.

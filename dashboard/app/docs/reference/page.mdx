@@ -372,6 +372,7 @@ are recent ([where from](/docs/how-it-decides#where-the-bases-runs-come-from)).
 | `--list` | check `gate.yaml` and print its pipelines; runs nothing |
 | `--cache DIR` | a directory for earlier jobs' runs: the base's runs of the same version on the same set, at most `base_max_age_hours` old, are reused from it and, on GitHub, from other jobs' artifacts; with `max_spend_usd` it also keeps the request's own rounds for a re-run |
 | `--refresh` | with `--cache` and `--out`, on the target branch itself: reuse its version's recent runs, run what is missing and name them for upload; compares nothing |
+| `--rounds K` | both versions run `K` rounds and the gate decides once, in place of `k` and `max_spend_usd`; an unchanged version runs too. For measuring noise: `--base HEAD` compares a version with itself |
 
 ```sh
 uv run llm-release-gate pr --base origin/main --out gate-out

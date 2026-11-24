@@ -1237,3 +1237,26 @@ def test_a_job_whose_runs_a_rerun_cannot_find_says_it_starts_over(
     version(repo, "answer-again", adaptive(repo, 0.0001))
     _, out = cached_gate(repo)
     assert "A re-run of this job starts over" in (out / "comment.md").read_text()
+
+
+def test_rounds_run_an_unchanged_version_a_fixed_number_of_times(repo):
+    (repo / "README.md").write_text("docs only\n")
+    code, out = gate(repo, "--rounds", "3")
+    assert code == pr.PASS
+    verdict = json.loads((out / "verdict.json").read_text())
+    assert (
+        verdict["outcome"] != "unchanged"
+        and verdict["base_config"] == verdict["candidate_config"]
+    )
+    for arm in ("base", "candidate"):
+        assert sorted(r["rep"] for r in records(out / f"{arm}.jsonl")) == [0, 1, 2]
+
+
+def test_rounds_replace_the_money_limit(repo):
+    version(repo, "answer-again", adaptive(repo))
+    _, out = gate(repo, "--rounds", "2")
+    verdict = json.loads((out / "verdict.json").read_text())
+    assert verdict["runs"] == 2 and not verdict["stop"]  # not adaptive
+    assert sorted(reps(out / "candidate.jsonl")) == [0, 1]
+    with pytest.raises(SystemExit):
+        pr.main(["--base", "HEAD", "--out", str(repo.parent / "x"), "--rounds", "0"])

@@ -10,6 +10,9 @@ branch's runs of the same version on the same set, up to that age, from that dir
 (`shared`), instead of running them again. OUT/NAME/shared.txt names the arms this job paid for, for the CI to upload; --refresh runs the target branch's
 version on its own.
 
+With --rounds K both versions run K rounds and the gate decides once, even when the request leaves the version as it
+is: a job of unchanged versions measures the noise.
+
 With `max_spend_usd` (D-032) the gate buys rounds, one run of every case by both versions, until it decides or the next
 round would not fit; a re-run of the job continues with the rounds paid for and the base runs they were compared with
 (OUT/NAME/pinned.jsonl, uploaded with the candidate's runs), with or without a cache of the base.
@@ -24,6 +27,7 @@ import subprocess
 import sys
 import traceback
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from fractions import Fraction
 from pathlib import Path
@@ -837,6 +841,12 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="on the target branch: fill the cache with its version's runs; compares nothing",
     )
+    p.add_argument(
+        "--rounds",
+        type=int,
+        help="run both versions this many rounds and decide once, an unchanged version too, in place of k and "
+        "max_spend_usd: for measuring noise",
+    )
     args = p.parse_args(argv)
     try:
         settings = project.load(args.project)
@@ -850,6 +860,8 @@ def main(argv: list[str] | None = None) -> int:
         p.error("--refresh needs --cache and --out")
     if not (args.refresh or (args.base and args.out)):
         p.error("give --base and --out")
+    if args.rounds is not None and (args.rounds < 1 or args.refresh):
+        p.error("--rounds needs a count of at least 1 and does not go with --refresh")
     if args.pipeline not in (None, *settings.pipelines):
         p.error(f"gate.yaml has no pipeline {args.pipeline!r}")
     candidate, out = args.project.resolve(), args.out.resolve()
@@ -934,6 +946,8 @@ def main(argv: list[str] | None = None) -> int:
                     prices_copy,
                 )
                 notes += more
+                if args.rounds:
+                    p = replace(p, k=args.rounds, max_spend_usd=None)
                 if warning := too_few_runs(p):  # before the runs cost anything
                     print(f"{name}: {warning}", file=sys.stderr)
                 golden, set_hash = checked_set(p, candidate, dest)
@@ -948,7 +962,7 @@ def main(argv: list[str] | None = None) -> int:
                     base_config,
                     prices,
                     dest,
-                    same_layout,
+                    same_layout and not args.rounds,
                     cache and cache / name,
                     rules is not None and rules.prepare == settings.prepare,
                 )
