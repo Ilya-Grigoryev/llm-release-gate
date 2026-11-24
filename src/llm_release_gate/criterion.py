@@ -161,12 +161,16 @@ def per_check(
 
 
 @cache
-def floor(kb: int, kc: int, seed: int = 0) -> Fraction:
-    """The smallest adjusted p `whole_runs` can give with these run counts: the share of
-    its splits that are the real one (1 of all; with random splits, the real one and any
-    random copy of it)."""
+def real(kb: int, kc: int, seed: int = 0) -> tuple[int, int]:
+    """How many of `whole_runs`' splits are the real one (1, or more when random splits
+    copy it), and how many splits there are."""
     masks = splits(min(kb, MAX_RUNS), min(kc, MAX_RUNS), seed)
-    return Fraction(masks.count(masks[0]), len(masks))
+    return masks.count(masks[0]), len(masks)
+
+
+def floor(kb: int, kc: int, seed: int = 0) -> Fraction:
+    """The smallest adjusted p `whole_runs` can give with these run counts."""
+    return Fraction(*real(kb, kc, seed))
 
 
 def can_block(kb: int, kc: int, alpha: float = 0.025, seed: int = 0) -> bool:
@@ -177,19 +181,38 @@ def can_block(kb: int, kc: int, alpha: float = 0.025, seed: int = 0) -> bool:
 
 
 def weak(kb: int, kc: int, alpha: float = 0.025, seed: int = 0) -> bool:
-    """Whether a block needs every other split to look less bad: then any other check
-    that passed in exactly `kb` of the runs, in another pattern, can stop a break
-    (4 + 4 at 0.025)."""
-    low = floor(kb, kc, seed)
-    return low <= Fraction(str(alpha)) < 2 * low
+    """Whether a break can block, but not once one more split looks as bad as the real
+    one: another check that passed in exactly `kb` of the runs, in a pattern among the
+    splits (any other pattern when the test takes every split; 4 + 4 at 0.025)."""
+    copies, n = real(kb, kc, seed)
+    return Fraction(copies, n) <= Fraction(str(alpha)) < Fraction(copies + 1, n)
 
 
-def runs_to_block(alpha: float = 0.025, seed: int = 0) -> int | None:
-    """The fewest runs of each version from which a check broken in every run can block; None if no number up to
-    MAX_RUNS can."""
+def first_block(alpha: float = 0.025, seed: int = 0) -> int | None:
+    """The fewest runs of each version at which a check broken in every run can block;
+    None if no number up to MAX_RUNS can. The adaptive gate reads the checks there."""
     return next(
         (k for k in range(1, MAX_RUNS + 1) if can_block(k, k, alpha, seed)), None
     )
+
+
+def runs_to_block(
+    alpha: float = 0.025, seed: int = 0, strong: bool = False
+) -> int | None:
+    """The fewest runs of each version from which on, up to MAX_RUNS, a check broken in
+    every run can block (`strong`: and the rule is not weak); None if 10 + 10 cannot.
+    Random splits that copy the real one make this uneven in k: a smaller number may
+    block as well (`first_block`)."""
+
+    def ok(k: int) -> bool:
+        return can_block(k, k, alpha, seed) and not (strong and weak(k, k, alpha, seed))
+
+    if not ok(MAX_RUNS):
+        return None
+    k = MAX_RUNS
+    while k > 1 and ok(k - 1):
+        k -= 1
+    return k
 
 
 def splits(kb: int, kc: int, seed: int = 0) -> list[int]:

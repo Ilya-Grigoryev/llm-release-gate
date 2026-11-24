@@ -261,13 +261,14 @@ MAX_ROUNDS = 60  # the most rounds the adaptive gate buys, as experiment E-011 s
 
 def k_c(alpha: float, checks_block: bool) -> int:
     """The round at which the adaptive gate reads the checks, once (D-032): known from the settings before any run. Five,
-    or more when `alpha` is so small that a check broken in every run needs more; two when no check may block."""
+    or the first round at which a check broken in every run can block when `alpha` is so small that it needs more; two
+    when no check may block."""
     if not checks_block:
         return 2
-    need = criterion.runs_to_block(split(alpha, True)[1])
+    need = criterion.first_block(split(alpha, True)[1])
     if need is None:
         raise ValueError(
-            f"with alpha {alpha:g} no number of rounds lets a check block: raise alpha"
+            f"with alpha {alpha:g} no number of rounds lets a check block: raise alpha, or set checks: report"
         )
     return max(5, need)
 
@@ -531,9 +532,10 @@ def checks_lines(
     if not c.units:
         return f"{label}: no check was scored in both versions.{left}", []
     name = f"test over whole runs, α {c.alpha:g}"
+    every = math.comb(kb + kc, kb) <= criterion.EXHAUSTIVE
     test = f"{name}, on {kb} + {kc} runs, " + (
         f"all {c.splits} splits"
-        if math.comb(kb + kc, kb) <= criterion.EXHAUSTIVE
+        if every
         else f"{c.splits - 1} random splits, seed {c.seed}"
     )
     if c.broken:
@@ -578,7 +580,7 @@ def checks_lines(
             else f"with {kb} + {kc} runs no break can be significant"
         )
         return f"{label}: {head}; {when} ({name}).{fewer}{left}", []
-    strong = criterion.runs_to_block(c.alpha / 2, c.seed)
+    strong = criterion.runs_to_block(c.alpha, c.seed, strong=True)
     fix = (
         "; a larger `alpha` avoids that"
         if once  # the adaptive gate picks the rounds itself
@@ -586,9 +588,14 @@ def checks_lines(
         if strong
         else ""
     )
+    which = (  # with random splits, only a pattern one of them drew
+        f"in another pattern{' (one fixed in every run too)' if kb == kc else ''}"
+        if every
+        else f"in a pattern one of the {c.splits - 1} random splits drew"
+    )
     soft = (
         f" With {kb} + {kc} runs the rule is weak: any other check that passed in exactly {kb} of the {kb + kc} runs, "
-        f"in another pattern{' (one fixed in every run too)' if kb == kc else ''}, stops a break from blocking{fix}."
+        f"{which}, stops a break from blocking{fix}."
         if criterion.weak(kb, kc, c.alpha, c.seed)
         else ""
     )

@@ -84,6 +84,21 @@ def hours(given: dict, path: Path, where: str) -> dict:
     return {"base_max_age_hours": given["base_max_age_days"] * 24}
 
 
+def adaptive(p: Pipeline, path: Path, where: str) -> None:
+    """Adaptive runs read the checks at a round K_c set by alpha: refuse, before anything is
+    paid, an alpha at which no round lets a check block."""
+    if p.max_spend_usd is None or not p.checks_block:
+        return
+    if (
+        criterion.first_block(p.alpha / 2) is None
+    ):  # the checks' share, as `gate.k_c` reads it
+        least = 2 * min(criterion.floor(k, k) for k in range(1, criterion.MAX_RUNS + 1))
+        raise ValueError(
+            f"{path}: {where}max_spend_usd with checks that may block needs alpha {float(least):g} or more, or "
+            f"checks: report: at alpha {p.alpha:g} no number of rounds lets a check block"
+        )
+
+
 def load(directory: Path) -> Project:
     """Read DIRECTORY/gate.yaml. Raises ValueError naming the file and each broken field."""
     path = Path(directory) / FILE
@@ -136,19 +151,9 @@ def load(directory: Path) -> Project:
             p.get("inputs-url"),
             **settings,
         )
-        # adaptive runs read the checks at a round K_c fixed by alpha: refuse before anything is paid
-        if (
-            pl.max_spend_usd is not None
-            and pl.checks_block
-            and criterion.runs_to_block(pl.alpha / 2) is None
-        ):
-            least = 2 * min(
-                criterion.floor(k, k) for k in range(1, criterion.MAX_RUNS + 1)
-            )
-            raise ValueError(
-                f"{path}: pipelines.{name}: max_spend_usd with checks that may block needs alpha {float(least):g} "
-                f"or more: at alpha {pl.alpha:g} no number of rounds lets a check block"
-            )
+        adaptive(pl, path, f"pipelines.{name}: ")
+    # a pipeline the target branch does not list runs under the top-level settings
+    adaptive(Pipeline("", "", "", **top), path, "top-level settings: ")
     return Project(
         tuple(raw["prepare"]) if "prepare" in raw else None,
         pipelines,

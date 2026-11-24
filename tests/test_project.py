@@ -217,10 +217,17 @@ def test_a_spend_limit_refuses_an_alpha_at_which_no_check_can_block(tmp_path):
     with pytest.raises(ValueError) as e:
         load(tmp_path, text.format(""))
     assert str(e.value).endswith(
-        "pipelines.a: max_spend_usd with checks that may block needs alpha 0.001 or more: at alpha 0.0009 no number "
-        "of rounds lets a check block"
+        "pipelines.a: max_spend_usd with checks that may block needs alpha 0.001 or more, or checks: report: at "
+        "alpha 0.0009 no number of rounds lets a check block"
     )
-    assert (
-        load(tmp_path, text.format(", checks: report")).pipelines["a"].alpha == 0.0009
-    )
+    report = text.replace("alpha: 0.0009", "alpha: 0.0009\nchecks: report")
+    assert load(tmp_path, report.format("")).pipelines["a"].alpha == 0.0009
     assert load(tmp_path, text.replace("0.0009", "0.001").format("")).pipelines["a"]
+
+
+def test_the_top_level_settings_a_new_pipeline_would_take_are_checked_too(tmp_path):
+    text = "mean: betting\nprices: p.yaml\nmax_spend_usd: 2\nalpha: 0.0009\npipelines: {a: {config: c, golden: g, alpha: 0.05}}\n"
+    with pytest.raises(
+        ValueError, match="top-level settings: max_spend_usd with checks that may block"
+    ):
+        load(tmp_path, text)

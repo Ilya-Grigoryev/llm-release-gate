@@ -23,7 +23,8 @@ WRONG_DATE = replace(RIGHT, output={**RIGHT.output, "date": "02/02/2026"})
 
 def test_k_c_is_five_unless_alpha_asks_for_more_and_two_without_blocking_checks():
     assert [gate.k_c(a, True) for a in (0.01, 0.025, 0.05, 0.1, 0.4)] == [5] * 5
-    assert gate.k_c(0.001, True) == criterion.runs_to_block(0.0005) > 5
+    # the first round at which a full break can block: 7, though 8 cannot (a random copy of the real split)
+    assert gate.k_c(0.001, True) == criterion.first_block(0.0005) == 7
     assert gate.k_c(0.05, False) == 2
 
 

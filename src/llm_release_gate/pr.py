@@ -640,9 +640,10 @@ def too_few_runs(p: project.Pipeline) -> str | None:
     although the settings let checks block; it names the `k` and the `alpha` that would."""
     if not p.checks_block or p.max_spend_usd is not None:  # adaptive: K_c covers it
         return None
-    need = criterion.runs_to_block(split(p.alpha, True)[1])
-    if need is not None and p.k >= need:
+    share = split(p.alpha, True)[1]
+    if criterion.can_block(p.k, p.k, share):
         return None
+    need = criterion.runs_to_block(share)  # from it on every k can
     # one check passes in all k base runs and fails in all k candidate runs; the checks get half of alpha
     alpha = math.ceil(20_000 * criterion.floor(p.k, p.k)) / 10_000
     return (

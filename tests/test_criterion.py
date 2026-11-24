@@ -302,7 +302,7 @@ def test_at_5_runs_a_break_blocks_while_few_other_checks_share_its_extremity(
 
 
 @pytest.mark.parametrize(
-    "alpha, k", [(0.025, 4), (0.0125, 5), (0.005, 5), (0.05, 3), (0.0005, 7)]
+    "alpha, k", [(0.025, 4), (0.0125, 5), (0.005, 5), (0.05, 3), (0.0005, 9)]
 )
 def test_runs_to_block_is_the_fewest_runs_a_full_break_needs(alpha, k):
     assert runs_to_block(alpha) == k
@@ -329,6 +329,15 @@ def test_the_floor_counts_random_copies_of_the_real_split():
     assert whole_runs(full(8, 8), full(0, 8), alpha=0.0005).outcome == "pass"
     assert whole_runs(full(9, 9), full(0, 9), alpha=0.0005).outcome == "block"
     assert criterion.floor(4, 4) == Fraction(1, 70)
+    assert (runs_to_block(0.0005), criterion.first_block(0.0005)) == (9, 7)
+
+
+def test_weak_means_one_more_split_as_bad_stops_a_break():
+    """At 8 + 8 the real split has a random copy: 2 of 2000. One more such split adds 1 of 2000."""
+    assert weak(8, 8, 0.0012) and not weak(8, 8, 0.0016)
+    assert weak(4, 4, 0.025) and not weak(4, 4, 0.03)
+    assert runs_to_block(0.025, strong=True) == 5
+    assert runs_to_block(0.0012, strong=True) == 9
 
 
 @pytest.mark.parametrize(
