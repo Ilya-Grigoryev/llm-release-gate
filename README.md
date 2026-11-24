@@ -309,7 +309,7 @@ without it the base runs again and the comment says so.
 The rules (`delta`, `alpha`, `k`, `max_spend_usd`, `budgets`, `prices`, `base_max_age_hours`) come from the target branch's `gate.yaml`, so editing the rules in a
 request does not loosen that request's gate: new rules apply after merge, and the comment says when a request changes
 them or adds a pipeline. Both versions run on the request's test set, so a request could edit the cases that would
-catch it. A request that changes the set's files, as the target branch's `gate.yaml` names them (the cases git tracks
+catch it. A request that changes the set's files, as the target branch's `gate.yaml` names them (the files git tracks
 under `golden`, the `manifest`), gets `set changed` (exit 13) where it would exit 0: the comment names the cases added,
 removed and edited, and a maintainer reviews them and merges over the check. A quality, budget or inconclusive verdict
 stays and gets the same note. A request that removes a pipeline (or renames it, which looks the same)

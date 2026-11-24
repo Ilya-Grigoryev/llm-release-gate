@@ -501,7 +501,7 @@ a cached directory.
 | 10 | `quality fail` | the rule on the mean blocked, or a check that may block got significantly worse: a normal or critical one under `checks: block`, a critical one under `checks: report` |
 | 11 | `inconclusive` | the betting rule could not decide with these runs and no check blocked; or a request removes or renames a pipeline: each `pr` step that would exit 0 or 13 exits 11, and the comments get a note. The naive rule never gives it |
 | 12 | `budget fail` | quality passed; a cost or latency limit did not |
-| 13 | `set changed` | `pr` only: it would exit 0, but the request changes the test set the target branch's `gate.yaml` names: the cases git tracks under `golden`, the `manifest`, or the set itself when both trees hold it. `set_change` says what changed |
+| 13 | `set changed` | `pr` only: it would exit 0, but the request changes the test set the target branch's `gate.yaml` names: the files git tracks under `golden`, the `manifest`, or the set itself when both trees hold it. `set_change` says what changed |
 | 20 | `infra error` | the runs cannot be compared, a step could not run, or the gate failed |
 | 1, 2 | — | a Python crash or a usage error, never read as a verdict |
 
@@ -560,7 +560,7 @@ paid for also go up as `llm-release-gate-runs-NAME-VERSION-SET` (16 characters o
 | `models_without_date` | undated model names in the runs |
 | `runs_per_case` | `{base, candidate}` |
 | `base_reused` | `{runs, days_before_candidate}`: base runs that came from earlier jobs, and how much earlier the oldest ran; `{0, null}` when none |
-| `set_change` | `pr` only: how the request changes the test set, `null` if it does not or the target branch names no set of this pipeline. `files` (paths from the project whose content differs, as git tracks them), `added`, `removed` and `edited` (case ids: from both sets when both trees hold them, else from the manifests' `ids`; `edited` then stays empty), and `outcome`, the verdict on the request's set (`pass`, `unchanged`, `no base` under `set changed`) |
+| `set_change` | `pr` only: how the request changes the test set, `null` if it does not or the target branch names no set of this pipeline. `files` (paths from the project, tracked under `golden` or the manifest, whose content differs), `added`, `removed` and `edited` (case ids: from both sets when both trees hold them, else from the manifests' `ids`; `edited` then stays empty), and `outcome`, the verdict on the request's set (`pass`, `unchanged`, `no base` under `set changed`) |
 
 `unchanged` writes only `outcome`, `exit_code`, the three hashes, `set_change`, and `base_mean`, `candidate_mean` and
 `diff_pp` as `null`. `set changed` keeps the fields of the verdict it replaces, named in `set_change.outcome`. `no base` has no `limit_pp`, `rule`, `cases`, `worse`, `runs`, `threshold_pp`, `relative`, `alpha`, `mean`, `checks`,

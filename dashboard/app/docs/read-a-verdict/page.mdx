@@ -166,11 +166,12 @@ cases that catch it would pass the same way. So the job fails with exit 13 until
 merges over the check.
 
 The line under the title names what changed: the cases added, removed and edited, then the files. The gate compares
-the files the target branch's `gate.yaml` names: the cases git tracks under `golden`, and the `manifest`. A reformatted
-case counts too. For a set kept out of git, such as one a CI step downloads, the gate sees a change in the manifest, or
-in the set itself when `prepare` builds it in both trees; pin such a set with a `manifest`. A request that changes code
-and cases together gets `set changed` when the code passes. To have the code judged on reviewed cases, merge the case
-edits first, in their own request.
+what the target branch's `gate.yaml` names: the files git tracks under `golden` (inputs too) and the `manifest`. A
+reformatted case counts, and so does a branch that lacks cases merged to the target branch after it forked: the gate
+compares the two trees, so update the branch. For a set kept out of git, such as one a CI step downloads, the gate sees
+a change in the manifest, or in the set itself when `prepare` builds it in both trees; pin such a set with a
+`manifest`. A request that changes code and cases together gets `set changed` when the code passes. To have the code
+judged on reviewed cases, merge the case edits first, in their own request.
 
 ### Infra error
 

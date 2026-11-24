@@ -86,7 +86,7 @@ gate: a raised `delta` applies after merge. If the target branch has no `gate.ya
 rules hold.
 
 Both versions run on the request's test set, so a request could pass by editing the cases that catch it. If it changes
-the files of a set the target branch's `gate.yaml` names (the cases git tracks under `golden`, or the `manifest`), a
+the files of a set the target branch's `gate.yaml` names (the files git tracks under `golden`, or the `manifest`), a
 verdict that would exit 0 becomes [`set changed`](/docs/read-a-verdict#set-changed) (exit 13). The comment names the
 cases added, removed and edited; a maintainer reviews them and merges over the check. A new pipeline has no set to
 compare with.
