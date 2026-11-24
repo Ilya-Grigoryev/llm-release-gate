@@ -1,135 +1,172 @@
 # Drift job: pre-registration
 
-Registered 24.11.2026, before the first run. Changes after this commit go to `deviations.md` with their date; an analysis
-not described here is reported as exploratory. Rules and parameters of the compared decision rules, the simulator and
-the other data sets are in the main pre-registration (`preregistration.md`, due 30.11.2026), which is committed before any
-of this data is analysed.
+Registered 24.11.2026, before the first run (first version `3ee64c8`; this version, after review, also before any run).
+Changes after the first scheduled run go to `deviations.md` with their date, whether or not data has been looked at; an
+analysis not described here is reported as exploratory. Rules and parameters of the compared decision rules, the
+simulator and the other data sets are in the main pre-registration (`preregistration.md`, due 30.11.2026), committed
+before any of this data is analysed.
 
-## Questions
+## Questions and expectations
 
 1. Are the rounds of one CI job independent draws, and how much of the variance lies between days, between jobs on the
-   same day and between runs within one job? (Experiment 1)
-2. Do shifts between sessions hit two versions differently: does the difference between the old and the new version of
-   a declared change move from job to job? (Experiment 1)
-3. Do jumps in the mean score line up with what the provider reports or with the time of day? (Experiment 1)
-4. How often does a rule block an unchanged version with both sides from one job, and how does the rate change when the
-   two sides come from jobs hours apart? (Experiment 2, the drift-job part)
+   same day and between runs within one job? (Experiment 1.) Expected: job effects shared by both sides cancel in the
+   difference the gate decides on, so rounds of an unchanged pair look independent; the score of a single side varies
+   between jobs at least for the receipt reader (an earlier look at recorded runs found a correlation of about 0.35).
+2. Do shifts between sessions hit two different versions differently: does the difference of a declared change move from
+   job to job? (Experiment 1.) No expectation: earlier data were too few.
+3. Do jumps in the mean score line up with what the provider reports or with the time of day? (Experiment 1, descriptive.)
+4. How often does a rule block an unchanged version within 5 rounds with both sides from one job, and how does the rate
+   change when the two sides come from jobs hours apart? (Experiment 2, the drift-job part.)
 
 ## Design
 
-**Settings.** All on `claude-haiku-5-5`, the model each application's config asks for, frozen at the tag `drift/base` in
-each application's repository for the whole series:
+**Settings.** All on `claude-haiku-5-5`, the model each application's config asks for. Each application's version is
+frozen for the whole series by the tag `drift/base`; the declared changes by `drift/change-1` (commits in the table below).
 
-| Setting | Repository, pipeline | Cases | Schedule (UTC; Vienna is UTC+1) |
-|---|---|---|---|
-| Support agent, alone | `workbench-support`, `support` (`golden/solo`) | 53 | daily 02:23 (night) and 14:23 (afternoon) |
-| Receipt reader, one call | `receipt-intake`, `sroie-image` (`golden/sroie`) | 30 | daily 14:53 |
-| Telecom (tau2-bench) | `telecom-support`, `telecom` (`golden/telecom-pr`) | 10 | Monday and Thursday 14:37 |
+| Setting | Repository, pipeline | Cases | Unchanged pair (UTC; Vienna is UTC+1) | Declared change |
+|---|---|---|---|---|
+| Support agent, alone | `workbench-support`, `support` (`golden/solo`) | 53 | daily 02:23 and 14:23 | in the 14:23 job |
+| Receipt reader, one call | `receipt-intake`, `sroie-image` (`golden/sroie`) | 30 | daily 02:53 and 14:57 | in the 14:57 job |
+| Telecom (tau2-bench) | `telecom-support`, `telecom` (`golden/telecom-pr`) | 10 | Monday and Thursday 15:37 | none (cost) |
 
-Not in the series from the start: the support agent against the simulated user (cost, see below) and the receipt reader
-with two calls (its pipeline is not finished). Either may join through an amendment registered before its first run; it
-is then analysed by the same rules as its own, shorter series.
+Not in the series from the start: the support agent against the simulated user (cost) and the receipt reader with two
+calls (its pipeline is not finished). Either may join through an amendment registered before its first run, analysed by
+the same rules as a series of its own.
 
-**A job.** A scheduled GitHub Actions workflow (`.github/workflows/drift.yml`) checks out `drift/base` and runs
-`llm-release-gate pr --base HEAD --rounds 5` (orchestration from gate `v0.1.0-dev.21`; the runner comes from the
-application's locked environment, gate `v0.1.0-dev.20`, record version 7). Both sides are the same version, each in its
-own tree and process, run in parallel in one job; each side runs every case 5 times (5 rounds), exactly as the gate runs
-its first batch of rounds. A job gives 10 runs of the unchanged version: 5 per side.
+**Declared changes.** Support agent: "Drop the member check and the overlap rule" (10 lines of `policy.md`; demo pull
+request workbench #2: −6.4 points, interval [−13.1, −1.9], after 5 rounds on 15.11.), a break near δ. Receipt reader:
+"List the fields in the order a receipt prints them" (demo pull request receipt #1: −0.17 points, a pass), a different
+prompt with the same meaning: whether a session shifts it differently from the original is the question.
 
-**The declared change.** In every afternoon job of the support agent, after the unchanged pair, the same job runs
-`pr --base drift/base --rounds 5` from the tag `drift/change-1`: `drift/base` plus the commit "Drop the member check and
-the overlap rule" (10 lines of `policy.md`; demo pull request workbench #2, measured at −6.4 points, interval
-[−13.1, −1.9], after 5 rounds on 15.11.). It gives 5 runs of each version, in one job, after the unchanged pair.
+**A job.** The scheduled workflow `.github/workflows/drift.yml` checks out `drift/base` and, in one step, runs the
+unchanged pair `llm-release-gate pr --base HEAD --rounds 5` and, where scheduled, the change pair
+`pr --base drift/base --rounds 5` from `drift/change-1`. Orchestration comes from gate `v0.1.0-dev.21`; the runner from
+the application's locked environment, gate `v0.1.0-dev.20` (record version 7). In each pair both sides run in parallel,
+each in its own tree and process; each side's runner runs every case 5 times in one call with 4 workers, case by case, as
+the gate does with a fixed `k`. A "round" is therefore the repetition index, not a slice of time. The two pairs of a job
+alternate their order: the change pair first on odd UTC dates, second on even ones. The verdict each pair records is the
+gate's at a fixed 5 rounds, not the adaptive gate's.
 
 **Duration.** From the first scheduled run (25.11.2026) to 05.01.2027 inclusive; then the schedules are removed.
-Expected: 84 support jobs, 42 receipt jobs, 12 telecom jobs, 42 declared-change pairs. A GitHub schedule may start late
-or skip a run; actual start times are taken from the records.
+Expected: 84 support jobs (42 with the change), 84 receipt jobs (42 with the change), 12 telecom jobs. Only runs started
+by the schedule enter the analysis: manual runs are smoke tests, and failed jobs are not re-run.
 
-**What every run records** (record version 7): `model` as the API reports it, `requested_model`, `request_id`,
-`timestamp`, `retries`, `usage` with cost, `ci_job` (repository, run id, attempt, job), `config_hash`, `set_hash`,
-per-check results and the case score. The provider returns no other version information that the runner keeps.
+**What is recorded.** Every run (record version 7): `model` as the API reports it, `requested_model`, `request_id`,
+`timestamp` (end of the run), `retries`, token counts, `ci_job`, `config_hash`, `set_hash`, per-check results and the case
+score. The records carry no cost (the gate's runner is not given prices); cost is computed from the tokens with each
+application's `prices.yaml`, as the gate's `verdict.json` does. Each job also writes `meta.json`: event, schedule, run id
+and attempt, runner name, image OS and version, uv version, gate versions, start and end time and exit code of each pair.
+The gate's console output goes to a file in the artifact, not to the Actions log.
 
-**Data.** The workflow uploads each job's output as an artifact (kept 90 days); `fetch-drift.sh` copies them to
-`data/runs/drift/` at least once a week. Nothing is deleted or rewritten.
+**Data.** Each job's output is an artifact (kept 90 days). `fetch-drift.sh` copies every job, with the run's metadata
+from the GitHub API, to `data/runs/drift/` at least once a week; nothing is deleted or rewritten.
 
-**Blinding.** Until the analysis (after the last job), monitoring reads only operational fields: errors, retries, cost,
-`ci_job`, counts of runs. Scores, verdicts and comments of drift jobs are not opened.
+**Blinding.** Until the analysis (after 05.01.2027), monitoring uses only `drift-status.py`, which prints operational
+fields (jobs, runs, errors, retries, tokens, cost, `ci_job`), never scores, checks or verdicts.
 
-**Exclusions.** A job with an infrastructure error is dropped. A job in which more than 10 % of the runs ended with an
-error is dropped; otherwise its errored runs are dropped and the rest kept. A re-run of a job (attempt 2 or later) is a
-job of its own.
+**Stop and cuts.** The cost is checked weekly against a forecast of the whole series. If the forecast exceeds $150, the
+series is cut in this order until it fits: (1) the receipt reader's change pair; (2) the support agent's change pair on
+every other day; (3) telecom once a week. The series stops if it has cost $150.
 
-**Stop.** If the series has cost more than $150, the schedules are removed and the series is analysed as far as it got.
+**Cost (estimate).** A round of both sides: support $0.158, receipt $0.021, telecom $0.556 (demo pull requests of
+15.–16.11.). Support 84 × $0.79 = $66; its change 42 × $0.79 = $33; receipt 84 × $0.105 = $9; its change 42 × $0.105 =
+$4; telecom 12 × $2.78 = $33; smoke tests about $1: about $147, about $25 a week. The simulated-user setting would add
+about $1.15 a job.
 
-**Cost (estimate).** A round of both sides: support $0.16, receipt $0.02, telecom $0.56. Support 84 × $0.80 = $67,
-declared change 42 × $0.80 = $34, receipt 42 × $0.10 = $4, telecom 12 × $2.80 = $34: about $139, about $23 a week.
-The simulated-user setting would add about $1.15 a job ($48 for one job a day).
+**Commits frozen by the tags** (the tags can move; these cannot):
+
+| Repository | `drift/base` | `drift/change-1` |
+|---|---|---|
+| `workbench-support` | `2d6bac65ece2013982e5fbdcdafe8a10f3ed4aae` | `fddf8cd0108adc9ec870e54137fa446ee6134142` |
+| `receipt-intake` | `38e31ef3261b3f87d743c2b3fbcf17d2c5eb0ed1` | `1d899a035f70a4df7ebe903046818c48b70f38f0` |
+| `telecom-support` | `2402e1784a26ce6cf9fefc0e7fc2092b8e4e905e` | none |
 
 ## Measures
 
-- `S`: the score of a run, the mean case score over the set's cases (as the gate computes it).
-- `D_t = S_c,t − S_b,t`: the difference between the two sides in round `t` of one job.
-- For each check: its pass rate in a run, over the cases it applies to.
+- `S`: the score of a run, the mean case score over the set's cases with a usable record.
+- `D_t = S_c,t − S_b,t`: the difference between the two sides of a pair for repetition `t`.
+- Per check: its pass rate in a run, over the cases it applies to.
+- Start time of a side: the earliest `timestamp` of its records. Day: the UTC date of the job's start.
+- Gap between two sides: the absolute difference of their start times, in hours.
+
+## Exclusions
+
+The unit is the record. A side's repetition in which more than 10 % of the cases have no error-free record is dropped;
+otherwise `S` is taken over the cases that have one. A pair in which either side keeps fewer than 3 repetitions is
+dropped. A job that produced no usable records (checkout, setup or test set failed, timeout) is dropped. The gate's exit
+code is not used. The number of dropped pairs and jobs and their times are reported. In every analysis each setting must
+show one `config_hash`, one `set_hash` and one `requested_model` per side type; anything else is reported and dropped.
 
 ## Analysis
 
-All per setting. Intervals are 95 %; bootstrap intervals resample whole days (2 000 resamples, percentile), so they hold
-when jobs of one day are correlated. In the settings with one job a day, day and job cannot be separated: they are
-reported as one level.
+Per setting. Intervals are 95 %. Bootstraps resample whole days with replacement, 2 000 resamples, seed 20261124,
+percentile intervals; pairs of sides are only formed between distinct original jobs. Telecom (12 jobs) is reported
+descriptively throughout: its power is too low for any decision below.
 
-**Q1 — independence of rounds (primary).** The intraclass correlation of `D_t` within jobs, `ρ_D`, by the one-way
-random-effects ANOVA estimator over the jobs' unchanged pairs (5 rounds each), truncated at 0, with a bootstrap interval.
-The gate decides on `D_t`, so `ρ_D` is what its guarantee assumes to be 0. Effective number of rounds in a job:
-`5 / (1 + 4 ρ_D)`.
+**Q1 — independence of rounds (primary).** For each pair type (unchanged pair, change pair), `ρ_D`: the intraclass
+correlation of `D_t` within jobs by the one-way random-effects ANOVA estimator `(F − 1) / (F + 4)` with `F = MSB / MSW`,
+truncated at 0, and its exact interval from the F distribution with `J − 1` and `4J` degrees of freedom (Searle).
 
-**Decision on the unit of observation.**
-- The upper bound of `ρ_D` is below 0.10 in every setting: rounds in a job count as independent; the run stays the unit
-  and the gate stays as it is.
-- `ρ_D` (the estimate) is 0.10 or more in some setting: for that setting the between-job part is large; we report what
-  requiring runs from at least two jobs, or the job as the unit, costs in money and time per decision, from the recorded
-  cost and duration of the jobs.
-- Otherwise (estimate below 0.10, upper bound at or above): undetermined; the gate stays as it is and the setting is named
-  under threats to validity.
+Decision per setting:
+- **independent**: the upper bound of `ρ_D` is below 0.10 for every pair type of the setting. The run stays the unit and
+  the gate stays as it is.
+- **large**: for some pair type the F test of no job effect rejects at α = 0.05 and the estimate is 0.10 or more. We
+  report what requiring runs from at least two jobs, or the job as the unit, costs in money and time per decision, from
+  the recorded cost and duration of the jobs.
+- otherwise **undetermined**: the gate stays as it is and the setting is named under threats to validity.
 
-At 0.10, 5 rounds of one job are worth about 3.6 independent rounds.
+At 0.10, 5 rounds of one job are worth about 3.6 independent rounds. Power by simulation (normal data, 4 000 series): with
+84 jobs, P(independent | ρ_D = 0) = 0.69 and P(large | ρ_D = 0.2) = 0.98; with 42 jobs, 0.38 and 0.92. The coverage of
+the upper bound at ρ_D = 0.10 is 97–98 %. For the support agent and the receipt reader the decision needs both pair types,
+so "independent" is reached with probability about 0.26 even if rounds are independent; "undetermined" is the expected
+outcome under low power and is reported as such.
 
-**Q1 — variance split (descriptive, Table 10).** The run scores `S` of the unchanged version (both sides pooled, side as a
-fixed effect) are split into days, jobs within a day and runs within a job by a nested random-effects model fitted by
-REML. Reported: the share of each part with bootstrap intervals, the within-job intraclass correlation of `S` and the
-effective sample size `10 / (1 + 9 ρ_S)` of one job's runs. The same split is made for the pass rate of each check;
-reported as the distribution over checks, naming the checks whose between-job share is above one half.
+**Q1 — variance split (descriptive, Table 10).** The run scores `S` of the unchanged pair (both sides; side and time of day
+as fixed effects) are split into days, jobs within a day and runs within a job by a nested random-effects model fitted by
+REML; in telecom, with one job a day, into jobs and runs. Reported: the share of each part with bootstrap intervals, the
+within-job intraclass correlation `ρ_S` of one side's runs and its effective sample size `5 / (1 + 4 ρ_S)`. The same
+split for the pass rate of each check that varies at all; checks without variance are counted, and the checks whose
+between-job share is above one half are named.
 
-**Q2 — shifts that hit two versions differently.** For each declared-change job, `Δ_j`, the mean over its 5 rounds of
-`S_new − S_old`, with its within-job variance. Heterogeneity across jobs: Cochran's `Q` and the DerSimonian–Laird `τ²`,
-tested at α = 0.05. The same is computed for the unchanged pair of the same jobs as a control. The change is said to move
-with the session if its `Q` test rejects and its `τ²` exceeds the upper bound of the control's.
+**Q1 — dependence within a run (descriptive).** The design effect of the cases of one run: the variance of `D_t` over the
+unchanged pairs against `Σ_i Var(d_i) / N²`, where `d_i` is case `i`'s difference between the sides and `N` the number of
+cases. Handed to the synthetic simulation (experiment 8) with `ρ_D` of both pair types, `τ²` of the change and the
+between-day variance of `S`.
 
-**Q3 — jumps.** The mean score of each job over the six weeks, one line per setting (Fig. 5b). A job is a jump if its
-mean lies more than 3 standard errors (from its own runs) away from the median of the 7 days around it. Jumps are listed
-next to the `model` values the API returned in that job and in the job before, and the time of day. For the support agent,
-night and afternoon job means are compared by Welch's t-test (α = 0.05). Descriptive; no claim depends on it.
+**Q2 — shifts that hit two versions differently.** For the change pairs, a one-way ANOVA on `D_t` by job: the F test of
+no job effect (α = 0.05) and `τ² = max(0, (MSB − MSW) / 5)`. The control is the unchanged pair of the same jobs. The
+change **moves with the session** if its F test rejects and the bootstrap lower bound of `τ²_change − τ²_control` is above
+0; it **does not move** if the upper bound of its `ρ_D` is below 0.10; otherwise undetermined.
 
-**Q4 — false blocks on unchanged versions.** For every rule of the main pre-registration (the gate, its three
-comparators and the five reference rules, with the parameters fixed there), on the drift jobs:
-- **same job**: one decision per job, its side `b` against its side `c`, rounds fed in order; the false-block rate is the
-  share of jobs blocked, with a Wilson interval (jobs are the units). A rule that needs more than 5 rounds ends undecided,
-  which is not a block; undecided shares are reported apart. The gate's own verdict, recorded by the job, is reported too.
-- **hours apart**: side `b` of job `i` against side `c` of job `j`, every ordered pair `i ≠ j` of one setting, gap =
-  the difference of their start times. Rates by gap: 12 h, 24 h, 36–48 h, 3–6 days, 7–13 days, 14 days or more, with
-  bootstrap intervals.
-- **Validity window.** The first gap whose bootstrap lower bound lies above the same-job rate marks where the rate starts
-  to rise; the recommended validity window is the largest gap before it. If no gap rises, the window is at least the
-  largest gap observed. The support agent's schedule gives no gap between 0 and 12 hours, so the window is resolved to
-  12 hours at best.
+**Q3 — jumps (descriptive).** The mean score of each job over the series, one line per setting (Fig. 5b). A job is a jump
+if its mean lies more than 3 × 1.4826 × MAD away from the median of the job means within 3 days either side (telecom: 10
+days), the window cut at the ends of the series. Jumps are listed with the `model` values the API returned in that job and
+the one before, and the time of day. Night against afternoon: paired by date, a t test on the job means of the two jobs of
+each day (support agent, receipt reader).
 
-**Confirmation and refutation.** Q1: independent rounds are confirmed if the first branch of the decision holds and
-refuted if the second does. Q2: confirmed if the change moves with the session as defined above. Q4: the gate keeps
-false blocks at its level if the upper Wilson bound of its same-job rate is at most α = 0.05 (its false-block level for
-the whole gate).
+**Q4 — false blocks on unchanged versions.** For every rule of the main pre-registration, with its parameters fixed there,
+rounds fed in order and the rule stopped at 5 rounds (a rule still undecided at 5 has not blocked; undecided shares are
+reported apart):
+- **same job**: one decision per unchanged pair, its side `b` against its side `c`. False-block rate: share of jobs
+  blocked, Wilson interval. For the gate, per setting: false blocks within 5 rounds are **at its level** if the upper
+  bound is at most α = 0.05, **above** if the lower bound exceeds 0.05, otherwise undetermined. Only the support agent and
+  the receipt reader (84 jobs each) can reach "at its level", and only with no block in at least 73 jobs.
+- **apart**: side `b` of one pair against side `c` of another pair of the same setting and version. Gap bins in hours,
+  half-open: [0, 0.5) (the unchanged pair against the change pair's old side, the same version run minutes later in the
+  same job), [0.5, 18), [18, 30), [30, 54), [54, 168), [168, 336), [336, ∞). Per bin, the rate and its difference from the
+  same-job rate, `Δ_g`, with bootstrap intervals.
+- **Validity window** (the gate, support agent): a bin is **safe** if the upper bound of `Δ_g` is at most 0.025 and the
+  bound holds for every shorter bin; the rate **rises** at the first bin whose lower bound of `Δ_g` is above 0. The
+  recommended window is the upper edge of the last safe bin before the first rise; with no safe bin, no reuse is
+  recommended. As a more sensitive measure, the variance of the pair mean `D̄` is reported by bin.
+
+**Confirmation and refutation** are the decisions named above, per setting.
 
 ## Threats known in advance
 
-- 12 hours between support jobs: windows shorter than that are not resolved.
-- One model family and one provider; three applications.
-- GitHub-hosted runners differ between jobs; the runner name is not recorded, `ci_job` is.
-- Jobs follow a fixed clock: time of day and day of week are partly confounded with the schedule.
+- Low power for "independent" and for receipt and telecom false-block rates; the outcomes say so.
+- Support and receipt jobs come 12 hours apart: windows between 30 minutes and 12 hours are not resolved.
+- One model family, one provider, three applications; one API key shared with other work in December (pools are recorded
+  away from the drift times).
+- GitHub-hosted runners differ between jobs and their images change over six weeks; `meta.json` records them.
+- Fixed clock times: time of day and day of week are partly confounded with the schedule.
