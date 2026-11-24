@@ -47,7 +47,9 @@ gate `v0.1.0-dev.20` (record version 7). In each pair both sides run in parallel
 each in its own tree and process; each side's runner runs every case 5 times in one call with 4 workers, case by case, as
 the gate does with a fixed `k`. A "round" is therefore the repetition index, not a slice of time. The two pairs of a job
 alternate their order: the change pair first on odd UTC dates, second on even ones. The verdict each pair records is the
-gate's at a fixed 5 rounds, not the adaptive gate's.
+gate's at a fixed 5 rounds, not the adaptive gate's. That recorded verdict comes from the
+tree's gate `v0.1.0-dev.20` (Fisher with Tarone's correction on checks) and is not used: Q4 recomputes every rule from
+the records.
 
 **Duration.** From the first scheduled run (25.11.2026) to 05.01.2027 inclusive; then the schedules are removed.
 Expected: 84 support jobs (42 with the change), 84 receipt jobs (42 with the change), 12 telecom jobs. Only runs started

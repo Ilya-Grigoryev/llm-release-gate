@@ -38,8 +38,8 @@ before its first run.
 
 ## The gate under test
 
-AgentiCI is the gate in this repository (`llm-release-gate`) at the feature-freeze tag of 30.11.2026 [tag set at the
-freeze]. The simulator calls the gate's own decision functions from that tag (the rule on the mean, the rule on checks,
+AgentiCI is the gate in this repository (`llm-release-gate`) at the feature-freeze tag `v0.1.0-dev.22`
+(`8a60927`, 24.11.2026). The simulator calls the gate's own decision functions from that tag (the rule on the mean, the rule on checks,
 the error split) and reimplements only the loop that buys rounds (below).
 
 - **Score.** A run executes all `N` cases of a set; its score `S ∈ [0, 1]` is the mean case score. A case score is the
