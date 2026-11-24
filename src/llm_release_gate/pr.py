@@ -29,7 +29,6 @@ import traceback
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
-from fractions import Fraction
 from pathlib import Path
 
 from llm_release_gate import criterion, project, shared
@@ -642,12 +641,13 @@ def too_few_runs(p: project.Pipeline) -> str | None:
     if not p.checks_block or p.max_spend_usd is not None:  # adaptive: K_c covers it
         return None
     need = criterion.runs_to_block(split(p.alpha, True)[1])
-    if p.k >= need:
+    if need is not None and p.k >= need:
         return None
     # one check passes in all k base runs and fails in all k candidate runs; the checks get half of alpha
-    alpha = math.ceil(Fraction(20_000, math.comb(2 * p.k, p.k))) / 10_000
+    alpha = math.ceil(20_000 * criterion.floor(p.k, p.k)) / 10_000
     return (
-        f"⚠️ With alpha {p.alpha:g} and k: {p.k} the rule on checks cannot block: it needs k: {need}"
+        f"⚠️ With alpha {p.alpha:g} and k: {p.k} the rule on checks cannot block: "
+        + (f"it needs k: {need}" if need else "no k can")
         + (f", or alpha {alpha:g} at k: {p.k}." if alpha < 0.5 else ".")
     )
 

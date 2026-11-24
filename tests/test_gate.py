@@ -1,3 +1,4 @@
+import itertools
 import json
 from pathlib import Path
 
@@ -405,15 +406,22 @@ def test_a_check_broken_in_every_run_blocks_while_the_mean_holds(
         gate.main(args) == gate.QUALITY_FAIL
     )  # the mean lost 25 points, under the threshold
     checks = json.loads(report.read_text())["checks"]
-    assert (checks["outcome"], checks["m"], checks["runs_to_block"]) == ("block", 1, 4)
+    assert (checks["outcome"], checks["splits"], checks["runs_to_block"]) == (
+        "block",
+        70,
+        4,
+    )
+    assert (checks["test"], checks["runs"], checks["seed"]) == ("whole runs", [4, 4], 0)
     [unit] = checks["broken"]
     assert (unit["check"], unit["base"], unit["candidate"]) == ("total", [4, 4], [0, 4])
+    assert unit["adjusted"] == pytest.approx(1 / 70)
     text = comment.read_text()
     assert (
-        "Checks: 1 broke, they block (one-sided Fisher, α 0.025, on 4 + 4 runs, Tarone m = 1)"
+        "Checks: 1 broke, they block (test over whole runs, α 0.025, on 4 + 4 runs, all 70 splits)."
         in text
     )
     assert f"| {CASE.id} | total | 4/4 | 0/4 | 0.014 |" in text
+    assert "p: the share of the 70 splits of these runs between the versions" in text
 
     assert gate.main([*args, "--checks", "report"]) == gate.PASS
     assert json.loads(report.read_text())["checks"]["outcome"] == "report"
@@ -432,10 +440,11 @@ def test_with_one_run_the_comment_says_the_checks_cannot_block(
         == gate.PASS
     )
     checks = json.loads(report.read_text())["checks"]
-    assert (checks["testable"], checks["can_block"]) == (0, False)
+    assert (checks["can_block"], checks["runs"]) == (False, [1, 1])
     assert (
-        "with 1 + 1 runs no break can be significant; a single broken check can block from 4 runs of each version "
-        "(one-sided Fisher, α 0.025). 1 of 4 passed less often." in comment.read_text()
+        "with 1 + 1 runs no break can be significant; a check broken in every run can block from 4 runs of each "
+        "version (test over whole runs, α 0.025). 1 of 4 passed less often."
+        in comment.read_text()
     )
 
 
@@ -453,53 +462,69 @@ def test_check_runs_keeps_runs_aligned_and_marks_missing_results():
     assert gate.check_runs({"b": ([{}], [{}])}) == ({}, {})
 
 
+def test_check_runs_puts_a_run_at_its_repetition_so_cases_of_one_round_stay_together():
+    pairs = {
+        "a": ([{"rep": 0, "hits": {"x": True}}, {"rep": 2, "hits": {"x": False}}], [{"rep": 0, "hits": {"x": True}}]),
+        "b": ([{"rep": i, "hits": {"x": True}} for i in range(3)], [{"rep": 1, "hits": {"x": True}}]),
+    }  # fmt: skip
+    base, candidate = gate.check_runs(pairs)
+    assert base == {("a", "x"): [True, None, False], ("b", "x"): [True] * 3}
+    assert candidate == {("a", "x"): [True, None], ("b", "x"): [None, True]}
+
+
 def test_more_than_five_broken_checks_point_to_the_report():
     base = {(f"c{i}", "x"): [True] * 8 for i in range(7)}
     candidate = {(f"c{i}", "x"): [False] * 8 for i in range(7)}
-    line, rows = gate.checks_lines(criterion.per_check(base, candidate))
+    line, rows = gate.checks_lines(criterion.whole_runs(base, candidate))
     assert line.startswith("Checks: 7 broke, they block")
-    assert (
-        sum(r.startswith("| c") for r in rows) == 5
-        and rows[-1] == "2 more in the JSON report."
-    )
+    assert sum(r.startswith("| c") for r in rows) == 5
+    assert "2 more in the JSON report." in rows and rows[-1].startswith("p: the share")
 
 
 def lines_for(base, candidate):
-    return gate.checks_lines(criterion.per_check(base, candidate))[0]
+    return gate.checks_lines(criterion.whole_runs(base, candidate))[0]
 
 
 def test_the_checks_line_follows_the_run_counts_not_the_data():
     def full(k, n, cases=1):
         return {(f"c{i}", "x"): [True] * k + [False] * (n - k) for i in range(cases)}
 
-    assert lines_for(full(8, 8), full(8, 8)).startswith(
-        "Checks: none broke (1 checked, one-sided Fisher, α 0.025, on 8 + 8 runs)"
+    assert lines_for(full(8, 8), full(8, 8)) == (
+        "Checks: none broke (1 checked, test over whole runs, α 0.025, on 8 + 8 runs, 1999 random splits, seed 0)."
     )
-    # two full breaks at 4 + 4: Tarone counts both, and neither can reach 0.025 / 2
-    assert lines_for(full(4, 4, 2), full(0, 4, 2)) == (
-        "Checks: with 4 + 4 runs no break can be significant; Tarone counts 2 checks that changed or vary, and a break "
-        "among them can block from 5 runs of each version (one-sided Fisher, α 0.025). 2 of 2 passed less often."
+    # two full breaks at 4 + 4 share one pattern: they block, as any number would
+    assert lines_for(full(4, 4, 2), full(0, 4, 2)).startswith(
+        "Checks: 2 broke, they block"
     )
-    # one break and one check that varies the same in both versions: the varying one counts too
+    # one break and one check that varies in another pattern at 4 + 4: the rule is weak
     unstable = {("v", "x"): [True, True, False, False]}
-    line = lines_for(full(4, 4) | unstable, full(0, 4) | unstable)
-    assert "Tarone counts 2 checks" in line and line.endswith(
-        "1 of 2 passed less often."
+    assert lines_for(full(4, 4) | unstable, full(0, 4) | unstable) == (
+        "Checks: none significantly worse; 1 of 2 passed less often (test over whole runs, α 0.025, on 4 + 4 runs, all "
+        "70 splits). With 4 + 4 runs the rule is weak: one check that varies in another pattern stops a break from "
+        "blocking; 5 runs of each version avoid that."
     )
+    assert "weak" not in lines_for(full(5, 5), full(4, 5))
     assert lines_for(full(8, 8), full(6, 8)).startswith(
-        "Checks: none significantly worse; 1 of 1 passed less often (one-sided Fisher, α 0.025, on 8 + 8 runs"
+        "Checks: none significantly worse; 1 of 1 passed less often (test over whole runs, α 0.025, on 8 + 8 runs"
+    )
+    assert lines_for(full(3, 3), full(0, 3)) == (
+        "Checks: with 3 + 3 runs no break can be significant; a check broken in every run can block from 4 runs of "
+        "each version (test over whole runs, α 0.025). 1 of 1 passed less often."
     )
     assert "no break can be significant" in lines_for(full(10, 10), full(0, 1))
     assert lines_for(full(10, 10), full(0, 2)).startswith("Checks: 1 broke")
+    assert lines_for(full(12, 12), full(12, 12)).endswith(
+        "The test reads the first 10 runs of each version, as far as it was checked."
+    )
 
 
 def test_a_check_scored_on_one_side_only_is_counted_even_with_nothing_to_test():
-    v = criterion.per_check(
+    v = criterion.whole_runs(
         {("a", "x"): [True], ("a", "y"): [None]},
         {("a", "x"): [None], ("a", "y"): [True]},
     )
     assert gate.checks_lines(v)[0] == (
-        "Checks: no check was scored in both versions. 2 checks scored in one version only are left out."
+        "Checks: no check was scored in both versions. 2 checks scored in one version only are not compared."
     )
 
 
@@ -781,7 +806,9 @@ def test_the_annotation_escapes_what_github_reads_as_commands(
     args, _, _ = levels_args(
         tmp_path, monkeypatch, Fixed(total="21.50"), {"minor": ["total"]}
     )
-    unit = gate.criterion.Unit("50%\ncase", "total", (4, 4), (0, 4), 0.014, 0.014)
+    unit = gate.criterion.Unit(
+        "50%\ncase", "total", (4, 4), (0, 4), 0.014, 0.014, 0.014
+    )
     monkeypatch.setattr(gate.Levelled, "warnings", lambda self: [unit])
     capsys.readouterr()
     gate.main(args)
@@ -796,14 +823,14 @@ def test_the_gate_splits_its_alpha_between_the_rules():
         0.025,
     )  # no check can block: all for the mean
     assert gate.alpha_line(0.05, True, True) == (
-        "False blocks: at most α 0.05 for the gate, 0.025 for the rule on the mean and 0.025 for the rule on checks."
+        "False blocks: α 0.05 for the gate, 0.025 to the rule on the mean and 0.025 to the rule on checks."
     )
     assert (
-        "all of it for the rule on the mean, since no check can block"
+        "all of it to the rule on the mean, since no check can block"
         in gate.alpha_line(0.05, True, False)
     )
     assert gate.alpha_line(0.05, False, True) == (
-        "False blocks: at most α 0.025 for the rule on checks; the naive rule on the mean has no such bound."
+        "False blocks: α 0.025 to the rule on checks; the naive rule on the mean has no α."
     )
     assert gate.alpha_line(0.05, False, False).startswith(
         "False blocks: no check can block"
@@ -814,7 +841,7 @@ def test_the_gate_splits_its_alpha_between_the_rules():
 def test_a_lower_alpha_needs_more_runs_for_a_check_to_block(
     tmp_path, monkeypatch, capsys, k, code
 ):
-    # alpha 0.025 leaves 0.0125 for checks: 4/4 -> 0/4 has p 1/70, above it; 5/5 -> 0/5 has 1/252
+    # alpha 0.025 leaves 0.0125 for checks: 4/4 -> 0/4 is as bad in 1 of 70 splits, above it; 5/5 -> 0/5 in 1 of 252
     base = runs(tmp_path, monkeypatch, "base", 0, Fixed(), k=k)
     broken = runs(tmp_path, monkeypatch, "broken", 1, Fixed(total="21.50"), k=k)
     report, comment = tmp_path / "v.json", tmp_path / "c.md"
@@ -824,9 +851,7 @@ def test_a_lower_alpha_needs_more_runs_for_a_check_to_block(
     v = json.loads(report.read_text())
     assert v["alpha"] == {"gate": 0.025, "mean": None, "checks": 0.0125}
     assert (v["checks"]["alpha"], v["checks"]["runs_to_block"]) == (0.0125, 5)
-    assert (
-        "False blocks: at most α 0.0125 for the rule on checks" in comment.read_text()
-    )
+    assert "False blocks: α 0.0125 to the rule on checks" in comment.read_text()
 
 
 def test_the_rule_on_the_mean_gets_all_of_alpha_when_no_check_can_block(
@@ -844,7 +869,7 @@ def test_the_rule_on_the_mean_gets_all_of_alpha_when_no_check_can_block(
         v["mean"]["alpha"] == 0.05 and v["checks"]["alpha"] == 0.025
     )  # listed at half
     text = comment.read_text()
-    assert "all of it for the rule on the mean, since no check can block" in text
+    assert "all of it to the rule on the mean, since no check can block" in text
     assert "points (90 %)" in text  # 0.05 on each side
     assert "fewer with a larger `alpha` or δ" in text
 
@@ -880,9 +905,15 @@ def test_the_table_of_alpha_follows_the_code(page):
     method = mean.METHODS[mean.DEFAULT]
 
     def blocks(n, alpha):
-        base = {(f"c{i}", "x"): [True] * 5 for i in range(n)}
-        broken = {key: [False] * 5 for key in base}
-        return criterion.per_check(base, broken, alpha=alpha).outcome == "block"
+        """A check broken in all of 5 + 5 runs and n - 1 checks with 5 passes in 10 runs, each in another pattern."""
+        others = [
+            s for s in itertools.combinations(range(10), 5) if s != (0, 1, 2, 3, 4)
+        ]
+        base, cand = {("c", "x"): [True] * 5}, {("c", "x"): [False] * 5}
+        for i, s in enumerate(others[: n - 1]):
+            row = [j in s for j in range(10)]
+            base["v", f"x{i}"], cand["v", f"x{i}"] = row[:5], row[5:]
+        return criterion.whole_runs(base, cand, alpha=alpha).outcome == "block"
 
     for alpha in (0.01, 0.025, 0.05, 0.1):
         on_mean, on_checks = gate.split(alpha, True)

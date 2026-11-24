@@ -170,7 +170,7 @@ def test_a_check_broken_in_every_run_blocks_at_k_c(tmp_path, table):
     assert code == gate.QUALITY_FAIL and v["runs"] == 5 and asked == [1, 5]
     assert [u["check"] for u in v["checks"]["broken"]] == ["date"]
     assert (
-        "Checks: 1 broke, they block (one-sided Fisher, α 0.025, on 5 + 5 runs"
+        "Checks: 1 broke, they block (test over whole runs, α 0.025, on 5 + 5 runs, all 252 splits)"
         in comment
     )
 
@@ -267,12 +267,14 @@ def test_without_a_way_to_continue_the_comment_says_a_rerun_starts_over(
 
 
 def test_the_checks_line_says_why_no_break_can_block_at_k_c():
-    base = {(f"c{i}", "x"): [True] * 5 for i in range(30)}
-    broken = {
-        key: [False] * 5 for key in base
-    }  # 30 fully broken: Tarone's m outgrows what 5 + 5 runs can reach
-    line, _ = gate.checks_lines(criterion.per_check(base, broken), once=True)
-    assert line.startswith(
-        "Checks: read once, on 5 + 5 runs; Tarone counts 7 checks that changed or vary"
+    # K_c is 2 when no check may block: the checks that only report are read once, on 2 + 2 runs
+    base = {(f"c{i}", "x"): [True] * 2 for i in range(30)}
+    broken = {key: [False] * 2 for key in base}
+    line, _ = gate.checks_lines(criterion.whole_runs(base, broken), once=True)
+    assert line == (
+        "Checks: read once, on 2 + 2 runs; a check broken in every run can block only from 4 runs of each version "
+        "(test over whole runs, α 0.025). 30 of 30 passed less often."
     )
-    assert "can block only from" in line
+    # 30 checks broken in every run of 5 + 5 block: they share one pattern (Tarone's rule blocked none of them)
+    full = {key: [True] * 5 for key in base}
+    assert criterion.whole_runs(full, {k: [False] * 5 for k in full}).outcome == "block"

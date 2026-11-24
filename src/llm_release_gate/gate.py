@@ -262,7 +262,14 @@ MAX_ROUNDS = 60  # the most rounds the adaptive gate buys, as experiment E-011 s
 def k_c(alpha: float, checks_block: bool) -> int:
     """The round at which the adaptive gate reads the checks, once (D-032): known from the settings before any run. Five,
     or more when `alpha` is so small that a check broken in every run needs more; two when no check may block."""
-    return max(5, criterion.runs_to_block(split(alpha, True)[1])) if checks_block else 2
+    if not checks_block:
+        return 2
+    need = criterion.runs_to_block(split(alpha, True)[1])
+    if need is None:
+        raise ValueError(
+            f"with alpha {alpha:g} no number of rounds lets a check block: raise alpha"
+        )
+    return max(5, need)
 
 
 def plan(
@@ -329,15 +336,15 @@ def look(
     if rules:
         blocking, reporting = families(runs, rules, mode)
         return (
-            criterion.per_check(*blocking, alpha=alpha, mode="block")
+            criterion.whole_runs(*blocking, alpha=alpha, mode="block")
             if blocking[0]
             else None,
-            criterion.per_check(*reporting, alpha=alpha, mode="report")
+            criterion.whole_runs(*reporting, alpha=alpha, mode="report")
             if reporting[0]
             else None,
         )
     return (
-        criterion.per_check(*runs, alpha=alpha, mode=mode) if runs[0] else None
+        criterion.whole_runs(*runs, alpha=alpha, mode=mode) if runs[0] else None
     ), None
 
 
@@ -406,15 +413,16 @@ def adaptive_lines(a: dict) -> list[str]:
 
 
 def alpha_line(alpha: float, betting: bool, checks_block: bool) -> str:
-    """How the gate spends its alpha, for the comment."""
+    """How the gate spends its alpha, for the comment; each rule keeps its share under its own assumptions (docs: How
+    often the gate may be wrong)."""
     on_mean, on_checks = split(alpha, checks_block)
     if betting and checks_block:
-        return f"False blocks: at most α {alpha:g} for the gate, {on_mean:g} for the rule on the mean and {on_checks:g} for the rule on checks."
+        return f"False blocks: α {alpha:g} for the gate, {on_mean:g} to the rule on the mean and {on_checks:g} to the rule on checks."
     if betting:
-        return f"False blocks: at most α {alpha:g} for the gate, all of it for the rule on the mean, since no check can block."
+        return f"False blocks: α {alpha:g} for the gate, all of it to the rule on the mean, since no check can block."
     if checks_block:
-        return f"False blocks: at most α {on_checks:g} for the rule on checks; the naive rule on the mean has no such bound."
-    return "False blocks: no check can block, and the naive rule on the mean has no bound on them."
+        return f"False blocks: α {on_checks:g} to the rule on checks; the naive rule on the mean has no α."
+    return "False blocks: no check can block, and the naive rule on the mean has no α."
 
 
 def leveled(
@@ -461,31 +469,28 @@ def families(
 def check_runs(
     pairs: dict[str, tuple[list[dict], list[dict]]],
 ) -> tuple[dict[criterion.Key, list], dict[criterion.Key, list]]:
-    """Per (case, check), its result in every run of the base and of the candidate; a run without results gives None."""
+    """Per (case, check), its result in every run of the base and of the candidate, at the run's repetition: the test
+    over whole runs keeps the cases of one repetition together. A run without results, or missing, gives None."""
     keys = sorted(
         {(case, check) for case, arms in pairs.items() for rs in arms for r in rs for check in r.get("hits") or {}}
     )  # fmt: skip
+    reps = {
+        (case, side): {r.get("rep", i): r for i, r in enumerate(arms[side])}
+        for case, arms in pairs.items()
+        for side in (0, 1)
+    }
+    width = [
+        1 + max((k for (_, s), rs in reps.items() if s == side for k in rs), default=-1)
+        for side in (0, 1)
+    ]
     base, candidate = (
-        {(case, check): [(r.get("hits") or {}).get(check) for r in pairs[case][side]] for case, check in keys}
+        {
+            (case, check): [((reps[case, side].get(i) or {}).get("hits") or {}).get(check) for i in range(width[side])]
+            for case, check in keys
+        }
         for side in (0, 1)
     )  # fmt: skip
     return base, candidate
-
-
-def run_counts(c: criterion.CheckVerdict) -> tuple[int, int]:
-    """The most runs any check had in the base and in the candidate."""
-    return max(u.base[1] for u in c.units), max(u.candidate[1] for u in c.units)
-
-
-def level(c: criterion.CheckVerdict) -> Fraction:
-    """The threshold Tarone's m leaves for each check."""
-    return Fraction(str(c.alpha)) / c.m
-
-
-def blockable(c: criterion.CheckVerdict) -> bool:
-    """Whether a check broken in every run could block, at its own run counts and the threshold Tarone's m leaves."""
-    counts = {(u.base[1], u.candidate[1]) for u in c.units}
-    return any(criterion.can_block(b, k, level(c), c.sides) for b, k in counts)
 
 
 def checks_report(
@@ -496,11 +501,14 @@ def checks_report(
         "outcome": c.outcome,
         "mode": c.mode,
         "alpha": c.alpha,
-        "sides": c.sides,
-        "m": c.m,
-        "testable": c.testable,
-        "can_block": bool(c.units) and blockable(c),
-        "runs_to_block": criterion.runs_to_block(level(c), c.sides),
+        "test": "whole runs",
+        "runs": list(c.runs),
+        "cut": c.cut,
+        "splits": c.splits,
+        "seed": c.seed,
+        "can_block": bool(c.units) and criterion.can_block(*c.runs, c.alpha),
+        "weak": criterion.weak(*c.runs, c.alpha),
+        "runs_to_block": criterion.runs_to_block(c.alpha),
         "checked": len(c.units),
         "one_sided": [list(k) for k in c.one_sided],
         "broken": [{**asdict(u), "level": rules.of(u.case, u.check)} for u in c.broken],
@@ -512,16 +520,22 @@ def checks_lines(
 ) -> tuple[str, list[str]]:
     """The comment's line on the rule on checks, and its table of broken checks (`once`: the adaptive gate read them on
     rounds 1 to K_c and reads no more)."""
+    kb, kc = c.runs
     left = (
-        f" {len(c.one_sided)} checks scored in one version only are left out."
+        f" {len(c.one_sided)} checks scored in one version only are not compared."
         if c.one_sided
         else ""
     )
+    if c.cut:
+        left += f" The test reads the first {criterion.MAX_RUNS} runs of each version, as far as it was checked."
     if not c.units:
         return f"{label}: no check was scored in both versions.{left}", []
-    kb, kc = run_counts(c)
-    name = f"{'one' if c.sides == 1 else 'two'}-sided Fisher, α {c.alpha:g}"
-    test = f"{name}, on {kb} + {kc} runs"
+    name = f"test over whole runs, α {c.alpha:g}"
+    test = f"{name}, on {kb} + {kc} runs, " + (
+        f"all {c.splits} splits"
+        if math.comb(kb + kc, kb) <= criterion.EXHAUSTIVE
+        else f"{c.splits - 1} random splits, seed {c.seed}"
+    )
     if c.broken:
         verb = (
             (
@@ -534,43 +548,47 @@ def checks_lines(
         )
         rows = ["", "| Case | Check | Base | Candidate | p |", "|---|---|---|---|---|"]
         rows += [
-            f"| {u.case} | {u.check} | {u.base[0]}/{u.base[1]} | {u.candidate[0]}/{u.candidate[1]} | {u.p:.2g} |"
+            f"| {u.case} | {u.check} | {u.base[0]}/{u.base[1]} | {u.candidate[0]}/{u.candidate[1]} | {u.adjusted:.2g} |"
             for u in c.broken[:5]
         ]
         if len(c.broken) > 5:
             rows += ["", f"{len(c.broken) - 5} more in the JSON report."]
-        return (
-            f"{label}: {len(c.broken)} broke, {verb} ({test}, Tarone m = {c.m}).{left}",
-            rows,
-        )
+        rows += [
+            "",
+            (
+                f"p: the share of the {c.splits} splits of these runs between the versions in which a check looks at "
+                f"least this much worse; at most α {c.alpha:g} names it."
+            ),
+        ]
+        return f"{label}: {len(c.broken)} broke, {verb} ({test}).{left}", rows
     worse = sum(
         u.candidate[0] * u.base[1] < u.base[0] * u.candidate[1] for u in c.units
     )
     fewer = f" {worse} of {len(c.units)} passed less often." if worse else ""
-    if not blockable(c):
-        need = criterion.runs_to_block(level(c), c.sides)
-        which = (
-            "a single broken check"
-            if c.m == 1
-            else f"Tarone counts {c.m} checks that changed or vary, and a break among them"
+    if not criterion.can_block(kb, kc, c.alpha):
+        need = criterion.runs_to_block(c.alpha)
+        when = (
+            f"a check broken in every run can block {'only ' if once else ''}from {need} runs of each version"
+            if need
+            else f"at α {c.alpha:g} no number of runs lets a check block"
         )
-        line = (
-            f"{label}: with {kb} + {kc} runs no break can be significant; {which} can block from {need} runs of each "
-            f"version ({name}).{fewer}{left}"
+        head = (
+            f"read once, on {kb} + {kc} runs"
+            if once  # the adaptive gate reads the checks once, on these runs: more rounds will not change it
+            else f"with {kb} + {kc} runs no break can be significant"
         )
-        if once:  # the adaptive gate reads the checks once, on these runs: more rounds will not change it
-            line = (
-                f"{label}: read once, on {kb} + {kc} runs; {which} can block only from {need} runs of each version "
-                f"({name}).{fewer}{left}"
-            )
-        return line, []
+        return f"{label}: {head}; {when} ({name}).{fewer}{left}", []
+    strong = criterion.runs_to_block(c.alpha / 2)
+    soft = (
+        f" With {kb} + {kc} runs the rule is weak: one check that varies in another pattern stops a break from "
+        f"blocking{f'; {strong} runs of each version avoid that' if strong else ''}."
+        if criterion.weak(kb, kc, c.alpha)
+        else ""
+    )
     if worse:
-        line = (
-            f"{label}: none significantly worse; {worse} of {len(c.units)} passed less often ({test}, Tarone m = {c.m})."
-            f"{left}"
-        )
+        line = f"{label}: none significantly worse; {worse} of {len(c.units)} passed less often ({test}).{soft}{left}"
         return line, []
-    return f"{label}: none broke ({len(c.units)} checked, {test}).{left}", []
+    return f"{label}: none broke ({len(c.units)} checked, {test}).{soft}{left}", []
 
 
 def record_cost(r: dict, prices: Prices) -> float | None:
@@ -875,8 +893,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         "--alpha",
         type=float,
         default=0.05,
-        help="the bound on how often the gate blocks a candidate that is no worse (default 0.05): half to the "
-        "betting rule on the mean, half to the rule on checks; the naive rule has no bound",
+        help="how often the gate may block a candidate that is no worse (default 0.05): half to the betting rule "
+        "on the mean, half to the rule on checks; the naive rule takes no share",
     )
     p.add_argument(
         "--relative",
@@ -1169,7 +1187,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         for u in lv.warnings():
             note = (
                 f"{lv.rules.of(u.case, u.check).capitalize()} check {u.check} got worse in {u.case}: passed "
-                f"{u.base[0]}/{u.base[1]} runs before, {u.candidate[0]}/{u.candidate[1]} now (p {u.p:.2g})."
+                f"{u.base[0]}/{u.base[1]} runs before, {u.candidate[0]}/{u.candidate[1]} now (p {u.adjusted:.2g})."
             )
             print(
                 "::warning title=Release gate::"
