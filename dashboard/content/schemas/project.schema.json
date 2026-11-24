@@ -146,7 +146,7 @@
       "minimum": 0
     },
     "alpha": {
-      "description": "How often the gate as a whole may block a candidate that is no worse (default 0.05). The gate splits it: half to the betting rule on the mean, half to the rule on checks, all to the rule on the mean when no check can block. The betting rule's share bounds its wrong passes of a loss over delta as well; the naive rule has no bound. A lower alpha needs more runs to decide.",
+      "description": "How often the gate as a whole may block a candidate that is no worse (default 0.05). The gate splits it: half to the betting rule on the mean, half to the rule on checks, all to the rule on the mean when no check can block. The betting rule's share also covers its wrong passes of a loss over delta; the naive rule takes no share. A lower alpha needs more runs to decide; with max_spend_usd and checks that may block, at least 0.001.",
       "type": "number",
       "exclusiveMinimum": 0,
       "exclusiveMaximum": 0.5
@@ -159,7 +159,7 @@
       ]
     },
     "checks": {
-      "description": "A check that broke over the runs (Fisher's exact test per case and check) blocks, or is only reported (default block).",
+      "description": "A check that broke over the runs (a permutation test over whole runs, up to 10 of each version) blocks, or is only reported (default block).",
       "enum": [
         "block",
         "report"

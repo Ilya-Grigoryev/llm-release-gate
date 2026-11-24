@@ -89,7 +89,7 @@ uv run --env-file .env llm-release-gate run --config configs/sroie-image.yaml --
 
 The first gate compares one run per version: it blocks when the candidate's mean score is lower than the base's by more than a threshold, 5 points by default (`--relative` reads it as a percentage of the base mean). It pairs the two files case by case and refuses files with different set hashes, different scorer versions or cases missing from one side. `--golden` rescores both sides from their saved answers with the current scorer, without calling the model.
 
-The rule on checks reads every run, up to 10 of each version, with a permutation test over whole runs. A run is every check of every case at one repetition, so checks that fail together stay together. The test splits the runs between the versions again in every possible way (from 7 runs of each: the real split and 1999 random ones, seed 0) and takes, in each split, the smallest one-sided Fisher p over the checks. The gate names a check when it passed less often and at most half of `alpha` (0.025 by default) of the splits give some check a p as small as its own (step-down, Westfall and Young). A named check gives `quality fail` whatever the mean did; `--checks report` (`checks: report` in `gate.yaml`) only lists it. Checks broken in every run fail in one pattern, so any number of them can block. With one run of each version no check can block: at the default `alpha` a check broken in every run can block from 4 runs of each, at 4 one check that varies in another pattern stops it, and the comment says both.
+The rule on checks reads every run, up to 10 of each version, with a permutation test over whole runs. A run is every check of every case at one repetition, so checks that fail together stay together. The test splits the runs between the versions again in every possible way, or, above 2000 ways (7 + 7 runs, also 9 + 5 and 10 + 5, but not 10 + 4), the real split and 1999 random ones with seed 0, and takes, in each split, the smallest one-sided Fisher p over the checks. The gate names a check when it passed less often and at most half of `alpha` (0.025 by default) of the splits give some check a p as small as its own (step-down, Westfall and Young). A named check gives `quality fail` whatever the mean did; `--checks report` (`checks: report` in `gate.yaml`) only lists it. Checks broken in every run fail in one pattern, so any number of them can block. With one run of each version no check can block: at the default `alpha` a check broken in every run can block from 4 runs of each, at 4 any other check that passed in exactly 4 of the 8 runs in another pattern (one fixed in every run too) stops it, and the comment says both.
 
 `--prices` takes a YAML of `model: [input, output]` in USD per 1M tokens, or `[input, output, cached input]`, and adds what the decision cost: every successful call of both runs. An agent resends the whole dialog on every call, so most of its input is billed as cached; without the third price, cached tokens cost the full input price. For a traced record that means every model step, the user simulator's included.
 
@@ -237,7 +237,8 @@ runs of a check split between the versions in 252 ways, and a check that passed 
 candidate runs looks worst in one of them. Every check broken that way shares that split, so any number of them
 blocks. Each other check that passes in 5 of the 10 runs in another pattern, broken or noisy, adds a split as bad;
 once such splits, the real one included, outnumber the column, no check blocks. At `k: 4` the default share allows
-only the real split, so one check that varies in another pattern stops a break: the rule on checks is weak there, and
+only the real split, so any other check that passed in exactly 4 of the 8 runs in another pattern stops a break: the
+rule on checks is weak there, and
 the comment says so. The comment states the split and the range's level. If no check could block with the pipeline's `k` and `alpha`, `pr` says so before the runs and names
 the `k` or `alpha` that would let it.
 
@@ -256,7 +257,8 @@ max_spend_usd: 5   # per pipeline and job; give it room, see below
   5 (more when `alpha` is below about 0.008, 2 when no check can block) and never again; rounds bought later go to the rule on the mean, which stays
   valid however many rounds it reads. A pass therefore comes at round 5 at the earliest while checks may block; under
   `checks: report` without `critical` levels the gate can pass from round 2, and the test on 2 + 2 runs cannot flag a
-  reported or `minor` check. Cost and latency budgets read rounds 1 to 5 as well.
+  reported or `minor` check. Cost and latency budgets read rounds 1 to 5 as well. Below an `alpha` of 0.001 no round
+  lets a check block, so `pr` refuses such a `gate.yaml` while checks may block, before any run.
 - **How rounds are bought.** A round is one run of every case by both versions, the two in the same job. The first
   round runs alone to learn what a round costs. Rounds 2 to 5 follow as one batch, then one at a time, up to 60. A
   round runs only if its estimate, the last round's cost, fits in what the job has left, so a round dearer than the

@@ -141,7 +141,7 @@ runner's scorer is `hits(case, answer, trace=None)` (by default the run's trace,
   case is `minor`; else the check's pattern (`critical` first); else the case's pattern; else `normal`. The checks that
   may block (`critical`, and `normal` under `checks: block`) form one family for `whole_runs`; those that only report
   (`minor`, and `normal` under `checks: report`) another, each at half of `alpha`; the second never blocks and spends
-  none of the gate's bound. A broken `critical` check leads the comment; a
+  none of the gate's `alpha`. A broken `critical` check leads the comment; a
   significantly worse check of the second family puts ⚠️ in the title ("minor" when all are minor, else "reported"), a
   `warnings` entry in the JSON and a `::warning` annotation in GitHub Actions, and keeps the exit code. Without `levels`,
   `checks: report` keeps its old output, with no ⚠️. `minor` checks leave the case score (rebuilt from `hits` with the case's own
@@ -161,10 +161,12 @@ runner's scorer is `hits(case, answer, trace=None)` (by default the run's trace,
   of both versions are interchangeable, as for a candidate that behaves like the base; for one that fixed checks or
   changed which checks fail together, E-009 measured at most 1.86 % at 2.5 %, without a proof. `CheckVerdict` holds
   the run counts read, the number of splits, the seed, the named checks with their Fisher p and adjusted p, and every
-  check scored in both versions; `block` or `report` mode. The gate builds its input from every run's `hits` at the run's repetition (`check_runs`; a run
-  without results, or missing, gives None) and turns a pass into `quality fail` when it blocks. `floor(kb, kc)` is the
-  smallest adjusted p the run counts allow (1 / splits); `can_block` compares it with alpha, `weak` with alpha / 2 (only
-  the real split may be as bad: one more check varying in another pattern stops a break, 4 + 4 at 0.025),
+  check scored in both versions; `block` or `report` mode. The gate builds its input from every run's `hits` at the
+  run's repetition (`check_runs`; a run without results, or missing, gives None) and turns a pass into `quality fail` when it blocks. `floor(kb, kc)` is the
+  smallest adjusted p the run counts allow: the share of the splits that are the real one, counting the random copies
+  of it seed 0 draws (8 + 8: 2 of 2000); `can_block` compares it with alpha, `weak` with alpha / 2 (only the real split
+  may be as bad: any other check that passed in exactly k_b of the runs, in another pattern, stops a break; 4 + 4 at
+  0.025),
   `runs_to_block(alpha)` gives the fewest equal runs from which a check broken in every run can block, 4 at the
   defaults. The statistic is the smallest p (experiment E-010: a sum of −log p catches more partial breaks but lets
   false blocks grow when checks of a case fail together differently). `per_check` keeps the rule it replaced, Fisher per
@@ -173,8 +175,8 @@ runner's scorer is `hits(case, answer, trace=None)` (by default the run's trace,
 - **Built — one `alpha` for the gate** (`split`, `alpha:` in `gate.yaml`, `--alpha`). Either rule can block on its
   own, so the gate's share of false blocks is the sum of theirs. `alpha` (default 0.05) is that sum: half to the
   betting rule, half to the rule on checks; all to the betting rule when the set has no check that may block. The
-  settings and the set decide which checks may block, the results never do, so the split keeps the bound. The
-  naive rule takes no share; under it `alpha` covers the rule on checks. The betting rule's share also bounds its wrong
+  settings and the set decide which checks may block, the results never do, so the shares still add up to `alpha`. The
+  naive rule takes no share; under it `alpha` covers the rule on checks. The betting rule's share also covers its wrong
   pass. The comment states the split (`alpha_line`); `pr` warns before the runs when `k` is below `runs_to_block` at
   the checks' share.
 - **Built (D-032).** With `max_spend_usd` the gate buys rounds (`gate.plan`) until it decides or the next round does not

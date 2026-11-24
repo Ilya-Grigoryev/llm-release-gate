@@ -23,7 +23,7 @@ match this list.
 3. **What was compared.** The naive rule reads the first run of each case, even when `k` asks for more; the betting
    rule reads them all. The next line says how often the gate may block wrongly: its `alpha` and the share of each
    rule, or that the naive rule takes no share
-   ([How often the gate may be wrong](/docs/how-it-decides#how-often-the-gate-may-be-wrong)). The line on checks after it reads all runs, up to 10 of each version, and names the checks that broke, or how many runs one would need to show; at 4 runs of each version it adds that the rule is weak, since one check that varies in another pattern stops a break ([The rule on checks](/docs/how-it-decides#the-rule-on-checks-whole-runs)). Each `config` hash covers the whole
+   ([How often the gate may be wrong](/docs/how-it-decides#how-often-the-gate-may-be-wrong)). The line on checks after it reads all runs, up to 10 of each version, and names the checks that broke, or how many runs one would need to show; at 4 runs of each version it adds that the rule is weak, since any other check that passed in exactly 4 of the 8 runs in another pattern stops a break ([The rule on checks](/docs/how-it-decides#the-rule-on-checks-whole-runs)). Each `config` hash covers the whole
    version; `set` is the test set's hash. When the base's runs came from earlier jobs, a line follows, for example
    "Base: 20 of 20 runs come from earlier jobs; the oldest ran 5 hours before the candidate's"
    ([where from](/docs/how-it-decides#where-the-bases-runs-come-from)).

@@ -66,8 +66,8 @@ The rule on checks asks whether a check passed less often in the candidate's run
 looks at whole runs: a run is every check of every case at one repetition, so checks that fail together stay together.
 
 - **Split the runs again.** With 5 runs of each version there are 252 ways to label 5 of the 10 runs "base" and the
-  rest "candidate". From 7 runs of each the gate takes the real labels and 1999 random ones, with seed 0, so the same
-  runs give the same answer.
+  rest "candidate". Above 2000 ways (from 7 + 7 runs, also 9 + 5 and 10 + 5, but not 10 + 4) the gate takes the real
+  labels and 1999 random ones, with seed 0, so the same runs give the same answer.
 - **Score each split.** For every split the gate takes each check's one-sided Fisher p (how unlikely so few candidate
   passes are) and the smallest p over the checks.
 - **Name the checks.** The gate names a check when it passed less often and at most half of `alpha`, 0.025 by default,
@@ -78,8 +78,10 @@ A check that passed in all 5 base runs and failed in all 5 candidate runs looks 
 and every check broken that way shares that split: 1, 10 or 30 such checks block alike. Other checks that pass in 5 of
 the 10 runs in another pattern each add a split as bad. At the default `alpha` a break still blocks while at most 6
 splits are that bad, the real one included, so 5 other patterns ([the table](#how-often-the-gate-may-be-wrong)). With
-4 runs of each version only the real split may be that bad, so one check that varies in another pattern stops a
-break: the comment calls the rule weak there. With 3 or fewer runs no check can block at the default `alpha`. The rule reads the first 10 runs of each version, as far as it was tested in simulation.
+4 runs of each version only the real split may be that bad, so any other check that passed in exactly 4 of the 8 runs
+in another pattern, one fixed in every run included, stops a break: the comment calls the rule weak there. With 3 or
+fewer runs no check can block at the default `alpha`. The rule reads the first 10 runs of each version, as far as
+simulation checked it.
 
 The test is exact when the runs of both versions are interchangeable, as they are when the candidate behaves like the
 base. Two cases fall outside that argument: a candidate that fixed some checks, and one that changed which
@@ -153,7 +155,8 @@ max_spend_usd: 5   # per pipeline and job; give it room, see below
   5 (more when `alpha` is below about 0.008, 2 when no check can block) and never again; rounds bought later go to the rule on the mean, which stays
   valid however many rounds it reads. A pass therefore comes at round 5 at the earliest while checks may block. Under
   `checks: report` without `critical` levels the gate can pass from round 2, and the test on 2 + 2 runs cannot flag a
-  reported or `minor` check. Cost and latency budgets read rounds 1 to 5 as well.
+  reported or `minor` check. Cost and latency budgets read rounds 1 to 5 as well. Below an `alpha` of 0.001 no round
+  lets a check block, so `pr` refuses such a `gate.yaml` while checks may block, before any run.
 - **How rounds are bought.** A round is one run of every case by both versions, the two in the same job. The first
   round runs alone to learn what a round costs. Rounds 2 to 5 follow as one batch, then one at a time, up to 60. A
   round runs only if its estimate, the last round's cost, fits in what the job has left, so a round dearer than the
