@@ -314,6 +314,23 @@ def test_below_one_random_split_in_2000_no_number_of_runs_can_block():
     assert runs_to_block(0.0004) is None and not can_block(10, 10, 0.0004)
 
 
+def test_the_floor_counts_random_copies_of_the_real_split():
+    """With seed 0 the real split of 8 + 8 runs comes up once more among the random ones."""
+    assert criterion.floor(7, 7) == Fraction(1, 2000) and criterion.floor(
+        8, 8
+    ) == Fraction(2, 2000)
+    assert [can_block(k, k, 0.0005) for k in (6, 7, 8, 9, 10)] == [
+        False,
+        True,
+        False,
+        True,
+        True,
+    ]
+    assert whole_runs(full(8, 8), full(0, 8), alpha=0.0005).outcome == "pass"
+    assert whole_runs(full(9, 9), full(0, 9), alpha=0.0005).outcome == "block"
+    assert criterion.floor(4, 4) == Fraction(1, 70)
+
+
 @pytest.mark.parametrize(
     "kb, kc, alpha, possible",
     [(3, 3, 0.025, False), (4, 4, 0.025, True), (10, 1, 0.025, False), (10, 2, 0.025, True), (3, 3, 0.05, True)],

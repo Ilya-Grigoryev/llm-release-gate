@@ -37,6 +37,10 @@ class Unit:
 
 @dataclass(frozen=True)
 class CheckVerdict:
+    """`whole_runs`' verdict. `broken`: named (adjusted p at most alpha, fewer passes);
+    `units`: every check both versions scored; both by adjusted p. `one_sided`: checks
+    scored in one version only, in the splits but never named."""
+
     outcome: str  # pass / block / report (would block, but the mode only reports)
     mode: str
     alpha: float
@@ -44,13 +48,9 @@ class CheckVerdict:
     cut: bool  # runs past MAX_RUNS were left out
     splits: int  # splits of the runs between the versions, the real one included
     seed: int  # of the random splits; unused when the test took every split
-    broken: list[
-        Unit
-    ]  # named: adjusted p at most alpha and fewer passes; smallest adjusted p first
-    units: list[Unit]  # every check both versions scored, smallest adjusted p first
-    one_sided: list[
-        Key
-    ]  # checks scored in one version only: in the splits, never named
+    broken: list[Unit]
+    units: list[Unit]
+    one_sided: list[Key]
 
 
 @dataclass(frozen=True)
@@ -160,31 +160,36 @@ def per_check(
     )
 
 
-def floor(kb: int, kc: int) -> Fraction:
-    """The smallest adjusted p `whole_runs` can give with these run counts: one split of all of them, or the real one
-    of the random ones."""
-    kb, kc = min(kb, MAX_RUNS), min(kc, MAX_RUNS)
-    n = math.comb(kb + kc, kb)
-    return Fraction(1, n if n <= EXHAUSTIVE else SPLITS + 1)
+@cache
+def floor(kb: int, kc: int, seed: int = 0) -> Fraction:
+    """The smallest adjusted p `whole_runs` can give with these run counts: the share of
+    its splits that are the real one (1 of all; with random splits, the real one and any
+    random copy of it)."""
+    masks = splits(min(kb, MAX_RUNS), min(kc, MAX_RUNS), seed)
+    return Fraction(masks.count(masks[0]), len(masks))
 
 
-def can_block(kb: int, kc: int, alpha: float = 0.025) -> bool:
+def can_block(kb: int, kc: int, alpha: float = 0.025, seed: int = 0) -> bool:
     """Whether a check that passed in all `kb` base runs and failed in all `kc` candidate runs can block."""
     if not 0 < alpha < 1:
         raise ValueError("alpha must lie in (0, 1)")
-    return floor(kb, kc) <= Fraction(str(alpha))
+    return floor(kb, kc, seed) <= Fraction(str(alpha))
 
 
-def weak(kb: int, kc: int, alpha: float = 0.025) -> bool:
-    """Whether a block needs every other split to look less bad: one check that varies in another pattern then stops a
-    break from blocking (4 + 4 runs at 0.025)."""
-    return can_block(kb, kc, alpha) and 2 * floor(kb, kc) > Fraction(str(alpha))
+def weak(kb: int, kc: int, alpha: float = 0.025, seed: int = 0) -> bool:
+    """Whether a block needs every other split to look less bad: then any other check
+    that passed in exactly `kb` of the runs, in another pattern, can stop a break
+    (4 + 4 at 0.025)."""
+    low = floor(kb, kc, seed)
+    return low <= Fraction(str(alpha)) < 2 * low
 
 
-def runs_to_block(alpha: float = 0.025) -> int | None:
+def runs_to_block(alpha: float = 0.025, seed: int = 0) -> int | None:
     """The fewest runs of each version from which a check broken in every run can block; None if no number up to
     MAX_RUNS can."""
-    return next((k for k in range(1, MAX_RUNS + 1) if can_block(k, k, alpha)), None)
+    return next(
+        (k for k in range(1, MAX_RUNS + 1) if can_block(k, k, alpha, seed)), None
+    )
 
 
 def splits(kb: int, kc: int, seed: int = 0) -> list[int]:

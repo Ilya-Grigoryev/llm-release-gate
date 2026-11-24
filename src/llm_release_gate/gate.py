@@ -245,7 +245,7 @@ def mean_lines(
 
 def split(alpha: float, checks_block: bool) -> tuple[float, float]:
     """The whole gate's alpha (D-031) as (rule on the mean, rule on checks). Whether a check may block depends on the
-    settings and the set's checks, never on the results, so the split keeps the bound."""
+    settings and the set's checks, never on the results, so the shares still add up to alpha."""
     return (alpha / 2 if checks_block else alpha), alpha / 2
 
 
@@ -506,9 +506,9 @@ def checks_report(
         "cut": c.cut,
         "splits": c.splits,
         "seed": c.seed,
-        "can_block": bool(c.units) and criterion.can_block(*c.runs, c.alpha),
-        "weak": criterion.weak(*c.runs, c.alpha),
-        "runs_to_block": criterion.runs_to_block(c.alpha),
+        "can_block": bool(c.units) and criterion.can_block(*c.runs, c.alpha, c.seed),
+        "weak": criterion.weak(*c.runs, c.alpha, c.seed),
+        "runs_to_block": criterion.runs_to_block(c.alpha, c.seed),
         "checked": len(c.units),
         "one_sided": [list(k) for k in c.one_sided],
         "broken": [{**asdict(u), "level": rules.of(u.case, u.check)} for u in c.broken],
@@ -527,7 +527,7 @@ def checks_lines(
         else ""
     )
     if c.cut:
-        left += f" The test reads the first {criterion.MAX_RUNS} runs of each version, as far as it was checked."
+        left += f" The test reads the first {criterion.MAX_RUNS} runs of each version, as far as simulation checked it."
     if not c.units:
         return f"{label}: no check was scored in both versions.{left}", []
     name = f"test over whole runs, α {c.alpha:g}"
@@ -565,8 +565,8 @@ def checks_lines(
         u.candidate[0] * u.base[1] < u.base[0] * u.candidate[1] for u in c.units
     )
     fewer = f" {worse} of {len(c.units)} passed less often." if worse else ""
-    if not criterion.can_block(kb, kc, c.alpha):
-        need = criterion.runs_to_block(c.alpha)
+    if not criterion.can_block(kb, kc, c.alpha, c.seed):
+        need = criterion.runs_to_block(c.alpha, c.seed)
         when = (
             f"a check broken in every run can block {'only ' if once else ''}from {need} runs of each version"
             if need
@@ -578,11 +578,18 @@ def checks_lines(
             else f"with {kb} + {kc} runs no break can be significant"
         )
         return f"{label}: {head}; {when} ({name}).{fewer}{left}", []
-    strong = criterion.runs_to_block(c.alpha / 2)
+    strong = criterion.runs_to_block(c.alpha / 2, c.seed)
+    fix = (
+        "; a larger `alpha` avoids that"
+        if once  # the adaptive gate picks the rounds itself
+        else f"; {strong} runs of each version avoid that"
+        if strong
+        else ""
+    )
     soft = (
-        f" With {kb} + {kc} runs the rule is weak: one check that varies in another pattern stops a break from "
-        f"blocking{f'; {strong} runs of each version avoid that' if strong else ''}."
-        if criterion.weak(kb, kc, c.alpha)
+        f" With {kb} + {kc} runs the rule is weak: any other check that passed in exactly {kb} of the {kb + kc} runs, "
+        f"in another pattern{' (one fixed in every run too)' if kb == kc else ''}, stops a break from blocking{fix}."
+        if criterion.weak(kb, kc, c.alpha, c.seed)
         else ""
     )
     if worse:

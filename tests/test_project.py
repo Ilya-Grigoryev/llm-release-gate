@@ -210,3 +210,17 @@ def test_a_spend_limit_makes_the_runs_adaptive_and_k_c_follows_the_settings(tmp_
     assert a.checks_block and not b.checks_block
     assert replace(b, levels={"critical": ["x"]}).checks_block
     assert replace(b, levels={"cases": {"x-*": "critical"}}).checks_block
+
+
+def test_a_spend_limit_refuses_an_alpha_at_which_no_check_can_block(tmp_path):
+    text = "mean: betting\nprices: p.yaml\nmax_spend_usd: 2\nalpha: 0.0009\npipelines: {{a: {{config: c, golden: g{}}}}}\n"
+    with pytest.raises(ValueError) as e:
+        load(tmp_path, text.format(""))
+    assert str(e.value).endswith(
+        "pipelines.a: max_spend_usd with checks that may block needs alpha 0.001 or more: at alpha 0.0009 no number "
+        "of rounds lets a check block"
+    )
+    assert (
+        load(tmp_path, text.format(", checks: report")).pipelines["a"].alpha == 0.0009
+    )
+    assert load(tmp_path, text.replace("0.0009", "0.001").format("")).pipelines["a"]

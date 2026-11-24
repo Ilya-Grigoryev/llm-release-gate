@@ -500,9 +500,16 @@ def test_the_checks_line_follows_the_run_counts_not_the_data():
     unstable = {("v", "x"): [True, True, False, False]}
     assert lines_for(full(4, 4) | unstable, full(0, 4) | unstable) == (
         "Checks: none significantly worse; 1 of 2 passed less often (test over whole runs, α 0.025, on 4 + 4 runs, all "
-        "70 splits). With 4 + 4 runs the rule is weak: one check that varies in another pattern stops a break from "
-        "blocking; 5 runs of each version avoid that."
+        "70 splits). With 4 + 4 runs the rule is weak: any other check that passed in exactly 4 of the 8 runs, in "
+        "another pattern (one fixed in every run too), stops a break from blocking; 5 runs of each version avoid that."
     )
+    # the adaptive gate picks the rounds itself: only alpha helps (5 + 5 at a share of 0.005)
+    noisy = {("v", "x"): [True, True, False, False, True]}
+    line, _ = gate.checks_lines(
+        criterion.whole_runs(full(5, 5) | noisy, full(5, 5) | noisy, alpha=0.005),
+        once=True,
+    )
+    assert line.endswith("stops a break from blocking; a larger `alpha` avoids that.")
     assert "weak" not in lines_for(full(5, 5), full(4, 5))
     assert lines_for(full(8, 8), full(6, 8)).startswith(
         "Checks: none significantly worse; 1 of 1 passed less often (test over whole runs, α 0.025, on 8 + 8 runs"
@@ -514,7 +521,7 @@ def test_the_checks_line_follows_the_run_counts_not_the_data():
     assert "no break can be significant" in lines_for(full(10, 10), full(0, 1))
     assert lines_for(full(10, 10), full(0, 2)).startswith("Checks: 1 broke")
     assert lines_for(full(12, 12), full(12, 12)).endswith(
-        "The test reads the first 10 runs of each version, as far as it was checked."
+        "The test reads the first 10 runs of each version, as far as simulation checked it."
     )
 
 

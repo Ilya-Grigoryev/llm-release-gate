@@ -6,7 +6,7 @@ from pathlib import Path
 
 import yaml
 
-from llm_release_gate import protocol
+from llm_release_gate import criterion, protocol
 
 FILE = "gate.yaml"
 SCHEMA = json.loads((Path(__file__).parent / "project.schema.json").read_text())
@@ -128,7 +128,7 @@ def load(directory: Path) -> Project:
                     raise ValueError(
                         f"{path}: pipelines.{name}: max_spend_usd needs {need}"
                     )
-        pipelines[name] = Pipeline(
+        pipelines[name] = pl = Pipeline(
             name,
             p["config"],
             p["golden"],
@@ -136,6 +136,19 @@ def load(directory: Path) -> Project:
             p.get("inputs-url"),
             **settings,
         )
+        # adaptive runs read the checks at a round K_c fixed by alpha: refuse before anything is paid
+        if (
+            pl.max_spend_usd is not None
+            and pl.checks_block
+            and criterion.runs_to_block(pl.alpha / 2) is None
+        ):
+            least = 2 * min(
+                criterion.floor(k, k) for k in range(1, criterion.MAX_RUNS + 1)
+            )
+            raise ValueError(
+                f"{path}: pipelines.{name}: max_spend_usd with checks that may block needs alpha {float(least):g} "
+                f"or more: at alpha {pl.alpha:g} no number of rounds lets a check block"
+            )
     return Project(
         tuple(raw["prepare"]) if "prepare" in raw else None,
         pipelines,
