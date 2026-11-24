@@ -798,18 +798,13 @@ def set_change(
         if not now or now.get("") != was:
             files.append(p.manifest or own.manifest)
     old_set, new_set = base / own.golden, candidate / p.golden
-    old_cases = new_cases = None
-    if old_set.is_dir() and new_set.is_dir():
-        (old_cases, old_errors), (new_cases, new_errors) = map(
-            case_hashes, (old_set, new_set)
-        )
-        if old_errors or new_errors:  # an invalid set is the gate's error, not a change
-            old_cases = new_cases = None
-    if not (old or was or old_cases is not None) or not (
-        files or old_cases != new_cases
+    old_cases = case_hashes(old_set) if old_set.is_dir() else {}
+    new_cases = case_hashes(new_set) if old_cases and new_set.is_dir() else None
+    if not (old or was or old_cases) or not (
+        files or (new_cases is not None and old_cases != new_cases)
     ):
         return None
-    if old_cases is None:  # a set out of git: its manifests name the ids
+    if new_cases is None:  # the target branch holds no set: its manifests name the ids
         old_cases, new_cases = (
             dict.fromkeys(manifest_ids(d / m) or ()) if m else {}
             for d, m in ((base, own.manifest), (candidate, p.manifest))

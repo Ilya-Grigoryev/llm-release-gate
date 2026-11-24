@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from llm_release_gate.golden import load_cases, validate
+from llm_release_gate.golden import case_hashes, load_cases, validate
 from llm_release_gate.hashing import canonical_hash
 
 FIXTURE = Path(__file__).parent / "fixtures" / "golden"
@@ -146,3 +146,20 @@ def test_yml_files_count_as_cases(golden):
     shutil.copy(golden / "synth-001.yaml", golden / "copy.yml")
     _, errors = validate(golden)
     assert any("also in" in e for e in errors)
+
+
+def test_case_hashes_name_cases_without_loading_their_checks(golden):
+    case = golden / "synth-001.yaml"
+    before = case_hashes(golden)
+    edit(
+        case,
+        lambda d: d["scoring"].update(
+            method="checks",
+            checks=[{"id": "f", "kind": "function", "function": "no_such_module:f"}],
+        ),
+    )
+    assert validate(golden)[1]  # the check cannot load here
+    after = case_hashes(golden)
+    assert list(after) == ["synth-001"] and after != before
+    (golden / "broken.yaml").write_text("id: [")
+    assert case_hashes(golden) == after  # a file that does not parse is left out

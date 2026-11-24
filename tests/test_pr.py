@@ -259,6 +259,19 @@ def test_added_and_removed_cases_are_named_tracked_or_not(repo):
     ]  # git sees tracked files; the set on disk the rest
 
 
+def test_prepare_cannot_hide_a_case_edit_from_the_target_branch(repo):
+    edit_case(repo)
+    edited = repo.parent / "edited.yaml"
+    shutil.copy(repo / "golden" / "synth-001.yaml", edited)
+    version(
+        repo, "answer", GATE + f"prepare: [cp, {edited}, golden/synth-001.yaml]\n"
+    )  # both trees
+    code, out = gate(repo)
+    assert code == pr.SET_CHANGED and verdict_of(out)["set_change"]["files"] == [
+        "golden/synth-001.yaml"
+    ]
+
+
 def test_a_reformatted_case_counts_as_a_change(repo):
     edit_case(repo, old="version: 1", new="version: 1  # unchanged")
     version(repo, "answer-again")

@@ -38,16 +38,10 @@ def validate(directory: Path) -> tuple[str | None, list[str]]:
     The set hash covers each case's parsed content and the bytes of each input,
     so reformatting a YAML file keeps it and editing an expectation or an input changes it.
     """
-    parts, errors = case_hashes(directory)
-    return (None if errors else canonical_hash(parts)), errors
-
-
-def case_hashes(directory: Path) -> tuple[dict[str, dict], list[str]]:
-    """The hashes of each valid case's content and inputs, by id, and the errors."""
     errors, seen, parts = [], {}, {}
     files = case_files(directory)
     if not files:
-        return {}, [f"{directory}: no *.yaml cases"]
+        return None, [f"{directory}: no *.yaml cases"]
     root = Path(directory).resolve()
     for path in files:
         try:
@@ -86,7 +80,23 @@ def case_hashes(directory: Path) -> tuple[dict[str, dict], list[str]]:
             "case": case_hash,
             "inputs": {name: file_hash(p) for name, p in case.inputs.items()},
         }
-    return parts, errors
+    return (None if errors else canonical_hash(parts)), errors
+
+
+def case_hashes(directory: Path) -> dict[str, str]:
+    """Each case's id and a hash of its content and inputs, without checking the case: for naming what a request
+    changes. A file that does not parse is left out."""
+    found = {}
+    for path in case_files(directory):
+        try:
+            raw = yaml.safe_load(path.read_text())
+            inputs = {
+                n: file_hash(path.parent / f) for n, f in dict(raw["input"]).items()
+            }
+            found[str(raw["id"])] = canonical_hash({"case": raw, "inputs": inputs})
+        except (OSError, ValueError, LookupError, TypeError, yaml.YAMLError):
+            continue
+    return found
 
 
 def check(
