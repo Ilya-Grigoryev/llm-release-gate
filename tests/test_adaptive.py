@@ -176,7 +176,7 @@ def test_a_check_broken_in_every_run_blocks_at_k_c(tmp_path, table):
 
 
 def test_the_checks_read_rounds_1_to_k_c_only(tmp_path, table):
-    # the date breaks from round 6 on: over 12 rounds Fisher would name it (p 0.002), on rounds 1-5 it cannot
+    # the date breaks from round 6 on: the test over the first 10 rounds names it, on rounds 1-5 it cannot
     arm(tmp_path / "base.jsonl", [RIGHT], 12, "b")
     arm(tmp_path / "candidate.jsonl", [RIGHT] * 5 + [WRONG_DATE] * 7, 12, "c")
     assert (

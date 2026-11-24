@@ -232,13 +232,13 @@ A lower `alpha` means fewer wrong blocks and wrong passes, and more runs before 
 | 0.1 | 0.05 | `k: 3` | 12 | 8 / 3 / 2 | 5 |
 
 The table assumes checks that may block. With none, the rule on the mean gets all of `alpha`: its runs are in the row
-whose share equals your `alpha`, the 0.1 row at the default. The fourth column is the test's limit. At `k: 5` the 10 runs of a check split between the versions in 252 ways, and a
-check that passed in all 5 base runs and failed in all 5 candidate runs looks worst in one of them. Every check broken
-that way shares that split, so any number of them blocks. Each other check that passes in 5 of the 10 runs in another
-pattern, broken or noisy, adds a split as bad; past the column's number, no check blocks. At `k: 4` the default share
-allows only the real split, so one check that varies in another pattern stops a break: the rule on checks is weak
-there, and the comment says so. The comment states the split and
-the range's level. If no check could block with the pipeline's `k` and `alpha`, `pr` says so before the runs and names
+whose share equals your `alpha`, the 0.1 row at the default. The fourth column is the test's limit. At `k: 5` the 10
+runs of a check split between the versions in 252 ways, and a check that passed in all 5 base runs and failed in all 5
+candidate runs looks worst in one of them. Every check broken that way shares that split, so any number of them
+blocks. Each other check that passes in 5 of the 10 runs in another pattern, broken or noisy, adds a split as bad;
+once such splits, the real one included, outnumber the column, no check blocks. At `k: 4` the default share allows
+only the real split, so one check that varies in another pattern stops a break: the rule on checks is weak there, and
+the comment says so. The comment states the split and the range's level. If no check could block with the pipeline's `k` and `alpha`, `pr` says so before the runs and names
 the `k` or `alpha` that would let it.
 
 ### Adaptive runs: a money limit instead of `k`
