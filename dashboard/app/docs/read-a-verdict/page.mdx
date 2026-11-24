@@ -97,7 +97,7 @@ With `levels` in `gate.yaml` ([Critical and minor checks](/docs/how-it-decides#c
 | ⚠️ The target branch's gate.yaml is not valid … | Fix it: until then a request can loosen its own gate. |
 | `booking` is new in gate.yaml … | See [No base version](#no-base-version). |
 | ⚙️ This request changes the gate's rules … | Nothing, unless the request should be judged by the new rules: then merge them first, in their own request. |
-| This request changes the test set … | Review case edits as code: a request that deletes or loosens its failing cases passes without being better. |
+| ✋ This request changes the test set … | Under a red title, review the named cases as code. Under ✋ set changed, see [Set changed](#set-changed). |
 | ❌ This request removes `faq` … | See [Inconclusive](#inconclusive). |
 | Base ran again: this job cannot read earlier runs … | Add `actions: read` to the job's `permissions`. |
 
@@ -109,6 +109,7 @@ With `levels` in `gate.yaml` ([Critical and minor checks](/docs/how-it-decides#c
 | ❌ quality fail | 10 |
 | ⚠️ inconclusive, or a ❌ note under another title | 11 |
 | ❌ budget fail | 12 |
+| ✋ set changed | 13 |
 | ⚠️ infra error | 20 |
 | not checked: no comment | the step exits 1 |
 
@@ -157,6 +158,20 @@ Two things give `inconclusive` (exit 11):
   and exit 11 unless something worse happened. If the removal is meant, a maintainer merges over the check; a renamed
   pipeline gets `no base version` under its new name.
 
+### Set changed
+
+The request changes the pipeline's test set, and the gate compared the versions on the request's cases. On those cases
+the job would pass (the verdict follows "Verdict on the request's cases"), but a request that deletes or loosens the
+cases that catch it would pass the same way. So the job fails with exit 13 until a maintainer reviews the change and
+merges over the check.
+
+The line under the title names what changed: the cases added, removed and edited, then the files. The gate compares
+the files the target branch's `gate.yaml` names: the cases git tracks under `golden`, and the `manifest`. A reformatted
+case counts too. For a set kept out of git, such as one a CI step downloads, the gate sees a change in the manifest, or
+in the set itself when `prepare` builds it in both trees; pin such a set with a `manifest`. A request that changes code
+and cases together gets `set changed` when the code passes. To have the code judged on reviewed cases, merge the case
+edits first, in their own request.
+
 ### Infra error
 
 The gate could not reach a verdict; it says nothing about quality. The comment gives the reason and the
@@ -167,8 +182,8 @@ rate limits or an outage, re-run the job; for quota or a wrong key, fix the repo
 
 The request leaves this pipeline's version as it is, so nothing ran and the job passes. If you expected a run, your
 change touched only files that do not count, such as documentation, `.github/`, `gate.yaml`, ignored paths or test
-sets ([What a version is](/docs/how-it-works#what-a-version-is)). Edited cases run on the next request that changes
-the version.
+sets ([What a version is](/docs/how-it-works#what-a-version-is)). A request that edits only cases gets
+[`set changed`](#set-changed) instead. Edited cases run on the next request that changes the version.
 
 ### No base version
 

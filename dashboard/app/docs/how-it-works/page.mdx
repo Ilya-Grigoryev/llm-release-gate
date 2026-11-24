@@ -52,12 +52,13 @@ change. These do not count:
 A `docs/` directory deeper in the tree is code. A `!` pattern in `ignore` takes documentation, CI or ignored paths back
 into the version, but nothing else from this list.
 
-<Fig id="how-it-works-2" caption={"A version is its config, its prompts and the code git tracks. Documentation, CI, gate settings, ignored paths and test sets do not count. Example repository."} alt={"In the example repository, editing the system prompt, the config, the code, the lock file or a file under docs/kb/ makes a new version, so both versions run. The files under docs/kb/ count because gate.yaml takes them back with \"!docs/kb/\". Editing README.md, docs/guide.md, web/ (listed in ignore), a test case or a rule in gate.yaml leaves the version as it is, so the gate reports \"unchanged\"."} />
+<Fig id="how-it-works-2" caption={"A version is its config, its prompts and the code git tracks. Documentation, CI, gate settings, ignored paths and test sets do not count. Example repository."} alt={"In the example repository, editing the system prompt, the config, the code, the lock file or a file under docs/kb/ makes a new version, so both versions run. The files under docs/kb/ count because gate.yaml takes them back with \"!docs/kb/\". Editing README.md, docs/guide.md, web/ (listed in ignore), a test case or a rule in gate.yaml leaves the version as it is, so nothing runs: the gate reports \"unchanged\", or \"set changed\" for a test case, which a person reviews."} />
 
 ## When nothing runs
 
 A pipeline whose version the request leaves as it is gets `unchanged` and costs nothing. Editing one pipeline's prompt
-leaves the others unchanged. Editing only test cases is `unchanged` too; the comment notes that the test set changed.
+leaves the others unchanged. Editing only test cases runs nothing either, but the verdict is
+[`set changed`](/docs/read-a-verdict#set-changed), and a maintainer merges over the check.
 
 The gate skips a pipeline only when both branches' `gate.yaml` agree on `ignore` and on which files belong to which
 pipeline. If a request changes either, every pipeline runs, so it cannot hide new code from its own gate. The same
@@ -83,6 +84,12 @@ The rules come from the target branch's `gate.yaml`: `delta`, `alpha`, `k`, `mea
 the request: the candidate's config, the test set, its manifest and `prepare`. A request therefore cannot loosen its own
 gate: a raised `delta` applies after merge. If the target branch has no `gate.yaml`, or a broken one, the request's
 rules hold.
+
+Both versions run on the request's test set, so a request could pass by editing the cases that catch it. If it changes
+the files of a set the target branch's `gate.yaml` names (the cases git tracks under `golden`, or the `manifest`), a
+verdict that would exit 0 becomes [`set changed`](/docs/read-a-verdict#set-changed) (exit 13). The comment names the
+cases added, removed and edited; a maintainer reviews them and merges over the check. A new pipeline has no set to
+compare with.
 
 A request that removes or renames a pipeline fails as [`inconclusive`](/docs/read-a-verdict#inconclusive) (exit 11),
 and every other pipeline that would exit 0 exits 11 too. The gate catches mistakes, not a hostile author
@@ -138,5 +145,5 @@ points, six times the default `delta`. [How it decides](/docs/how-it-decides) ex
 ## Verdicts
 
 Each pipeline gets one verdict, and CI sees its exit code: `pass`, `unchanged` and `no base version` exit 0,
-`quality fail` 10, `inconclusive` 11, `budget fail` 12 and `infra error` 20. A request from a fork is `not checked`,
+`quality fail` 10, `inconclusive` 11, `budget fail` 12, `set changed` 13 and `infra error` 20. A request from a fork is `not checked`,
 and its job fails. [Read a verdict](/docs/read-a-verdict) says what to do with each.

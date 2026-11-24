@@ -122,7 +122,8 @@ runner's scorer is `hits(case, answer, trace=None)` (by default the run's trace,
   base's by more than the threshold (absolute or relative; the CLI's default is 5 points). Means are compared as exact fractions. `Verdict` holds
   `outcome`, `exit_code`, `base_mean`, `candidate_mean`, `diff_pp`, `limit_pp`, `rule`, `cases` and the cases that got
   worse. It gives `pass` (0) or `quality fail` (10); a budget can turn a pass into `budget fail` (12); `inconclusive` (11)
-  comes from the betting rule; `infra error` (20) is any failure to compare.
+  comes from the betting rule; `infra error` (20) is any failure to compare. `pr` turns an exit 0 on a changed test set
+  into `set changed` (13, D-035).
 - **Built — betting rule on the mean** (`mean.py`, `mean: betting`). The rule pairs run k of each case with run k of
   the base; D = candidate − base in [−1, 1] and Y = (D + 1) / 2. Two one-sided betting tests (Waudby-Smith and Ramdas,
   arXiv:2010.09686): capital K+ = Π (1 + λ (Y − m)) at m = (1 − δ) / 2 passes once it reaches 1 / α, K− = Π (1 − λ (Y − m))
@@ -229,8 +230,13 @@ trees, and asks each tree's own gate for the version's hash. The rules (`delta`,
 from the target branch's `gate.yaml` when it has one (D-024); price files are copied before the request's `prepare`
 runs in that tree. Pipelines are matched by name, and the base arm runs the target branch's config of the pipeline, so
 renaming a config file keeps the base. A pipeline the target branch lacks gives `no base version`: only the candidate
-runs (`gate --no-base`), for its score and budget, exit 0. The comment notes changed rules, a new pipeline and a changed
-test set. The gate runs the request's code, workflow and lock file: it catches mistakes, not a hostile author. Equal hashes give `unchanged` (exit 0, no runs) when the two `gate.yaml` agree on `ignore` and on which files belong to which pipeline; a request that removes a pipeline exits 11;
+runs (`gate --no-base`), for its score and budget, exit 0. The comment notes changed rules and a new pipeline. The set
+comes from the request (D-035, C′): `pr` compares the files that define it, as the target branch's `gate.yaml` names
+them, with the request's: git's ids of the files it tracks under `golden` (the target branch as committed, the request
+with uncommitted edits), the `manifest`, and the sets' case hashes when both trees hold the set (`prepare` may build it).
+A changed set turns an exit 0 (`pass`, `unchanged`, `no base version`) into `set changed`, exit 13: the comment names
+the cases added, removed and edited and the files, `verdict.json` gets `set_change`, and a person merges over the check.
+Other outcomes keep their code and get the note. The gate runs the request's code, workflow and lock file: it catches mistakes, not a hostile author. Equal hashes give `unchanged` (exit 0, no runs) when the two `gate.yaml` agree on `ignore` and on which files belong to which pipeline; a request that removes a pipeline exits 11;
 otherwise both versions run in parallel, each with its own code, `k` runs per case, and the gate writes `comment.md` and
 `verdict.json`. With `--cache DIR` the base's runs come from earlier jobs first (below). A step that cannot run gives an infra-error comment and 20; `pr` exits with the worst outcome of its
 pipelines. The action gates one pipeline per step (`pipeline:`, or the only one), posts the comment and keeps the

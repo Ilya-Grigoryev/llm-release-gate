@@ -496,12 +496,13 @@ other files that do not count gets `unchanged` and calls no model
 ## What each outcome means
 
 `pass`, `unchanged` and `no base version` exit with 0 and leave the job green. `quality fail` (10), `inconclusive` (11),
-`budget fail` (12), `infra error` (20) and `not checked` turn it red. [Read a verdict](/docs/read-a-verdict) explains
+`budget fail` (12), `set changed` (13: the request edits its test set), `infra error` (20) and `not checked` turn it red. [Read a verdict](/docs/read-a-verdict) explains
 each outcome and what to do next.
 
 ## Next steps
 
-- **Write more cases.** One case sees only its own input ([Write tests](/docs/write-tests)).
+- **Write more cases.** One case sees only its own input ([Write tests](/docs/write-tests)). A request that edits the
+  test set gets `set changed`: a maintainer reviews the cases and merges over the check.
 - **Add prices and budgets** to see what a decision cost and to block a candidate that is too expensive or too slow
   ([How it decides](/docs/how-it-decides#budgets-cost-and-latency)).
 - **Gate more than one pipeline** ([Connect your app](/docs/connect)).

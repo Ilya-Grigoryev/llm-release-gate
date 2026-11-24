@@ -155,7 +155,8 @@ price. A model without a price has an unknown cost, and a cost budget then gives
 ## Manifest
 
 For a test set built or fetched outside git: `pr` and `golden validate --manifest` fail unless the set has exactly these
-ids and this hash.
+ids and this hash. Commit it: `pr` compares it with the target branch's to see whether a request
+[changes the set](#exit-codes).
 
 ```yaml
 # manifests/invoices.yaml: the case ids, and the hash `golden validate` prints for your set (example value)
@@ -360,7 +361,8 @@ Run `uv run llm-release-gate COMMAND` in a project that lists the gate as a depe
 
 Gates a pull or merge request from its git checkout, with the target branch in a second worktree. Per pipeline, equal
 version hashes give `unchanged` (unless one of the [changes that run every pipeline](#gate-yaml)); otherwise both
-versions run in parallel, with results in `OUT/NAME`. With `--cache`, the base's runs come from earlier jobs when they
+versions run in parallel, with results in `OUT/NAME`. A request that changes the test set exits 13 where it would exit
+0 ([`set changed`](#exit-codes)), with `--rounds` too. With `--cache`, the base's runs come from earlier jobs when they
 are recent ([where from](/docs/how-it-decides#where-the-bases-runs-come-from)).
 
 | Flag | Meaning |
@@ -497,13 +499,14 @@ a cached directory.
 | 0 | `unchanged` | `pr` only: equal version hashes and none of the [changes that run every pipeline](#gate-yaml); nothing ran |
 | 0 | no base version (`outcome: "no base"`) | the target branch has no version of this pipeline: the candidate runs alone and does not block |
 | 10 | `quality fail` | the rule on the mean blocked, or a check that may block got significantly worse: a normal or critical one under `checks: block`, a critical one under `checks: report` |
-| 11 | `inconclusive` | the betting rule could not decide with these runs and no check blocked; or a request removes or renames a pipeline: each `pr` step that would exit 0 exits 11, and the comments get a note. The naive rule never gives it |
+| 11 | `inconclusive` | the betting rule could not decide with these runs and no check blocked; or a request removes or renames a pipeline: each `pr` step that would exit 0 or 13 exits 11, and the comments get a note. The naive rule never gives it |
 | 12 | `budget fail` | quality passed; a cost or latency limit did not |
+| 13 | `set changed` | `pr` only: it would exit 0, but the request changes the test set the target branch's `gate.yaml` names: the cases git tracks under `golden`, the `manifest`, or the set itself when both trees hold it. `set_change` says what changed |
 | 20 | `infra error` | the runs cannot be compared, a step could not run, or the gate failed |
 | 1, 2 | — | a Python crash or a usage error, never read as a verdict |
 
 On a pull request from a fork the action runs nothing and its step exits 1 as `not checked`. With several pipelines,
-`pr` exits with the worst outcome, in the order 20, 10, 12, 11, 0; each `verdict.json` keeps its own.
+`pr` exits with the worst outcome, in the order 20, 10, 12, 11, 13, 0; each `verdict.json` keeps its own.
 
 | Command | 0 | 1 | 2 |
 |---|---|---|---|
@@ -557,9 +560,10 @@ paid for also go up as `llm-release-gate-runs-NAME-VERSION-SET` (16 characters o
 | `models_without_date` | undated model names in the runs |
 | `runs_per_case` | `{base, candidate}` |
 | `base_reused` | `{runs, days_before_candidate}`: base runs that came from earlier jobs, and how much earlier the oldest ran; `{0, null}` when none |
+| `set_change` | `pr` only: how the request changes the test set, `null` if it does not or the target branch names no set of this pipeline. `files` (paths from the project whose content differs, as git tracks them), `added`, `removed` and `edited` (case ids: from both sets when both trees hold them, else from the manifests' `ids`; `edited` then stays empty), and `outcome`, the verdict on the request's set (`pass`, `unchanged`, `no base` under `set changed`) |
 
-`unchanged` writes only `outcome`, `exit_code`, the three hashes, and `base_mean`, `candidate_mean` and `diff_pp` as
-`null`. `no base` has no `limit_pp`, `rule`, `cases`, `worse`, `runs`, `threshold_pp`, `relative`, `alpha`, `mean`, `checks`,
+`unchanged` writes only `outcome`, `exit_code`, the three hashes, `set_change`, and `base_mean`, `candidate_mean` and
+`diff_pp` as `null`. `set changed` keeps the fields of the verdict it replaces, named in `set_change.outcome`. `no base` has no `limit_pp`, `rule`, `cases`, `worse`, `runs`, `threshold_pp`, `relative`, `alpha`, `mean`, `checks`,
 `levels`, `checks_mode`, `checks_reported`, `warnings`, `minor_cases`, `levels_unmatched` or `rescored`; its
 `base_mean`, `diff_pp`, `base_config` and (with prices) `cost_usd.base` are `null`, `runs_per_case.base` is `0`, and
 it has no `base_reused`.

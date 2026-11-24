@@ -43,8 +43,18 @@ const CHANGES: Change[] = [
     label: "edit a test case",
     file: "golden/booking/cancel-after-deadline.yaml",
     runs: false,
-    why: <>The test set that {code("gate.yaml")} names does not count.</>,
-    note: <>This request changes the test set of {code("booking")}.</>,
+    why: (
+      <>
+        The test set that {code("gate.yaml")} names is not part of the version. The verdict is {code("set changed")} (exit 13): a
+        person reviews the edit and merges over the check.
+      </>
+    ),
+    note: (
+      <>
+        ✋ This request changes the test set of {code("booking")}. Cases edited: {code("cancel-after-deadline")}. Files:{" "}
+        {code("golden/booking/cancel-after-deadline.yaml")}.
+      </>
+    ),
   },
   { label: <>edit {code("web/index.html")}</>, file: "web/index.html", runs: false, why: <>{code("web/")} is listed in {code("ignore")}.</> },
   {

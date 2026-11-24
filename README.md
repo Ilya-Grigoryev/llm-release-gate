@@ -114,6 +114,7 @@ uv run llm-release-gate gate --base data/runs/base.jsonl --candidate data/runs/c
 | 10 | quality fail |
 | 11 | inconclusive: the betting rule on the mean could not decide with these runs, or a request removes a pipeline from `gate.yaml` |
 | 12 | budget fail: quality passed, a cost or latency limit did not |
+| 13 | set changed (`pr` only): an exit 0 on a test set the request changed; a person reviews the cases and merges over the check |
 | 20 | infra error: the runs cannot be compared, or the tool failed |
 
 Python and argparse keep 1 and 2, so a crash is never read as a verdict.
@@ -307,7 +308,11 @@ without it the base runs again and the comment says so.
 
 The rules (`delta`, `alpha`, `k`, `max_spend_usd`, `budgets`, `prices`, `base_max_age_hours`) come from the target branch's `gate.yaml`, so editing the rules in a
 request does not loosen that request's gate: new rules apply after merge, and the comment says when a request changes
-them, adds a pipeline or changes a test set. A request that removes a pipeline (or renames it, which looks the same)
+them or adds a pipeline. Both versions run on the request's test set, so a request could edit the cases that would
+catch it. A request that changes the set's files, as the target branch's `gate.yaml` names them (the cases git tracks
+under `golden`, the `manifest`), gets `set changed` (exit 13) where it would exit 0: the comment names the cases added,
+removed and edited, and a maintainer reviews them and merges over the check. A quality, budget or inconclusive verdict
+stays and gets the same note. A request that removes a pipeline (or renames it, which looks the same)
 fails as inconclusive (exit 11; the other pipelines keep their verdicts): no version of it was compared, so a
 maintainer merges it over the check if that is intended. Commit the price file: a file that `prepare` makes is read
 after `prepare` has run. The gate matches pipelines by name: a pipeline the target branch's
