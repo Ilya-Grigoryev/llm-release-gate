@@ -334,7 +334,7 @@ sequenceDiagram
 
 ## The record of a run
 
-One JSON line per (case, repetition), record version 6:
+One JSON line per (case, repetition), record version 7:
 
 | Field | Meaning |
 |---|---|
@@ -342,6 +342,7 @@ One JSON line per (case, repetition), record version 6:
 | `config_hash`, `set_hash` | the version (config, prompts, code) and the test set; runs on different sets are never paired |
 | `commit` | the project's commit, `+dirty` with uncommitted edits; to find the code, not to compare |
 | `case`, `rep`, `run_id`, `timestamp` | which run, of which invocation, when (UTC) |
+| `ci_job` | the CI job that ran it (`github:<repository>/<run id>/<attempt>/<job>`, `gitlab:<project>/<job id>`), `null` outside CI; a reused run keeps its own; the legs of a GitHub matrix job share one |
 | `requested_model` | the model the config asked for |
 | `prices_hash` | hash of the price table the runner priced `usage` with, `null` without one |
 | `output`, `raw`, `input_tokens`, `output_tokens`, `latency_s`, `model`, `fingerprint`, `reasoning_tokens`, `finish_reason`, `request_id` | the pipeline's `Answer`; `model` is what the provider reported |

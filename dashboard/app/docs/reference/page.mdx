@@ -565,7 +565,7 @@ it has no `base_reused`.
 
 ## The record of a run
 
-One JSON line per run of a case and repetition, record version 6, with `error` set for a run without an answer. A run
+One JSON line per run of a case and repetition, record version 7, with `error` set for a run without an answer. A run
 the account stopped before it paid for anything is not recorded. A rerun appends the missing runs; the gate reads the
 last line without an `error`.
 
@@ -575,6 +575,7 @@ last line without an `error`.
 | `config_hash`, `set_hash` | the version and the test set; runs on different sets are never paired |
 | `commit` | the project's commit, `+dirty` for uncommitted edits; not compared |
 | `case`, `rep`, `run_id`, `timestamp` | the case, the repetition (from 0), the runner's invocation, UTC time |
+| `ci_job` | the CI job that ran it: `github:<repository>/<run id>/<attempt>/<job>` or `gitlab:<project>/<job id>`; `null` outside CI; a reused run keeps its own; the legs of a GitHub matrix job share one |
 | `requested_model`, `model` | the config's model and the one the provider reported |
 | `prices_hash` | the runner's price table; `null` without one, as in every run `pr` starts |
 | `output`, `raw` | the parsed answer and the model's text |

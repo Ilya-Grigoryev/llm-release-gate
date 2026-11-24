@@ -6,11 +6,12 @@ fails. `<stem>.native.jsonl` is for raw provider responses, which nothing record
 
 import argparse
 import json
+import os
 import sys
 import threading
 import time
 import uuid
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from dataclasses import asdict, fields
 from datetime import UTC, datetime
@@ -33,7 +34,8 @@ from llm_release_gate.trace import Trace, active, usage
 from llm_release_gate.version import code_hash, commit, version_hash
 
 # 2: scorer_version; 3: trace, usage, wall_s; 4: requested_model; 5: prices_hash
-RECORD_VERSION = 6  # 6: config_hash covers the project's code (D-025), commit
+# 6: config_hash covers the project's code (D-025), commit
+RECORD_VERSION = 7  # 7: ci_job
 Scorer = Callable[[Case, Answer], dict[str, bool | float | None]]
 EMPTY_ANSWER = {f.name: None for f in fields(Answer)}
 
@@ -69,6 +71,24 @@ def results(path: Path, config_hash: str, set_hash: str) -> dict[tuple[str, int]
         and r.get("set_hash") == set_hash
         and r.get("error") is None
     }
+
+
+def ci_job(env: Mapping[str, str] = os.environ) -> str | None:
+    """The CI job the runs belong to, so runs can be grouped by job; None outside GitHub Actions and GitLab CI.
+
+    On GitHub: repository, run id, attempt and job key; the legs of a matrix job share it.
+    """
+    if env.get("GITHUB_RUN_ID"):
+        keys = (
+            "GITHUB_REPOSITORY",
+            "GITHUB_RUN_ID",
+            "GITHUB_RUN_ATTEMPT",
+            "GITHUB_JOB",
+        )
+        return "github:" + "/".join(env.get(k, "") for k in keys)
+    if env.get("CI_JOB_ID"):
+        return f"gitlab:{env.get('CI_PROJECT_PATH', '')}/{env['CI_JOB_ID']}"
+    return None
 
 
 def end_line(path: Path) -> None:
@@ -141,7 +161,7 @@ def run(
         raise ValueError(f"max_retries must be a non-negative int, got {max_retries!r}")
     done = results(out, config_hash, set_hash)
     todo = [(c, k) for c in cases for k in range(repetitions) if (c.id, k) not in done]
-    run_id = uuid.uuid4().hex
+    run_id, job_id = uuid.uuid4().hex, ci_job()
     stop = threading.Event()
     wait = wait or stop.wait
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -187,6 +207,7 @@ def run(
             "case": case.id,
             "rep": rep,
             "run_id": run_id,
+            "ci_job": job_id,
             "timestamp": datetime.now(UTC).isoformat(timespec="seconds"),
             "requested_model": model,
             # the price table `usage` was computed with

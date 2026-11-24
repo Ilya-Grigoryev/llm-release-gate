@@ -40,6 +40,36 @@ def go(pipeline, out, **kwargs):
     return run(pipeline, CASES, 4, out, **kwargs)
 
 
+def test_ci_job():
+    github = {
+        "GITHUB_REPOSITORY": "o/app",
+        "GITHUB_RUN_ID": "42",
+        "GITHUB_RUN_ATTEMPT": "2",
+        "GITHUB_JOB": "drift",
+    }
+    assert runner.ci_job(github) == "github:o/app/42/2/drift"
+    assert (
+        runner.ci_job({"CI_JOB_ID": "7", "CI_PROJECT_PATH": "g/app"})
+        == "gitlab:g/app/7"
+    )
+    assert runner.ci_job({}) is None
+
+
+def test_records_carry_the_ci_job(tmp_path, monkeypatch):
+    for k in ("GITHUB_RUN_ID", "CI_JOB_ID"):
+        monkeypatch.delenv(k, raising=False)
+    go(Replay(), tmp_path / "local.jsonl")
+    assert {r["ci_job"] for r in read_records(tmp_path / "local.jsonl")} == {None}
+    monkeypatch.setenv("GITHUB_REPOSITORY", "o/app")
+    monkeypatch.setenv("GITHUB_RUN_ID", "42")
+    monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "1")
+    monkeypatch.setenv("GITHUB_JOB", "drift")
+    go(Replay(), tmp_path / "ci.jsonl")
+    assert {r["ci_job"] for r in read_records(tmp_path / "ci.jsonl")} == {
+        "github:o/app/42/1/drift"
+    }
+
+
 def test_one_record_per_case_and_repetition(tmp_path):
     out = tmp_path / "runs.jsonl"
     assert go(Replay(), out) == 12

@@ -509,6 +509,30 @@ def test_a_recent_base_comes_from_the_cache(repo):
     assert "1 runs of" in (out / "base.log").read_text()
 
 
+def test_runs_name_the_ci_job_that_ran_them(repo, monkeypatch):
+    job = {
+        "GITHUB_REPOSITORY": "o/app",
+        "GITHUB_RUN_ATTEMPT": "1",
+        "GITHUB_JOB": "gate",
+    }
+    monkeypatch.setattr(pr, "ENV", {**pr.ENV, **job, "GITHUB_RUN_ID": "1"})
+    version(repo, "bare")
+    _, out = cached_gate(repo)
+    for arm in ("base", "candidate"):
+        assert {r["ci_job"] for r in records(out / f"{arm}.jsonl")} == {
+            "github:o/app/1/1/gate"
+        }
+    monkeypatch.setattr(pr, "ENV", {**pr.ENV, "GITHUB_RUN_ID": "2"})
+    version(repo, "answer-again")
+    _, out = cached_gate(repo)
+    assert {(r["ci_job"], r["reused"]) for r in records(out / "base.jsonl")} == {
+        ("github:o/app/1/1/gate", True)
+    }
+    assert {r["ci_job"] for r in records(out / "candidate.jsonl")} == {
+        "github:o/app/2/1/gate"
+    }
+
+
 def test_an_old_base_runs_again(repo):
     version(repo, "bare")
     cached_gate(repo)
