@@ -13,8 +13,11 @@ for repo in workbench-support receipt-intake telecom-support; do
     [ "$(cat "$dir/.attempt" 2>/dev/null)" = "$attempt" ] && continue
     mkdir -p "$dir"
     gh api "repos/Ilya-Grigoryev/$repo/actions/runs/$id" > "$dir/run.json"
-    gh run download "$id" -R "Ilya-Grigoryev/$repo" -D "$dir" 2>/dev/null || echo "no artifact: $repo $id"
-    echo "$attempt" > "$dir/.attempt"
+    if gh run download "$id" -R "Ilya-Grigoryev/$repo" -D "$dir" 2>/dev/null; then
+      echo "$attempt" > "$dir/.attempt"  # only on success: a failed copy is tried again next time
+    else
+      echo "not copied, try again: $repo $id"
+    fi
   done
 done
 mkdir -p "$COPY" && rsync -a "$DEST/" "$COPY/"
