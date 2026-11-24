@@ -3,7 +3,11 @@
 For each pipeline in the project's gate.yaml whose version the request changes, run the target branch's version and this
 checkout's on the pipeline's test set, each in its own tree and environment, and compare them. OUT/NAME gets the comment,
 the verdict, both arms' runs and logs, and cases/ with the set's text files (never images) for whoever reads the results.
-Exits with the worst outcome: 20 infra error, 10 quality fail, 12 budget fail, 11 inconclusive, 0 pass.
+Exits with the worst outcome: 20 infra error, 10 quality fail, 12 budget fail, 11 inconclusive, 13 set changed, 0 pass.
+
+A request that changes the files defining a pipeline's test set (D-035), as the target branch's gate.yaml names them
+(the set's tracked files, its manifest), gets `set changed` (13) instead of an exit 0: the versions ran on the
+request's cases, so a person reviews the case edits and merges over the check.
 
 With --cache, runs outlive the job (D-007): when `base_max_age_hours` is above 0 (D-033) the gate reuses the target
 branch's runs of the same version on the same set, up to that age, from that directory and from other jobs' artifacts
@@ -22,6 +26,7 @@ import argparse
 import json
 import math
 import os
+import posixpath
 import shutil
 import subprocess
 import sys
@@ -31,6 +36,8 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import yaml
+
 from llm_release_gate import criterion, project, shared
 from llm_release_gate.compare import Mismatch, load_arm
 from llm_release_gate.gate import (
@@ -39,13 +46,14 @@ from llm_release_gate.gate import (
     INFRA_ERROR,
     PASS,
     QUALITY_FAIL,
+    SET_CHANGED,
     complete,
     k_c,
     split,
 )
-from llm_release_gate.golden import check, load_cases
+from llm_release_gate.golden import case_hashes, check, load_cases
 from llm_release_gate.runner import read_records
-from llm_release_gate.version import own_files
+from llm_release_gate.version import GITLINK, ids_on_disk, own_files
 
 SYNC = [
     "uv",
@@ -55,7 +63,7 @@ SYNC = [
 ]  # each tree gets its own environment, its own gate included
 PYTHON = ["uv", "run", "--quiet", "python"]
 HASH = "import sys; from llm_release_gate.version import version_hash; print(version_hash(sys.argv[1]))"
-WORST = (INFRA_ERROR, QUALITY_FAIL, BUDGET_FAIL, INCONCLUSIVE, PASS)
+WORST = (INFRA_ERROR, QUALITY_FAIL, BUDGET_FAIL, INCONCLUSIVE, SET_CHANGED, PASS)
 TEXT = {".yaml", ".yml", ".json", ".txt", ".md", ".csv"}
 # the pipelines' code gets no token: only the gate reads other jobs' runs (`shared`)
 ENV = {
@@ -487,7 +495,7 @@ def one(
         code = call(decide, candidate, dest / "gate.log")
         if (
             code not in WORST
-            or code == INFRA_ERROR
+            or code in (INFRA_ERROR, SET_CHANGED)  # the gate never gives 13
             or not (dest / "comment.md").is_file()
         ):
             raise Infra("The gate could not compare the runs.", dest / "gate.log")
@@ -718,23 +726,140 @@ def ruled(
                 f"⚙️ This request changes the gate's rules for `{p.name}` (gate.yaml or its prices). They apply "
                 "after merge; until then the gate keeps the target branch's."
             )
-        own_set, new_set = base / own.golden, candidate / p.golden
-        if (
-            own_set.is_dir()
-            and new_set.is_dir()
-            and check(own_set)[0]
-            not in (
-                None,
-                check(new_set)[0],
-            )
-        ):
-            notes.append(f"This request changes the test set of `{p.name}`.")
     return (
         r,
         str(theirs) if theirs else None,
         own and own.config,
         notes,
     )
+
+
+def tracked(directory: Path, path: str, committed: bool) -> dict[str, str]:
+    """Git's id of each tracked file at PATH, by its path below PATH (a file: ""): as committed, or on disk with
+    uncommitted edits, as a version's hash counts them."""
+
+    def listing(*args: str) -> list[str]:
+        command = ["git", "--literal-pathspecs", "-C", str(directory), *args]
+        done = subprocess.run(
+            [*command, "--", path], capture_output=True, text=True, check=False
+        )
+        if done.returncode:
+            raise Infra(f"git cannot list {path}: {done.stderr.strip()}")
+        return [e for e in done.stdout.split("\0") if e]
+
+    if committed:
+        rows = [e.split("\t", 1) for e in listing("ls-tree", "-z", "-r", "HEAD")]
+        found = {n: i.split()[2] for i, n in rows if not i.startswith(GITLINK)}
+    else:
+        gone = set(listing("ls-files", "-z", "--deleted"))
+        rows = [e.split("\t", 1) for e in listing("ls-files", "-z", "--stage")]
+        found = {
+            n: i.split()[1]
+            for i, n in rows
+            if not i.startswith(GITLINK) and n not in gone
+        }
+        edited = [n for n in listing("ls-files", "-z", "--modified") if n in found]
+        found |= ids_on_disk(directory, edited)
+    prefix = "" if path == "." else path + "/"
+    return {n.removeprefix(prefix) if n != path else "": i for n, i in found.items()}
+
+
+def manifest_ids(path: Path) -> set[str] | None:
+    try:
+        return {str(i) for i in yaml.safe_load(path.read_text())["ids"]}
+    except (OSError, yaml.YAMLError, KeyError, TypeError):
+        return None
+
+
+def set_change(
+    own: project.Pipeline | None,
+    p: project.Pipeline,
+    base: Path | None,
+    candidate: Path,
+) -> dict | None:
+    """What the request changes in the pipeline's test set (D-035), against the set the target branch's gate.yaml
+    names: its tracked files, its manifest, and the set itself when both trees hold it (`prepare` may build it). None if
+    the target branch defines no set of the pipeline, or the request changes none of it."""
+    if base is None or own is None:
+        return None
+    old_dir, new_dir = posixpath.normpath(own.golden), posixpath.normpath(p.golden)
+    files = []
+    old = tracked(base, old_dir, True)
+    if old:
+        new = tracked(candidate, new_dir, False)
+        files += [
+            posixpath.join(new_dir if k in new else old_dir, k)
+            for k in sorted(old.keys() | new.keys())
+            if old.get(k) != new.get(k)
+        ]
+    was = own.manifest and tracked(base, posixpath.normpath(own.manifest), True).get("")
+    if was:
+        now = p.manifest and tracked(candidate, posixpath.normpath(p.manifest), False)
+        if not now or now.get("") != was:
+            files.append(p.manifest or own.manifest)
+    old_set, new_set = base / own.golden, candidate / p.golden
+    old_cases = new_cases = None
+    if old_set.is_dir() and new_set.is_dir():
+        (old_cases, old_errors), (new_cases, new_errors) = map(
+            case_hashes, (old_set, new_set)
+        )
+        if old_errors or new_errors:  # an invalid set is the gate's error, not a change
+            old_cases = new_cases = None
+    if not (old or was or old_cases is not None) or not (
+        files or old_cases != new_cases
+    ):
+        return None
+    if old_cases is None:  # a set out of git: its manifests name the ids
+        old_cases, new_cases = (
+            dict.fromkeys(manifest_ids(d / m) or ()) if m else {}
+            for d, m in ((base, own.manifest), (candidate, p.manifest))
+        )
+    return {
+        "files": files,
+        "added": sorted(new_cases.keys() - old_cases.keys()),
+        "removed": sorted(old_cases.keys() - new_cases.keys()),
+        "edited": sorted(
+            k
+            for k in old_cases.keys() & new_cases.keys()
+            if old_cases[k] != new_cases[k]
+        ),
+    }
+
+
+def named(items: list[str], n: int = 5) -> str:
+    return ", ".join(f"`{i}`" for i in items[:n]) + (
+        f" and {len(items) - n} more" if len(items) > n else ""
+    )
+
+
+def described(name: str, change: dict) -> str:
+    cases = [
+        f"{k}: {named(change[k])}" for k in ("added", "removed", "edited") if change[k]
+    ]
+    return (
+        f"✋ This request changes the test set of `{name}`."
+        + (f" Cases {'; '.join(cases)}." if cases else "")
+        + (f" Files: {named(change['files'])}." if change["files"] else "")
+    )
+
+
+def settle(dest: Path, name: str, change: dict | None, code: int) -> int:
+    """Record the set change in the verdict; with one, an exit 0 becomes `set changed` (D-035): the gate compared the
+    versions on the request's cases, so a person reviews the edits."""
+    verdict = json.loads((dest / "verdict.json").read_text())
+    verdict["set_change"] = change and {**change, "outcome": verdict["outcome"]}
+    if change and code == PASS:
+        title, _, rest = (dest / "comment.md").read_text().partition("\n")
+        was = title.removeprefix("**Release gate: ").removesuffix("**")
+        (dest / "comment.md").write_text(
+            f"**Release gate: ✋ set changed**\n\n{described(name, change)} The gate compares the versions on the "
+            "request's cases, so a request could pass by editing the cases that would catch it. Review the edits, "
+            f"then merge over the check.\n\nVerdict on the request's cases: {was}.\n{rest}"
+        )
+        verdict |= {"outcome": "set changed", "exit_code": SET_CHANGED}
+        code = SET_CHANGED
+    (dest / "verdict.json").write_text(json.dumps(verdict, indent=2) + "\n")
+    return code
 
 
 def show(dest: Path) -> None:
@@ -938,6 +1063,7 @@ def main(argv: list[str] | None = None) -> int:
                 if log.is_file():
                     shutil.copyfile(log, dest / log.name)
             notes = [rules_problem] if rules_problem else []
+            change = None
             try:
                 p, prices, base_config, more = ruled(
                     settings.pipelines[name],
@@ -954,7 +1080,10 @@ def main(argv: list[str] | None = None) -> int:
                 golden, set_hash = checked_set(p, candidate, dest)
                 if problem:
                     raise problem
-                codes[name] = one(
+                change = set_change(
+                    rules and rules.pipelines.get(name), p, base, candidate
+                )
+                code = one(
                     p,
                     golden,
                     set_hash,
@@ -967,6 +1096,7 @@ def main(argv: list[str] | None = None) -> int:
                     cache and cache / name,
                     rules is not None and rules.prepare == settings.prepare,
                 )
+                codes[name] = settle(dest, name, change, code)
             except Infra as e:
                 write_comment(
                     dest, "⚠️ infra error", str(e), e.log and dest / e.log.name
@@ -978,6 +1108,8 @@ def main(argv: list[str] | None = None) -> int:
                     dest, "⚠️ infra error", f"The gate failed: {type(e).__name__}: {e}"
                 )
                 codes[name] = INFRA_ERROR
+            if change and codes[name] != SET_CHANGED:
+                notes.append(described(name, change))
             if removed:  # unchecked must not look like a pass: a renamed pipeline looks the same (D-025)
                 notes.append(
                     f"❌ This request removes {', '.join(f'`{n}`' for n in removed)} from gate.yaml: no version of it "

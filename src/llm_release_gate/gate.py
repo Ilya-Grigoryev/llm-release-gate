@@ -22,6 +22,8 @@ from llm_release_gate.trace import usage
 
 # Exit codes. 1 and 2 stay with Python and argparse, so a crash is never read as a verdict.
 PASS, QUALITY_FAIL, INCONCLUSIVE, BUDGET_FAIL, INFRA_ERROR = 0, 10, 11, 12, 20
+# only `pr` gives it: an exit 0 on a test set the request changed (D-035)
+SET_CHANGED = 13
 VERDICTS = {
     PASS: "pass",
     QUALITY_FAIL: "quality fail",

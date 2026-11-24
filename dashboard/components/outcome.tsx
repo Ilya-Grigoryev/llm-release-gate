@@ -3,6 +3,7 @@ const LOOK: Record<string, { color: string; ink: string; icon: string }> = {
   "quality fail": { color: "var(--bad)", ink: "#fff", icon: "✕" },
   "budget fail": { color: "var(--bad)", ink: "#fff", icon: "$" },
   inconclusive: { color: "var(--warn)", ink: "#1b1a18", icon: "?" },
+  "set changed": { color: "var(--warn)", ink: "#1b1a18", icon: "Δ" },
   "infra error": { color: "var(--none)", ink: "#fff", icon: "!" },
   unchanged: { color: "var(--none)", ink: "#fff", icon: "=" },
   "no base": { color: "var(--none)", ink: "#fff", icon: "+" },

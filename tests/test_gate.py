@@ -59,9 +59,10 @@ def test_exit_codes_are_distinct_and_clear_of_python_and_argparse():
         gate.QUALITY_FAIL,
         gate.INCONCLUSIVE,
         gate.BUDGET_FAIL,
+        gate.SET_CHANGED,
         gate.INFRA_ERROR,
     ]
-    assert len(set(codes)) == 5 and not {1, 2} & set(codes)
+    assert len(set(codes)) == 6 and not {1, 2} & set(codes)
 
 
 class Fixed:

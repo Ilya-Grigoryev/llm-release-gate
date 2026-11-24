@@ -3,7 +3,7 @@ import Link from "next/link";
 import { Crumbs } from "@/components/crumbs";
 import { Json } from "@/components/json";
 import { Hit, Outcome } from "@/components/outcome";
-import { compareCases, share } from "@/lib/artifact";
+import { compareCases, setChange, share } from "@/lib/artifact";
 import { date, points, score, short, usd } from "@/lib/format";
 import { loadRun } from "@/lib/load";
 
@@ -59,7 +59,7 @@ export default async function Run(props: PageProps<"/[owner]/[repo]/runs/[id]">)
         <div className="text-lg font-medium">
           <Outcome value={run.outcome} />
         </div>
-        {v && !["unchanged", "no base"].includes(run.outcome) ? (
+        {v?.base_mean != null && v.candidate_mean != null ? (
           <>
             <p className="mt-2 text-sm text-ink-2">{v.rule}</p>
             <dl className="mt-4 grid grid-cols-2 gap-4 text-sm sm:grid-cols-4">
@@ -92,6 +92,11 @@ export default async function Run(props: PageProps<"/[owner]/[repo]/runs/[id]">)
                 <span className="font-mono text-xs">{short(v.set_hash)}</span>
               </Fact>
             </dl>
+            {v.set_change && (
+              <p className="mt-4 rounded-md bg-canvas px-3 py-2 text-sm text-ink-2">
+                The request changed its test set ({setChange(v.set_change)}); both versions ran on the request&apos;s cases.
+              </p>
+            )}
             {run.same_version && (
               <p className="mt-4 rounded-md bg-canvas px-3 py-2 text-sm text-ink-2">
                 Both sides run the same version. Any difference between them is run-to-run noise of the model, not an effect of

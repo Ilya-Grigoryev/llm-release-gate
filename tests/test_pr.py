@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from llm_release_gate import pr, project
+from llm_release_gate import golden, pr, project
 
 FIXTURES = Path(__file__).parent / "fixtures"
 AGENT = FIXTURES / "command" / "agent.sh"
@@ -151,12 +151,179 @@ def test_prepare_cannot_rewrite_the_target_branchs_prices(repo):
     assert gate(repo)[0] == pr.BUDGET_FAIL
 
 
-def test_a_changed_test_set_is_named(repo):
-    case = repo / "golden" / "synth-001.yaml"
-    case.write_text(case.read_text().replace("store: TEST MART", "store: OTHER MART"))
-    version(repo, "bare")
-    _, out = gate(repo)
-    assert "changes the test set of `demo`" in (out / "comment.md").read_text()
+# a request that changes its test set needs a person (D-035)
+
+
+def edit_case(
+    repo, path="golden/synth-001.yaml", old="store: TEST MART", new="store: OTHER MART"
+):
+    case = repo / path
+    case.write_text(case.read_text().replace(old, new))
+
+
+def verdict_of(out):
+    return json.loads((out / "verdict.json").read_text())
+
+
+def test_a_pass_on_a_changed_test_set_needs_a_person(repo):
+    edit_case(repo)
+    version(repo, "answer-again")  # as good as the base
+    code, out = gate(repo)
+    assert code == pr.SET_CHANGED == 13
+    verdict = verdict_of(out)
+    assert verdict["outcome"] == "set changed" and verdict["exit_code"] == 13
+    assert verdict["set_change"] == {
+        "files": ["golden/synth-001.yaml"],
+        "added": [],
+        "removed": [],
+        "edited": ["synth-001"],
+        "outcome": "pass",
+    }
+    comment = (out / "comment.md").read_text()
+    assert comment.startswith(
+        "**Release gate: ✋ set changed**\n\n✋ This request changes the test set of `demo`. "
+    )
+    assert "Cases edited: `synth-001`. Files: `golden/synth-001.yaml`." in comment
+    assert (
+        "Verdict on the request's cases: ✅ pass.\n\nMean score 1.000 → 1.000"
+        in comment
+    )
+
+
+def test_an_unchanged_test_set_keeps_the_pass(repo):
+    version(repo, "answer-again")
+    code, out = gate(repo)
+    assert code == pr.PASS and verdict_of(out)["set_change"] is None
+    assert "test set" not in (out / "comment.md").read_text()
+
+
+@pytest.mark.parametrize(
+    "mode, code, title",
+    [
+        ("wrongdate", pr.QUALITY_FAIL, "❌ quality fail"),
+        ("answer-again", pr.BUDGET_FAIL, "❌ budget fail"),
+    ],
+)
+def test_a_red_verdict_on_a_changed_test_set_stays_and_names_the_change(
+    repo, mode, code, title
+):
+    (repo / "prices.yaml").write_text("fake-model-2026-01-01: [1, 1]\n")
+    rules = GATE + "prices: prices.yaml\nbudgets: {cost_per_run_usd: 0.000001}\n"
+    commit_rules(repo, rules)
+    edit_case(repo)
+    version(repo, mode, rules)
+    assert gate(repo)[0] == code
+    out = repo.parent / "out" / "demo"
+    assert verdict_of(out)["set_change"]["outcome"] == title[2:]
+    comment = (out / "comment.md").read_text()
+    assert comment.startswith(f"**Release gate: {title}**")
+    assert (
+        "\n✋ This request changes the test set of `demo`. Cases edited: `synth-001`."
+        in comment
+    )
+
+
+def test_a_request_that_changes_only_the_test_set_needs_a_person(repo):
+    edit_case(repo)
+    code, out = gate(repo)
+    assert code == pr.SET_CHANGED and not list(out.glob("*.jsonl"))
+    assert verdict_of(out)["set_change"]["outcome"] == "unchanged"
+    assert (
+        "Verdict on the request's cases: ⏭ unchanged.\n\nThis request does not change"
+        in (out / "comment.md").read_text()
+    )
+
+
+def test_added_and_removed_cases_are_named_tracked_or_not(repo):
+    twin = (repo / "golden" / "synth-001.yaml").read_text()
+    (repo / "golden" / "synth-002.yaml").write_text(
+        twin.replace("id: synth-001", "id: synth-002")
+    )
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "two cases")
+    (repo / "golden" / "synth-002.yaml").unlink()
+    (repo / "golden" / "synth-003.yaml").write_text(
+        twin.replace("id: synth-001", "id: synth-003")
+    )  # not in git
+    version(repo, "answer-again")
+    code, out = gate(repo)
+    assert code == pr.SET_CHANGED
+    change = verdict_of(out)["set_change"]
+    assert (change["added"], change["removed"], change["edited"]) == (
+        ["synth-003"],
+        ["synth-002"],
+        [],
+    )
+    assert change["files"] == [
+        "golden/synth-002.yaml"
+    ]  # git sees tracked files; the set on disk the rest
+
+
+def test_a_reformatted_case_counts_as_a_change(repo):
+    edit_case(repo, old="version: 1", new="version: 1  # unchanged")
+    version(repo, "answer-again")
+    code, out = gate(repo)
+    assert code == pr.SET_CHANGED
+    change = verdict_of(out)["set_change"]
+    assert change["files"] == ["golden/synth-001.yaml"] and change["edited"] == []
+
+
+def test_moving_the_set_keeps_it_and_pointing_at_another_changes_it(repo):
+    shutil.copytree(repo / "golden", repo / "cases")
+    git(repo, "add", "cases")
+    version(repo, "answer-again", GATE.replace("golden: golden", "golden: cases"))
+    assert gate(repo)[0] == pr.PASS
+    edit_case(repo, "cases/synth-001.yaml")
+    code, out = gate(repo)
+    assert code == pr.SET_CHANGED and verdict_of(out)["set_change"]["files"] == [
+        "cases/synth-001.yaml"
+    ]
+
+
+def test_a_set_out_of_git_is_compared_by_its_manifest(repo):
+    (repo / "data").mkdir()
+    shutil.move(repo / "golden", repo / "data" / "golden")
+    (repo / ".gitignore").write_text(
+        "data/\n"
+    )  # built by a CI step, as in receipt-intake
+
+    def manifest(*ids):
+        set_hash = golden.check(repo / "data" / "golden")[0]
+        (repo / "manifest.yaml").write_text(
+            f"sha256: {set_hash}\nids: [{', '.join(ids)}]\n"
+        )
+
+    manifest("synth-001")
+    rules = GATE.replace(
+        "golden: golden", "golden: data/golden, manifest: manifest.yaml"
+    )
+    commit_rules(repo, rules)
+    version(repo, "answer-again", rules)
+    assert gate(repo)[0] == pr.PASS
+    twin = (repo / "data" / "golden" / "synth-001.yaml").read_text()
+    (repo / "data" / "golden" / "synth-002.yaml").write_text(
+        twin.replace("id: synth-001", "id: synth-002")
+    )
+    manifest("synth-001", "synth-002")
+    code, out = gate(repo)
+    assert code == pr.SET_CHANGED
+    change = verdict_of(out)["set_change"]
+    assert change["files"] == ["manifest.yaml"] and change["added"] == ["synth-002"]
+
+
+def test_the_worst_outcome_ranks_a_changed_set_below_any_other_failure(repo):
+    two = GATE + "  other: {config: other.yaml, golden: other}\n"
+    shutil.copytree(repo / "golden", repo / "other")
+    (repo / "other.yaml").write_text((repo / "demo.yaml").read_text())
+    (repo / "gate.yaml").write_text(two)
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "a second pipeline")
+    edit_case(repo)
+    code, out = gate(repo)
+    assert code == pr.SET_CHANGED
+    assert verdict_of(out.parent / "other")["outcome"] == "unchanged"
+    (repo / "gate.yaml").write_text(GATE)  # removes `other`: worse than a changed set
+    assert gate(repo)[0] == pr.INCONCLUSIVE
 
 
 def test_a_request_that_adds_the_project_runs_the_candidate_alone(
@@ -437,14 +604,6 @@ def test_a_new_ignore_rule_cannot_hide_new_code(repo):
     code, out = gate(repo)
     assert code == pr.PASS and "unchanged" not in (out / "comment.md").read_text()
     assert "changes what the gate ignores" in (out / "comment.md").read_text()
-
-
-def test_a_changed_test_set_alone_keeps_the_version(repo):
-    case = repo / "golden" / "synth-001.yaml"
-    case.write_text(case.read_text().replace("store: TEST MART", "store: OTHER MART"))
-    _, out = gate(repo)
-    comment = (out / "comment.md").read_text()
-    assert "unchanged" in comment and "changes the test set of `demo`." in comment
 
 
 def test_another_pipeline_cannot_declare_code_as_its_prompt(repo):
@@ -1260,3 +1419,33 @@ def test_rounds_replace_the_money_limit(repo):
     assert sorted(reps(out / "candidate.jsonl")) == [0, 1]
     with pytest.raises(SystemExit):
         pr.main(["--base", "HEAD", "--out", str(repo.parent / "x"), "--rounds", "0"])
+
+
+def test_adaptive_runs_turn_only_their_final_pass(repo):
+    rules = adaptive(repo)
+    edit_case(repo)
+    version(repo, "answer-again", rules)
+    code, out = gate(repo)
+    verdict = verdict_of(out)
+    assert (
+        code == pr.SET_CHANGED and verdict["runs"] == 7 and verdict["stop"] == "decided"
+    )
+    (repo / "gate.yaml").write_text(
+        f"{ADAPTIVE}0.0001\n"
+    )  # the limit stops before a pass
+    git(repo, "add", "gate.yaml")
+    git(repo, "commit", "-q", "-m", "a lower limit")
+    code, out = gate(repo)
+    assert (
+        code == pr.INCONCLUSIVE
+        and verdict_of(out)["set_change"]["outcome"] == "inconclusive"
+    )
+
+
+def test_rounds_compare_on_a_changed_set_too(repo):
+    edit_case(repo)
+    code, out = gate(repo, "--rounds", "2")
+    assert code == pr.SET_CHANGED and verdict_of(out)["runs_per_case"] == {
+        "base": 2,
+        "candidate": 2,
+    }

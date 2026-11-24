@@ -7,17 +7,19 @@ export type VerdictKind =
   | "quality fail"
   | "budget fail"
   | "inconclusive"
+  | "set changed"
   | "infra error"
   | "unchanged"
   | "no base version"
   | "not checked";
 
-/** The lamp each verdict lights: go lets the merge through, stop blocks it, wait is not sure yet, neutral decided nothing. */
+/** The lamp each verdict lights: go lets the merge through, stop blocks it, wait needs a person or more runs, neutral decided nothing. */
 export const LAMP: Record<VerdictKind, Lamp> = {
   pass: "go",
   "quality fail": "stop",
   "budget fail": "stop",
   inconclusive: "wait",
+  "set changed": "wait",
   "infra error": "neutral",
   unchanged: "neutral",
   "no base version": "neutral",

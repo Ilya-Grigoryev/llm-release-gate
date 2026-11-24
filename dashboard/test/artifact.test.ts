@@ -1,6 +1,6 @@
 import { strToU8, zipSync } from "fflate";
 import { describe, expect, it } from "vitest";
-import { compareCases, gateArtifact, latest, parseArtifact, parseCases, summarize, type Rec } from "../lib/artifact";
+import { compareCases, gateArtifact, latest, parseArtifact, parseCases, setChange, summarize, type Rec } from "../lib/artifact";
 
 const rec = (fields: Partial<Rec> & Pick<Rec, "case">): Rec => ({ rep: 0, config_hash: "c1", score: 1, hits: {}, ...fields });
 const lines = (rs: Rec[]) => rs.map((r) => JSON.stringify(r)).join("\n") + "\n";
@@ -77,6 +77,17 @@ describe("parseArtifact", () => {
     const verdict = { outcome: "no base", exit_code: 0, base_mean: null, candidate_mean: 0.75, diff_pp: null, base_config: null, candidate_config: "b" };
     const p = parseArtifact(zipSync({ "verdict.json": strToU8(JSON.stringify(verdict)) }));
     expect(summarize(p)).toMatchObject({ outcome: "no base", exit_code: 0, candidate_mean: 0.75, same_version: null });
+  });
+
+  it("summarizes a pass on a test set the request changed", () => {
+    const change = { files: ["golden/a.yaml"], added: [], removed: [], edited: ["a"], outcome: "unchanged" };
+    const verdict = { outcome: "set changed", exit_code: 13, base_mean: null, candidate_mean: null, diff_pp: null, base_config: "a", candidate_config: "a", set_change: change };
+    const p = parseArtifact(zipSync({ "verdict.json": strToU8(JSON.stringify(verdict)) }));
+    expect(summarize(p)).toMatchObject({ outcome: "set changed", exit_code: 13, base_mean: null, same_version: true });
+    expect(setChange(change)).toBe("edited: a");
+    const many = ["a", "b", "c", "d", "e", "f", "g"];
+    expect(setChange({ ...change, added: many, edited: [] })).toBe("added: a, b, c, d, e and 2 more");
+    expect(setChange({ ...change, edited: [] })).toBe("files: golden/a.yaml");
   });
 
   it("calls a run without a verdict an infra error", () => {

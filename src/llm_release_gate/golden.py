@@ -38,10 +38,16 @@ def validate(directory: Path) -> tuple[str | None, list[str]]:
     The set hash covers each case's parsed content and the bytes of each input,
     so reformatting a YAML file keeps it and editing an expectation or an input changes it.
     """
+    parts, errors = case_hashes(directory)
+    return (None if errors else canonical_hash(parts)), errors
+
+
+def case_hashes(directory: Path) -> tuple[dict[str, dict], list[str]]:
+    """The hashes of each valid case's content and inputs, by id, and the errors."""
     errors, seen, parts = [], {}, {}
     files = case_files(directory)
     if not files:
-        return None, [f"{directory}: no *.yaml cases"]
+        return {}, [f"{directory}: no *.yaml cases"]
     root = Path(directory).resolve()
     for path in files:
         try:
@@ -80,7 +86,7 @@ def validate(directory: Path) -> tuple[str | None, list[str]]:
             "case": case_hash,
             "inputs": {name: file_hash(p) for name, p in case.inputs.items()},
         }
-    return (None if errors else canonical_hash(parts)), errors
+    return parts, errors
 
 
 def check(
