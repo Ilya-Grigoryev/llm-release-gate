@@ -164,11 +164,12 @@ runner's scorer is `hits(case, answer, trace=None)` (by default the run's trace,
   check scored in both versions; `block` or `report` mode. The gate builds its input from every run's `hits` at the
   run's repetition (`check_runs`; a run without results, or missing, gives None) and turns a pass into `quality fail` when it blocks. `floor(kb, kc)` is the
   smallest adjusted p the run counts allow: the share of the splits that are the real one, counting the random copies
-  of it seed 0 draws (8 + 8: 2 of 2000); `can_block` compares it with alpha, `weak` with alpha / 2 (only the real split
-  may be as bad: any other check that passed in exactly k_b of the runs, in another pattern, stops a break; 4 + 4 at
-  0.025),
-  `runs_to_block(alpha)` gives the fewest equal runs from which a check broken in every run can block, 4 at the
-  defaults. The statistic is the smallest p (experiment E-010: a sum of −log p catches more partial breaks but lets
+  of it seed 0 draws (8 + 8: 2 of 2000); `can_block` compares it with alpha; `weak` says one more split as bad as the
+  real one stops a break (with every split taken, any other check that passed in exactly k_b of the runs, in another
+  pattern; 4 + 4 at 0.025). Copies make the floor uneven in k: at a share of 0.0005, 7 + 7 can block, 8 + 8 cannot,
+  9 + 9 can. `runs_to_block(alpha)` gives the fewest equal runs from which on, up to 10, a check broken in every run
+  can block (4 at the defaults; the comment and `pr`'s warning before the runs use it), `first_block(alpha)` the first
+  such number, where the adaptive gate reads the checks (K_c is the larger of it and 5). The statistic is the smallest p (experiment E-010: a sum of −log p catches more partial breaks but lets
   false blocks grow when checks of a case fail together differently). `per_check` keeps the rule it replaced, Fisher per
   check with Tarone's correction, for the experiments: at 5 + 5 runs it blocks none of 7 or more checks broken in every
   run.
