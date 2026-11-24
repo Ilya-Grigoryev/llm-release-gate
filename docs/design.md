@@ -139,7 +139,7 @@ runner's scorer is `hits(case, answer, trace=None)` (by default the run's trace,
   run. Variants (`--mean NAME`): bets on whole runs and an empirical-Bernstein process, for the experiments.
 - **Built — levels** (`levels.py`, `levels:` in `gate.yaml`). Each (case, check) is `critical`, `normal` or `minor`: the
   case is `minor`; else the check's pattern (`critical` first); else the case's pattern; else `normal`. The checks that
-  may block (`critical`, and `normal` under `checks: block`) form one family for `per_check`; those that only report
+  may block (`critical`, and `normal` under `checks: block`) form one family for `whole_runs`; those that only report
   (`minor`, and `normal` under `checks: report`) another, each at half of `alpha`; the second never blocks and spends
   none of the gate's bound. A broken `critical` check leads the comment; a
   significantly worse check of the second family puts ⚠️ in the title ("minor" when all are minor, else "reported"), a
@@ -147,22 +147,34 @@ runner's scorer is `hits(case, answer, trace=None)` (by default the run's trace,
   `checks: report` keeps its old output, with no ⚠️. `minor` checks leave the case score (rebuilt from `hits` with the case's own
   aggregate, so the scorer version stays), and a case with only `minor` checks leaves the mean. Without `levels`
   everything is `normal` and the gate is unchanged.
-- **Built — the rule on checks.** `per_check(base, candidate, alpha, sides, mode,
-  threshold) -> CheckVerdict`, a pure function over the results of each (case, check) per repetition: Fisher's exact test
-  on k of K passes in each version, computed in exact fractions; Tarone's correction (only checks that could reach
-  significance count, m the smallest number with at most m of them) and Bonferroni over those; a two-sided test blocks
-  only a check that got worse; a share passes at `threshold`, None is left out; `block` or `report` mode. Defaults —
-  one-sided, alpha 0.025 (the gate passes half its `alpha`) — wait on D-003's open choice (M-12); the list by a discrete BH is not built. The gate builds
-  its input from every run's `hits` (`check_runs`; a run without results gives None) and turns a pass into `quality fail`
-  when it blocks; `checks: report` in `gate.yaml` only lists. `can_block(kb, kc, alpha, sides)` says whether one check that
-  broke in every run could block with these run counts, `runs_to_block(alpha, sides)` the fewest equal runs from which
-  it can, 4 at the defaults; the comment names it when no break can be significant at α / m. Tarone's correction counts every
-  check that could show a break, so several broken at once need more runs than one.
+- **Built — the rule on checks** (D-030). `whole_runs(base, candidate, alpha, mode, threshold, seed) -> CheckVerdict`,
+  a pure function over the results of each (case, check) per repetition: a permutation test over whole runs. Run i of a
+  version is position i of every list, so checks of one case that fail together stay together; a shorter list ends in
+  None, and an unscored result (None) moves with its run. It reads the first 10 runs of each version (`MAX_RUNS`: the
+  test was simulated up to 10 + 10, experiment E-009). Splits of the k_b + k_c runs into k_b labelled base: all
+  C(k_b + k_c, k_b) of them up to 2000 (6 + 6 runs give 924), else the real one and 1999 random ones from `seed` (the gate
+  passes 0, so a second look at the same runs gives the same answer). Per split, the one-sided Fisher p of every check
+  that both passes and fails over all runs, in exact fractions; then step-down minP (Westfall and Young): ranked by
+  their real p, check j gets the share of splits in which some check ranked from j on has a p at most j's, and the
+  largest share up to j. A check is named when that share is at most alpha and it passed less often; a check scored in
+  one version only takes part in the splits and is never named. The share of false blocks holds exactly when the runs
+  of both versions are interchangeable, as for a candidate that behaves like the base; for one that fixed checks or
+  changed which checks fail together, E-009 measured at most 1.86 % at 2.5 %, without a proof. `CheckVerdict` holds
+  the run counts read, the number of splits, the seed, the named checks with their Fisher p and adjusted p, and every
+  check scored in both versions; `block` or `report` mode. The gate builds its input from every run's `hits` at the run's repetition (`check_runs`; a run
+  without results, or missing, gives None) and turns a pass into `quality fail` when it blocks. `floor(kb, kc)` is the
+  smallest adjusted p the run counts allow (1 / splits); `can_block` compares it with alpha, `weak` with alpha / 2 (only
+  the real split may be as bad: one more check varying in another pattern stops a break, 4 + 4 at 0.025),
+  `runs_to_block(alpha)` gives the fewest equal runs from which a check broken in every run can block, 4 at the
+  defaults. The statistic is the smallest p (experiment E-010: a sum of −log p catches more partial breaks but lets
+  false blocks grow when checks of a case fail together differently). `per_check` keeps the rule it replaced, Fisher per
+  check with Tarone's correction, for the experiments: at 5 + 5 runs it blocks none of 7 or more checks broken in every
+  run.
 - **Built — one `alpha` for the gate** (`split`, `alpha:` in `gate.yaml`, `--alpha`). Either rule can block on its
-  own, so the bound on a false block of the gate is the sum of theirs. `alpha` (default 0.05) is that sum: half to the
+  own, so the gate's share of false blocks is the sum of theirs. `alpha` (default 0.05) is that sum: half to the
   betting rule, half to the rule on checks; all to the betting rule when the set has no check that may block. The
   settings and the set decide which checks may block, the results never do, so the split keeps the bound. The
-  naive rule has no bound; under it `alpha` covers the rule on checks. The betting rule's share also bounds its wrong
+  naive rule takes no share; under it `alpha` covers the rule on checks. The betting rule's share also bounds its wrong
   pass. The comment states the split (`alpha_line`); `pr` warns before the runs when `k` is below `runs_to_block` at
   the checks' share.
 - **Built (D-032).** With `max_spend_usd` the gate buys rounds (`gate.plan`) until it decides or the next round does not

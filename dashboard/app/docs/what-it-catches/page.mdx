@@ -104,8 +104,8 @@ application reads from the repository are code, except `docs/` at the root and f
 - **A change no case touches.** If your cases have credits of €30, €45 and €60, raising the credit limit from €30 to
   €40 changes nothing for any of them.
 - **One case on a large set.** With 20 cases, one case going from 1 to 0 lowers the mean by exactly 5 points, which is
-  at the naive rule's limit and passes; the rule on checks blocks one check broken in every run from 4 runs of each version (default `alpha`),
-  several broken at once later. Read the comment's list of cases that got worse even on a pass.
+  at the naive rule's limit and passes; the rule on checks blocks a check broken in every run from 4 runs of each version (default `alpha`),
+  and several broken in every run just as well. Read the comment's list of cases that got worse even on a pass.
 - **Changes outside the version**: untracked files, environment variables, data outside the repository, services your
   tools call, a provider's change behind a model name.
 - **Changes smaller than the noise** of the runs: one per version by default.

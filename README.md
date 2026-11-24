@@ -10,7 +10,7 @@ The gate runs each case several times and compares the two versions case by case
 
 ## Status
 
-Work in progress. Built: two rules on the mean, the naive one (one run per version against a fixed threshold, the default) and a betting rule over all runs that passes, blocks or stays inconclusive and says how many runs a pass would need, or buys rounds up to a money limit (`max_spend_usd`); the rule on checks, read once, with critical and minor checks; a comment on every pull or merge request, cost and latency budgets, traces of agent runs, checks over the answer and the trace, any program as a pipeline, and a [dashboard](#dashboard) of the runs. Three projects use the gate, each in its own repository: [receipt-intake](https://github.com/Ilya-Grigoryev/receipt-intake) reads seller, date, address and total from receipt scans for a bookkeeping team (test receipts from [SROIE](https://rrc.cvc.uab.es/?ch=13), ICDAR 2019), from the OCR text or from the scan; [workbench-support](https://github.com/Ilya-Grigoryev/workbench-support) is the support agent of a coworking space, with tools on its booking system and its own test cases, alone on a ticket or in a chat with a simulated user; [telecom-support](https://github.com/Ilya-Grigoryev/telecom-support) is a mobile carrier's support agent built on the telecom domain of [tau2-bench](https://github.com/sierra-research/tau2-bench): tau2's agent, tools, tasks and evaluator, unchanged.
+Work in progress. Built: two rules on the mean, the naive one (one run per version against a fixed threshold, the default) and a betting rule over all runs that passes, blocks or stays inconclusive and says how many runs a pass would need, or buys rounds up to a money limit (`max_spend_usd`); the rule on checks, a permutation test over whole runs, read once, with critical and minor checks; a comment on every pull or merge request, cost and latency budgets, traces of agent runs, checks over the answer and the trace, any program as a pipeline, and a [dashboard](#dashboard) of the runs. Three projects use the gate, each in its own repository: [receipt-intake](https://github.com/Ilya-Grigoryev/receipt-intake) reads seller, date, address and total from receipt scans for a bookkeeping team (test receipts from [SROIE](https://rrc.cvc.uab.es/?ch=13), ICDAR 2019), from the OCR text or from the scan; [workbench-support](https://github.com/Ilya-Grigoryev/workbench-support) is the support agent of a coworking space, with tools on its booking system and its own test cases, alone on a ticket or in a chat with a simulated user; [telecom-support](https://github.com/Ilya-Grigoryev/telecom-support) is a mobile carrier's support agent built on the telecom domain of [tau2-bench](https://github.com/sierra-research/tau2-bench): tau2's agent, tools, tasks and evaluator, unchanged.
 
 [`docs/design.md`](docs/design.md) describes the parts, the flow of a merge request and the record of a run.
 
@@ -89,7 +89,7 @@ uv run --env-file .env llm-release-gate run --config configs/sroie-image.yaml --
 
 The first gate compares one run per version: it blocks when the candidate's mean score is lower than the base's by more than a threshold, 5 points by default (`--relative` reads it as a percentage of the base mean). It pairs the two files case by case and refuses files with different set hashes, different scorer versions or cases missing from one side. `--golden` rescores both sides from their saved answers with the current scorer, without calling the model.
 
-The rule on checks reads every run: per case and check, Fisher's exact test compares how often the check passed in each version (one-sided, at half of `alpha`, 0.025 by default; Bonferroni over the checks that can reach significance, after Tarone). A check that got significantly worse gives `quality fail` whatever the mean did; `--checks report` (`checks: report` in `gate.yaml`) only lists it. With one run of each version no check can reach significance: at the default `alpha` a single broken check can block from 4 runs of each, several broken at once need more (the correction counts every check that changed or varies), and the comment says when no break can be significant.
+The rule on checks reads every run, up to 10 of each version, with a permutation test over whole runs. A run is every check of every case at one repetition, so checks that fail together stay together. The test splits the runs between the versions again in every possible way (from 7 runs of each: the real split and 1999 random ones, seed 0) and takes, in each split, the smallest one-sided Fisher p over the checks. The gate names a check when it passed less often and at most half of `alpha` (0.025 by default) of the splits give some check a p as small as its own (step-down, Westfall and Young). A named check gives `quality fail` whatever the mean did; `--checks report` (`checks: report` in `gate.yaml`) only lists it. Checks broken in every run fail in one pattern, so any number of them can block. With one run of each version no check can block: at the default `alpha` a check broken in every run can block from 4 runs of each, at 4 one check that varies in another pattern stops it, and the comment says both.
 
 `--prices` takes a YAML of `model: [input, output]` in USD per 1M tokens, or `[input, output, cached input]`, and adds what the decision cost: every successful call of both runs. An agent resends the whole dialog on every call, so most of its input is billed as cached; without the third price, cached tokens cost the full input price. For a traced record that means every model step, the user simulator's included.
 
@@ -197,7 +197,7 @@ apply to every pipeline, and a pipeline's own win:
 | `k` | runs per case and version, default 1; the naive rule reads the first run, the betting rule, the rule on checks and budgets all; ignored with `max_spend_usd` |
 | `max_spend_usd` | instead of `k`, with `mean: betting` and `prices`: the gate buys rounds until it decides or the next one would not fit in this many USD per job ([below](#adaptive-runs-a-money-limit-instead-of-k)) |
 | `delta` | points of mean score the candidate may lose, default 5 |
-| `alpha` | the bound on how often the gate blocks a candidate that is no worse, default 0.05, split between the rules; the naive rule has none ([below](#how-often-the-gate-may-be-wrong)) |
+| `alpha` | how often the gate may block a candidate that is no worse, default 0.05, split between the rules; the naive rule takes no share ([below](#how-often-the-gate-may-be-wrong)) |
 | `mean` | `naive` (default): block when the first run's mean drops by more than `delta`; `betting`: pass when the runs show the loss is under `delta`, block when they show it is over, otherwise inconclusive with the number of runs a pass needs (from 2 runs; with δ 5 and 50 cases, a candidate that never differs from the base passes after 2, and noise needs more) |
 | `checks` | `block` (default): a check that got significantly worse over the runs blocks; `report`: it is only listed |
 | `levels` | `critical: [ids]` block even under `checks: report` and lead the comment; `minor: [ids]` stay out of the case score and only warn (⚠️ in the title, a CI annotation) when significantly worse, as normal checks under `checks: report` do once `levels` is set; `cases: {pattern: level}` for a case's checks, and a `minor` case leaves the mean. Ids take shell patterns (`assert-*`); a pattern that matches no check is named in the comment |
@@ -209,16 +209,22 @@ apply to every pipeline, and a pipeline's own win:
 
 ### How often the gate may be wrong
 
-Under `mean: betting`, `alpha` bounds how often the gate blocks a candidate that is no worse than the base. Each of
+Under `mean: betting`, `alpha` is how often the gate may block a candidate that is no worse than the base. Each of
 the two rules can block on its own, so the gate splits `alpha` between them: half to the betting rule on the mean, half
 to the rule on checks. If no check can block (`checks: report` without `critical` levels), the rule on the mean gets
-all of it. The betting rule's share bounds a second error: a candidate that lost more than `delta` and passes. Raise
-`alpha` to decide sooner, and more such losses pass. The naive rule has no bound of either kind; under `mean: naive`
-the rule on checks gets its half and the rest goes unused.
+all of it. The betting rule's share also limits a second error: a candidate that lost more than `delta` and passes.
+Raise `alpha` to decide sooner, and more such losses pass. The naive rule takes no share; under `mean: naive` the rule
+on checks gets its half and the rest goes unused.
+
+Each rule keeps its share under its own assumption. The betting rule needs runs that go wrong independently of each
+other. The rule on checks needs the runs of both versions to be interchangeable, as they are when the candidate behaves
+like the base; then its share holds exactly. A candidate that fixed some checks, or changed which checks fail
+together, is outside that argument: in a simulation of such candidates (up to 10 runs of each version) the rule
+blocked at most 1.86 % of them at a share of 2.5 %. No proof covers these cases.
 
 A lower `alpha` means fewer wrong blocks and wrong passes, and more runs before the gate decides. At `delta` 5:
 
-| `alpha` | Each rule's share: false blocks, and missed losses for the betting rule | A check broken in every run can block from | Fully broken checks that can still block at `k: 5` | Runs of each version a pass needs when nothing changed, 10 / 30 / 50 cases | With `max_spend_usd`, the round that reads the checks |
+| `alpha` | Each rule's share: false blocks, and missed losses for the betting rule | A check broken in every run can block from | Patterns of 5 passes in 10 runs that can still block at `k: 5` | Runs of each version a pass needs when nothing changed, 10 / 30 / 50 cases | With `max_spend_usd`, the round that reads the checks |
 |---|---|---|---|---|---|
 | 0.01 | 0.005 | `k: 5` | 1 | 14 / 5 / 3 | 5 |
 | 0.025 | 0.0125 | `k: 5` | 3 | 12 / 4 / 3 | 5 |
@@ -226,8 +232,12 @@ A lower `alpha` means fewer wrong blocks and wrong passes, and more runs before 
 | 0.1 | 0.05 | `k: 3` | 12 | 8 / 3 / 2 | 5 |
 
 The table assumes checks that may block. With none, the rule on the mean gets all of `alpha`: its runs are in the row
-whose share equals your `alpha`, the 0.1 row at the default. The fourth column is a limit of Tarone's correction: when more checks than that break in
-every run, it blocks none of them, and the rule on the mean has to catch the break. The comment states the split and
+whose share equals your `alpha`, the 0.1 row at the default. The fourth column is the test's limit. At `k: 5` the 10 runs of a check split between the versions in 252 ways, and a
+check that passed in all 5 base runs and failed in all 5 candidate runs looks worst in one of them. Every check broken
+that way shares that split, so any number of them blocks. Each other check that passes in 5 of the 10 runs in another
+pattern, broken or noisy, adds a split as bad; past the column's number, no check blocks. At `k: 4` the default share
+allows only the real split, so one check that varies in another pattern stops a break: the rule on checks is weak
+there, and the comment says so. The comment states the split and
 the range's level. If no check could block with the pipeline's `k` and `alpha`, `pr` says so before the runs and names
 the `k` or `alpha` that would let it.
 
@@ -245,7 +255,7 @@ max_spend_usd: 5   # per pipeline and job; give it room, see below
 - **Round 5 reads the checks, once.** The rule on checks is a test with one look, so the gate reads it on rounds 1 to
   5 (more when `alpha` is below about 0.008, 2 when no check can block) and never again; rounds bought later go to the rule on the mean, which stays
   valid however many rounds it reads. A pass therefore comes at round 5 at the earliest while checks may block; under
-  `checks: report` without `critical` levels the gate can pass from round 2, and Fisher on 2 + 2 runs cannot flag a
+  `checks: report` without `critical` levels the gate can pass from round 2, and the test on 2 + 2 runs cannot flag a
   reported or `minor` check. Cost and latency budgets read rounds 1 to 5 as well.
 - **How rounds are bought.** A round is one run of every case by both versions, the two in the same job. The first
   round runs alone to learn what a round costs. Rounds 2 to 5 follow as one batch, then one at a time, up to 60. A

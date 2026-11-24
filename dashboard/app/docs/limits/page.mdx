@@ -53,9 +53,9 @@ had a spread of 30 points over 11 runs, and twice the same version, run as base 
 10 points. So a block or a pass can be noise. With `base_max_age_hours` above 0, requests within the age limit compare
 with the same base runs, so one noisy base run moves all their verdicts. The chance of an answer may also move between
 sessions: on 16.11.2026 a check on a receipt passed in all 5 runs of one job and failed in all 5 of a job hours
-later, twice, on an unchanged version, and runs of one job then share that chance. The rules count each run as fresh evidence, so their bounds on wrong verdicts are
+later, twice, on an unchanged version, and runs of one job then share that chance. The rules count each run as fresh evidence, so their shares of wrong verdicts are
 optimistic until that is measured. A loss smaller than `delta` passes, so small losses add up unseen. The
-rule on checks reads every run but cannot block on one run per version: at the default `alpha` a single broken check needs 4 runs of each.
+rule on checks reads every run but cannot block on one run per version: at the default `alpha` a check broken in every run needs 4 runs of each.
 
 `mean: betting` reads every run and answers `inconclusive` when the runs show neither a pass nor a block. The comment
 then says how many runs a pass needs at least. With few cases that number is large, noise adds more, and every run

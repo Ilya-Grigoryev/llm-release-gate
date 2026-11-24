@@ -41,10 +41,10 @@ On every pull request that changes the version, the gate:
 3. takes each version's mean score and computes the difference in points: 100 × (candidate mean − base mean);
 4. blocks with `quality fail` (exit 10) when the difference is below −`delta`, 5 points by default;
 5. blocks with `quality fail` too when a check passed significantly less often in the candidate's runs than in the
-   base's (Fisher's exact test per case and check, one-sided, at half of [`alpha`](#how-often-the-gate-may-be-wrong),
-   0.025 by default, corrected for the number of checks that could show it). With one run of each version this cannot
-   happen: at the default `alpha` a single broken check can block from 4 runs of each, several broken at once need more. `checks: report` only lists it, and [levels](#critical-and-minor-checks) set
-   which checks may block;
+   base's ([the rule on checks](#the-rule-on-checks-whole-runs), at half of
+   [`alpha`](#how-often-the-gate-may-be-wrong), 0.025 by default). With one run of each version this cannot happen: at
+   the default `alpha` a check broken in every run can block from 4 runs of each. `checks: report` only lists it, and
+   [levels](#critical-and-minor-checks) set which checks may block;
 6. checks the [budgets](#budgets-cost-and-latency), if you set any.
 
 ```yaml
@@ -59,6 +59,34 @@ delta: 5    # block when the mean score drops by more than 5 points
 The rules come from the target branch's `gate.yaml`, so raising `delta` in a pull request does not loosen its own gate
 ([Whose rules apply](/docs/how-it-works#whose-rules-apply)). Outside CI, the `gate` command
 ([Reference](/docs/reference)) gives the same verdict from two files of runs.
+
+## The rule on checks: whole runs
+
+The rule on checks asks whether a check passed less often in the candidate's runs than chance alone would explain. It
+looks at whole runs: a run is every check of every case at one repetition, so checks that fail together stay together.
+
+- **Split the runs again.** With 5 runs of each version there are 252 ways to label 5 of the 10 runs "base" and the
+  rest "candidate". From 7 runs of each the gate takes the real labels and 1999 random ones, with seed 0, so the same
+  runs give the same answer.
+- **Score each split.** For every split the gate takes each check's one-sided Fisher p (how unlikely so few candidate
+  passes are) and the smallest p over the checks.
+- **Name the checks.** The gate names a check when it passed less often and at most half of `alpha`, 0.025 by default,
+  of the splits give some check a p as small as its own (step-down, Westfall and Young). The comment lists the named
+  checks with that share as p.
+
+A check that passed in all 5 base runs and failed in all 5 candidate runs looks worst in only one split, the real one,
+and every check broken that way shares that split: 1, 10 or 30 such checks block alike. Other checks that pass in 5 of
+the 10 runs in another pattern each add a split as bad; at the default `alpha` a break still blocks with up to 6 such
+splits ([the table](#how-often-the-gate-may-be-wrong)). With 4 runs of each version only the real split may be that
+bad, so one check that varies in another pattern stops a break: the comment calls the rule weak there. With 3 or fewer
+no check can block. The rule reads the first 10 runs of each version, as far as it was tested in simulation.
+
+The test is exact when the runs of both versions are interchangeable, as they are when the candidate behaves like the
+base. Two cases fall outside that argument: a candidate that fixed some checks, and one that changed which
+checks fail together. In a simulation of both, on noise from the author's applications and on harsher synthetic noise
+with up to 10 runs of each version, the rule blocked at most 1.86 % of such candidates at a share of 2.5 %. No proof
+covers these two cases. The rule catches small breaks spread over many checks less well; the comment then counts the
+checks that passed less often without naming them.
 
 ## The betting rule: every run, three answers
 
@@ -124,7 +152,7 @@ max_spend_usd: 5   # per pipeline and job; give it room, see below
 - **Round 5 reads the checks, once.** The rule on checks is a test with one look, so the gate reads it on rounds 1 to
   5 (more when `alpha` is below about 0.008, 2 when no check can block) and never again; rounds bought later go to the rule on the mean, which stays
   valid however many rounds it reads. A pass therefore comes at round 5 at the earliest while checks may block. Under
-  `checks: report` without `critical` levels the gate can pass from round 2, and Fisher on 2 + 2 runs cannot flag a
+  `checks: report` without `critical` levels the gate can pass from round 2, and the test on 2 + 2 runs cannot flag a
   reported or `minor` check. Cost and latency budgets read rounds 1 to 5 as well.
 - **How rounds are bought.** A round is one run of every case by both versions, the two in the same job. The first
   round runs alone to learn what a round costs. Rounds 2 to 5 follow as one batch, then one at a time, up to 60. A
@@ -154,7 +182,7 @@ a set more money or more cases.
 ## How often the gate may be wrong
 
 Each of the two rules can block on its own, so the gate's chance of blocking a candidate that is no worse adds up over
-both. Under `mean: betting`, `alpha` in `gate.yaml` bounds that sum, 0.05 by default, and the gate splits it:
+both. Under `mean: betting`, `alpha` in `gate.yaml` sets that sum, 0.05 by default, and the gate splits it:
 
 ```yaml
 alpha: 0.05   # the whole gate: 0.025 to the rule on the mean, 0.025 to the rule on checks
@@ -162,15 +190,16 @@ alpha: 0.05   # the whole gate: 0.025 to the rule on the mean, 0.025 to the rule
 
 - With `mean: betting` and checks that may block, each rule gets half.
 - If no check can block (`checks: report` without `critical` levels), the rule on the mean gets all of it.
-- The betting rule's share bounds both of its errors: a wrong block, and a wrong pass of a candidate that lost more
+- The betting rule's share covers both of its errors: a wrong block, and a wrong pass of a candidate that lost more
   than `delta`. Raising `alpha` to decide sooner lets more such losses pass.
-- The naive rule has no bound; under `mean: naive` the rule on checks gets its half and the rest goes unused.
+- The naive rule takes no share; under `mean: naive` the rule on checks gets its half and the rest goes unused.
 
-The comment says how the gate spent its `alpha`, for example "False blocks: at most α 0.05 for the gate, 0.025 for the
-rule on the mean and 0.025 for the rule on checks." A lower `alpha` needs more runs before the gate decides. At
-`delta` 5:
+Each rule keeps its share under its own assumption: runs that go wrong independently for the betting rule,
+interchangeable runs for the rule on checks ([The rule on checks](#the-rule-on-checks-whole-runs)). The comment says
+how the gate spent its `alpha`, for example "False blocks: α 0.05 for the gate, 0.025 to the rule on the mean and
+0.025 to the rule on checks." A lower `alpha` needs more runs before the gate decides. At `delta` 5:
 
-| `alpha` | Each rule's share: false blocks, and missed losses for the betting rule | A check broken in every run can block from | Fully broken checks that can still block at `k: 5` | Runs of each version a pass needs when nothing changed, 10 / 30 / 50 cases | With `max_spend_usd`, the round that reads the checks |
+| `alpha` | Each rule's share: false blocks, and missed losses for the betting rule | A check broken in every run can block from | Patterns of 5 passes in 10 runs that can still block at `k: 5` | Runs of each version a pass needs when nothing changed, 10 / 30 / 50 cases | With `max_spend_usd`, the round that reads the checks |
 |---|---|---|---|---|---|
 | 0.01 | 0.005 | `k: 5` | 1 | 14 / 5 / 3 | 5 |
 | 0.025 | 0.0125 | `k: 5` | 3 | 12 / 4 / 3 | 5 |
@@ -178,8 +207,9 @@ rule on the mean and 0.025 for the rule on checks." A lower `alpha` needs more r
 | 0.1 | 0.05 | `k: 3` | 12 | 8 / 3 / 2 | 5 |
 
 The table assumes checks that may block. With none, the rule on the mean gets all of `alpha`: its runs are in the row
-whose share equals your `alpha`, the 0.1 row at the default. The fourth column is a limit of Tarone's correction: when more checks than that break in every run, it blocks none of
-them, and the rule on the mean has to catch the break. If the pipeline's `k` is too small for any check to block at its
+whose share equals your `alpha`, the 0.1 row at the default. The fourth column is the test's limit: checks broken in
+every run share one split however many they are, and each other check that passes in 5 of the 10 runs in another
+pattern adds one; past that number no check blocks. If the pipeline's `k` is too small for any check to block at its
 `alpha`, `pr` says so in the job's log before the runs start and names the `k` or `alpha` that would let one block. Like `delta`, `alpha` comes from the target branch's `gate.yaml`. The last column is for [adaptive runs](#adaptive-runs-a-money-limit-instead-of-k).
 
 ## Critical and minor checks
@@ -209,9 +239,9 @@ matches no check of the set, so a typo cannot leave checks normal unnoticed. Whe
 position: in the author's telecom-support app, `assert-N` is the N-th assertion of each task, so `assert-1` is a
 different rule in each case.
 
-The rule on checks tests two families apart, each at half of `alpha` (0.025 by default) with its own correction: the
+The rule on checks tests two families apart, each at half of `alpha` (0.025 by default) with its own splits: the
 checks that may block (critical ones, and normal ones under `checks: block`) and the checks that only report (minor
-ones, and normal ones under `checks: report`). The second family never blocks, so it spends none of the gate's bound.
+ones, and normal ones under `checks: report`). The second family never blocks, so it spends none of the gate's `alpha`.
 Without `levels` nothing changes.
 
 ## Where the base's runs come from
