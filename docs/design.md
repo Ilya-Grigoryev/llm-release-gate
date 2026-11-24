@@ -178,8 +178,8 @@ runner's scorer is `hits(case, answer, trace=None)` (by default the run's trace,
   betting rule, half to the rule on checks; all to the betting rule when the set has no check that may block. The
   settings and the set decide which checks may block, the results never do, so the shares still add up to `alpha`. The
   naive rule takes no share; under it `alpha` covers the rule on checks. The betting rule's share also covers its wrong
-  pass. The comment states the split (`alpha_line`); `pr` warns before the runs when `k` is below `runs_to_block` at
-  the checks' share.
+  pass. The comment states the split (`alpha_line`); `pr` warns before the runs when the rule on checks cannot
+  block at `k` (`can_block`), naming the `k` from which it can at every larger one (`runs_to_block`).
 - **Built (D-032).** With `max_spend_usd` the gate buys rounds (`gate.plan`) until it decides or the next round does not
   fit, reads the checks once on rounds 1 to K_c (`gate.k_c`, `gate.look`), and a re-run continues with the request's
   own pairs of runs (`pr.resume`, `pinned.jsonl`, the cache's `-met-` files).
