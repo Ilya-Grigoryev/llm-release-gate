@@ -233,7 +233,9 @@ renaming a config file keeps the base. A pipeline the target branch lacks gives 
 runs (`gate --no-base`), for its score and budget, exit 0. The comment notes changed rules and a new pipeline. The set
 comes from the request (D-035, C′): `pr` compares the files that define it, as the target branch's `gate.yaml` names
 them, with the request's: git's ids of the files it tracks under `golden` (the target branch as committed, the request
-with uncommitted edits), the `manifest`, and the sets' case hashes when both trees hold the set (`prepare` may build it).
+with uncommitted edits; a submodule by its commit), the `manifest`, and the sets' case hashes when both trees hold the
+set (an input one side lacks is not compared). When the target branch has none of these, the comment says the gate
+cannot tell.
 A changed set turns an exit 0 (`pass`, `unchanged`, `no base version`) into `set changed`, exit 13: the comment names
 the cases added, removed and edited and the files, `verdict.json` gets `set_change`, and a person merges over the check.
 Other outcomes keep their code and get the note. The gate runs the request's code, workflow and lock file: it catches mistakes, not a hostile author. Equal hashes give `unchanged` (exit 0, no runs) when the two `gate.yaml` agree on `ignore` and on which files belong to which pipeline; a request that removes a pipeline exits 11;

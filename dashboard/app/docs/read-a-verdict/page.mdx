@@ -98,6 +98,7 @@ With `levels` in `gate.yaml` ([Critical and minor checks](/docs/how-it-decides#c
 | `booking` is new in gate.yaml … | See [No base version](#no-base-version). |
 | ⚙️ This request changes the gate's rules … | Nothing, unless the request should be judged by the new rules: then merge them first, in their own request. |
 | ✋ This request changes the test set … | Under a red title, review the named cases as code. Under ✋ set changed, see [Set changed](#set-changed). |
+| ⚠️ The target branch keeps the test set … neither in git nor under a manifest … | Commit the set, or pin it with a `manifest`: until then a request can edit its cases unseen. |
 | ❌ This request removes `faq` … | See [Inconclusive](#inconclusive). |
 | Base ran again: this job cannot read earlier runs … | Add `actions: read` to the job's `permissions`. |
 
@@ -160,18 +161,23 @@ Two things give `inconclusive` (exit 11):
 
 ### Set changed
 
-The request changes the pipeline's test set, and the gate compared the versions on the request's cases. On those cases
-the job would pass (the verdict follows "Verdict on the request's cases"), but a request that deletes or loosens the
-cases that catch it would pass the same way. So the job fails with exit 13 until a maintainer reviews the change and
-merges over the check.
+The request changes the pipeline's test set. The gate compared the versions on the request's cases (or ran nothing, if
+the version is unchanged), and the job would pass ("Verdict on the request's cases" gives that verdict). A request that
+deletes or loosens the cases that catch it would pass the same way, so the job fails with exit 13 until a maintainer
+reviews the change and merges over the check.
 
-The line under the title names what changed: the cases added, removed and edited, then the files. The gate compares
-what the target branch's `gate.yaml` names: the files git tracks under `golden` (inputs too) and the `manifest`. A
-reformatted case counts, and so does a branch that lacks cases merged to the target branch after it forked: the gate
-compares the two trees, so update the branch. For a set kept out of git, such as one a CI step downloads, the gate sees
-a change in the manifest, or in the set itself when `prepare` builds it in both trees; pin such a set with a
-`manifest`. A request that changes code and cases together gets `set changed` when the code passes. To have the code
-judged on reviewed cases, merge the case edits first, in their own request.
+The line under the title names what changed: the cases added, removed and edited, a dropped manifest, then the files.
+The gate compares what the target branch's `gate.yaml` names: the files git tracks under `golden` (inputs too, a
+submodule by its commit) and the `manifest`. A reformatted case counts. An input that one checkout lacks, such as one a
+CI step downloads, is not compared. A set out of git, one that a CI step downloads or `prepare` builds, shows a change
+only in its manifest: `prepare` comes from the request, so it can change both sets alike. Pin such a set with a
+`manifest`; without one the comment says the gate cannot tell.
+
+The gate compares two trees, so a branch that lacks cases merged to the target branch after it forked gets
+`set changed` too, and so does a re-run of an old job, which reads the target branch as it is now but the request as
+it was. Update the branch and let the job run again. A request that changes code and cases together gets
+`set changed` when the code passes; to have the code judged on reviewed cases, merge the case edits first, in their
+own request.
 
 ### Infra error
 

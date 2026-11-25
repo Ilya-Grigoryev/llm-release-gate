@@ -18,8 +18,9 @@ does stop a request loosening its own rules:
 - A request that removes or renames a pipeline fails as `inconclusive` (exit 11).
 - Both versions run on the request's test set. A request that changes the set's files, as the target branch names
   them (the files git tracks under `golden`, the `manifest`), fails as `set changed` (exit 13) where it would pass,
-  until a maintainer reviews the cases and merges over the check. The code of `function` checks, and a set that a CI
-  step fetches without a manifest, can still change unseen.
+  until a maintainer reviews the cases and merges over the check. A submodule in the set counts by its commit. The
+  code of `function` checks can still change unseen, and so can a set without a manifest that a CI step downloads or
+  `prepare` builds: `prepare` comes from the request, so it can change both sets alike.
 
 The candidate's config and `prepare` come from the request. Protect the workflow, `gate.yaml`, the test
 sets and the lock file with code owners, turn on "Require review from Code Owners" in the target branch's protection

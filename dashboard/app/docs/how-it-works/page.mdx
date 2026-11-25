@@ -92,7 +92,7 @@ cases added, removed and edited; a maintainer reviews them and merges over the c
 compare with.
 
 A request that removes or renames a pipeline fails as [`inconclusive`](/docs/read-a-verdict#inconclusive) (exit 11),
-and every other pipeline that would exit 0 exits 11 too. The gate catches mistakes, not a hostile author
+and every other pipeline that would exit 0 or 13 exits 11 too. The gate catches mistakes, not a hostile author
 ([Limits](/docs/limits#it-is-not-a-security-control)).
 
 ## Cases
