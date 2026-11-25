@@ -72,14 +72,22 @@ export type Verdict = {
   runs_per_case?: { base: number; candidate: number };
   mean?: { lower: number; upper: number; delta: number; decided_at: number | null } | null;
   /** `pr` only: what the request changed in the test set (D-035); `outcome` is the verdict on the request's set. */
-  set_change?: { files: string[]; added: string[]; removed: string[]; edited: string[]; outcome: string } | null;
+  set_change?: {
+    files: string[];
+    added: string[];
+    removed: string[];
+    edited: string[];
+    manifest?: "changed" | "removed" | null;
+    outcome: string;
+  } | null;
 };
 
-/** A test-set change in words, as the comment names it: the cases added, removed and edited, else the files. */
+/** A test-set change in words, as the comment names it: the cases added, removed and edited, a dropped manifest, else the files. */
 export function setChange(c: NonNullable<Verdict["set_change"]>): string {
   const named = (xs: string[]) => xs.slice(0, 5).join(", ") + (xs.length > 5 ? ` and ${xs.length - 5} more` : "");
-  const cases = (["added", "removed", "edited"] as const).filter((k) => c[k].length).map((k) => `${k}: ${named(c[k])}`);
-  return cases.length ? cases.join("; ") : `files: ${named(c.files)}`;
+  const parts = (["added", "removed", "edited"] as const).filter((k) => c[k].length).map((k) => `${k}: ${named(c[k])}`);
+  if (c.manifest === "removed") parts.push("manifest dropped");
+  return parts.length ? parts.join("; ") : `files: ${named(c.files)}`;
 }
 
 export type Parsed = { verdict: Verdict | null; comment: string | null; base: Rec[]; candidate: Rec[] };

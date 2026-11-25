@@ -88,6 +88,7 @@ describe("parseArtifact", () => {
     const many = ["a", "b", "c", "d", "e", "f", "g"];
     expect(setChange({ ...change, added: many, edited: [] })).toBe("added: a, b, c, d, e and 2 more");
     expect(setChange({ ...change, edited: [] })).toBe("files: golden/a.yaml");
+    expect(setChange({ ...change, files: ["golden/a.yaml"], edited: [], manifest: "removed" })).toBe("manifest dropped");
   });
 
   it("calls a run without a verdict an infra error", () => {

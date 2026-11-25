@@ -177,6 +177,7 @@ def test_a_pass_on_a_changed_test_set_needs_a_person(repo):
         "added": [],
         "removed": [],
         "edited": ["synth-001"],
+        "manifest": None,
         "outcome": "pass",
     }
     comment = (out / "comment.md").read_text()
@@ -228,9 +229,14 @@ def test_a_request_that_changes_only_the_test_set_needs_a_person(repo):
     code, out = gate(repo)
     assert code == pr.SET_CHANGED and not list(out.glob("*.jsonl"))
     assert verdict_of(out)["set_change"]["outcome"] == "unchanged"
+    comment = (out / "comment.md").read_text()
+    assert (
+        "The version is unchanged, but later requests are judged on these cases."
+        in comment
+    )
     assert (
         "Verdict on the request's cases: ⏭ unchanged.\n\nThis request does not change"
-        in (out / "comment.md").read_text()
+        in comment
     )
 
 
@@ -322,6 +328,73 @@ def test_a_set_out_of_git_is_compared_by_its_manifest(repo):
     assert code == pr.SET_CHANGED
     change = verdict_of(out)["set_change"]
     assert change["files"] == ["manifest.yaml"] and change["added"] == ["synth-002"]
+    assert change["manifest"] == "changed"
+    version(repo, "answer-again", rules.replace(", manifest: manifest.yaml", ""))
+    code, out = gate(
+        repo
+    )  # no manifest names the cases any more: none is called removed
+    change = verdict_of(out)["set_change"]
+    assert code == pr.SET_CHANGED and change["manifest"] == "removed"
+    assert (change["added"], change["removed"]) == ([], [])
+    assert (
+        "It drops the set's manifest. Files: `manifest.yaml`."
+        in (out / "comment.md").read_text()
+    )
+
+
+def test_inputs_out_of_git_are_no_change(repo):
+    (repo / ".gitignore").write_text(
+        "*.png\n"
+    )  # fetched by a CI step, in the request's checkout only
+    twin = (repo / "golden" / "synth-001.yaml").read_text()
+    (repo / "golden" / "synth-002.yaml").write_text(
+        twin.replace("id: synth-001", "id: synth-002").replace(
+            "inputs/synth-001.jpg", "inputs/scan.png"
+        )
+    )
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "a case with an input out of git")
+    (repo / "golden" / "inputs" / "scan.png").write_bytes(b"\x89PNG")
+    (repo / "README.md").write_text("docs only\n")
+    code, out = gate(repo)
+    assert code == pr.PASS and verdict_of(out)["set_change"] is None
+
+
+def test_a_submodule_in_the_set_counts_by_its_commit(repo, tmp_path):
+    sub = tmp_path / "sub"
+    sub.mkdir()
+    git(sub, "init", "-q")
+    (sub / "notes.txt").write_text("1\n")
+    git(sub, "add", "-A")
+    git(sub, "commit", "-q", "-m", "1")
+    git(
+        repo,
+        "-c",
+        "protocol.file.allow=always",
+        "submodule",
+        "add",
+        "-q",
+        str(sub),
+        "golden/vendor",
+    )
+    git(repo, "commit", "-q", "-m", "a submodule in the set")
+    assert gate(repo)[0] == pr.PASS
+    vendor = repo / "golden" / "vendor"
+    (vendor / "notes.txt").write_text("2\n")
+    git(vendor, "commit", "-q", "-am", "2")  # the request moves the submodule
+    code, out = gate(repo)
+    assert code == pr.SET_CHANGED and verdict_of(out)["set_change"]["files"] == [
+        "golden/vendor"
+    ]
+
+
+def test_a_set_outside_the_repository_cannot_be_compared_and_says_so(repo):
+    shutil.copytree(repo / "golden", repo.parent / "outside")
+    commit_rules(repo, GATE.replace("golden: golden", "golden: ../outside"))
+    version(repo, "answer-again", GATE.replace("golden: golden", "golden: ../outside"))
+    code, out = gate(repo)
+    assert code == pr.PASS and verdict_of(out)["set_change"] is None
+    assert "neither in git nor under a manifest" in (out / "comment.md").read_text()
 
 
 def test_the_worst_outcome_ranks_a_changed_set_below_any_other_failure(repo):

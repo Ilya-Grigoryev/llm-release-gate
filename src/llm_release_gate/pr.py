@@ -53,7 +53,7 @@ from llm_release_gate.gate import (
 )
 from llm_release_gate.golden import case_hashes, check, load_cases
 from llm_release_gate.runner import read_records
-from llm_release_gate.version import GITLINK, ids_on_disk, own_files
+from llm_release_gate.version import GITLINK, git, ids_on_disk, own_files, root_of
 
 SYNC = [
     "uv",
@@ -749,17 +749,16 @@ def tracked(directory: Path, path: str, committed: bool) -> dict[str, str]:
 
     if committed:
         rows = [e.split("\t", 1) for e in listing("ls-tree", "-z", "-r", "HEAD")]
-        found = {n: i.split()[2] for i, n in rows if not i.startswith(GITLINK)}
+        found = {n: i.split()[2] for i, n in rows}  # a submodule by its commit
     else:
         gone = set(listing("ls-files", "-z", "--deleted"))
         rows = [e.split("\t", 1) for e in listing("ls-files", "-z", "--stage")]
-        found = {
-            n: i.split()[1]
-            for i, n in rows
-            if not i.startswith(GITLINK) and n not in gone
-        }
-        edited = [n for n in listing("ls-files", "-z", "--modified") if n in found]
-        found |= ids_on_disk(directory, edited)
+        found = {n: i.split()[1] for i, n in rows if n not in gone}
+        links = {n for i, n in rows if i.startswith(GITLINK)}
+        moved = [n for n in listing("ls-files", "-z", "--modified") if n in found]
+        found |= ids_on_disk(directory, [n for n in moved if n not in links])
+        for n in (n for n in moved if n in links):  # a submodule checked out elsewhere
+            found[n] = (git(directory / n, "rev-parse", "HEAD") or found[n]).strip()
     prefix = "" if path == "." else path + "/"
     return {n.removeprefix(prefix) if n != path else "": i for n, i in found.items()}
 
@@ -771,54 +770,89 @@ def manifest_ids(path: Path) -> set[str] | None:
         return None
 
 
+def inside(directory: Path, path: str) -> bool:
+    """Whether PATH, from DIRECTORY, lies in DIRECTORY's git repository."""
+    top = root_of(directory)
+    full = Path(os.path.normpath(directory.resolve() / path))
+    return top is not None and full.is_relative_to(top)
+
+
+def differs(a: dict, b: dict) -> bool:
+    """Whether a case differs between two sets; an input one side cannot read is not compared."""
+    inputs = ((x, b["inputs"].get(n)) for n, x in a["inputs"].items())
+    return a["case"] != b["case"] or any(
+        None not in (x, y) and x != y for x, y in inputs
+    )
+
+
 def set_change(
     own: project.Pipeline | None,
     p: project.Pipeline,
     base: Path | None,
     candidate: Path,
-) -> dict | None:
+) -> tuple[dict | None, str | None]:
     """What the request changes in the pipeline's test set (D-035), against the set the target branch's gate.yaml
-    names: its tracked files, its manifest, and the set itself when both trees hold it (`prepare` may build it). None if
-    the target branch defines no set of the pipeline, or the request changes none of it."""
+    names: its tracked files, its manifest, and the set itself when both trees hold it; None if the target branch
+    defines no set of the pipeline or the request changes none of it. And a note when the gate cannot tell."""
     if base is None or own is None:
-        return None
+        return None, None
+
+    def ids(tree: Path, path: str, committed: bool) -> dict[str, str]:
+        path = posixpath.normpath(path)
+        return tracked(tree, path, committed) if inside(tree, path) else {}
+
     old_dir, new_dir = posixpath.normpath(own.golden), posixpath.normpath(p.golden)
-    files = []
-    old = tracked(base, old_dir, True)
+    files, manifest = [], None
+    old = ids(base, old_dir, True)
     if old:
-        new = tracked(candidate, new_dir, False)
+        new = ids(candidate, new_dir, False)
         files += [
             posixpath.join(new_dir if k in new else old_dir, k)
             for k in sorted(old.keys() | new.keys())
             if old.get(k) != new.get(k)
         ]
-    was = own.manifest and tracked(base, posixpath.normpath(own.manifest), True).get("")
+    was = own.manifest and ids(base, own.manifest, True).get("")
     if was:
-        now = p.manifest and tracked(candidate, posixpath.normpath(p.manifest), False)
-        if not now or now.get("") != was:
+        now = p.manifest and ids(candidate, p.manifest, False).get("")
+        if now != was:
             files.append(p.manifest or own.manifest)
+            manifest = "changed" if now else "removed"
     old_set, new_set = base / own.golden, candidate / p.golden
     old_cases = case_hashes(old_set) if old_set.is_dir() else {}
     new_cases = case_hashes(new_set) if old_cases and new_set.is_dir() else None
-    if not (old or was or old_cases) or not (
-        files or (new_cases is not None and old_cases != new_cases)
-    ):
-        return None
-    if new_cases is None:  # the target branch holds no set: its manifests name the ids
-        old_cases, new_cases = (
-            dict.fromkeys(manifest_ids(d / m) or ()) if m else {}
+    if not (
+        old or was or old_cases
+    ):  # outside git (another repository, a CI step's download), no manifest
+        return None, (
+            f"⚠️ The target branch keeps the test set of `{p.name}` neither in git nor under a manifest, so the gate "
+            "cannot tell whether this request changes it."
+        )
+    # the target branch holds no set: a changed manifest names the ids
+    if new_cases is None:
+        old_ids, new_ids = (
+            manifest_ids(d / m) if manifest == "changed" else None
             for d, m in ((base, own.manifest), (candidate, p.manifest))
         )
-    return {
-        "files": files,
-        "added": sorted(new_cases.keys() - old_cases.keys()),
-        "removed": sorted(old_cases.keys() - new_cases.keys()),
-        "edited": sorted(
+        if old_ids is None or new_ids is None:
+            old_ids = new_ids = set()
+        added, removed, edited = new_ids - old_ids, old_ids - new_ids, set()
+    else:
+        added = new_cases.keys() - old_cases.keys()
+        removed = old_cases.keys() - new_cases.keys()
+        edited = {
             k
             for k in old_cases.keys() & new_cases.keys()
-            if old_cases[k] != new_cases[k]
-        ),
-    }
+            if differs(old_cases[k], new_cases[k])
+        }
+    if not (files or added or removed or edited):
+        return None, None
+    return {
+        "files": files,
+        "added": sorted(added),
+        "removed": sorted(removed),
+        "edited": sorted(edited),
+        "manifest": manifest,
+    }, None
 
 
 def named(items: list[str], n: int = 5) -> str:
@@ -834,6 +868,7 @@ def described(name: str, change: dict) -> str:
     return (
         f"✋ This request changes the test set of `{name}`."
         + (f" Cases {'; '.join(cases)}." if cases else "")
+        + (" It drops the set's manifest." if change["manifest"] == "removed" else "")
         + (f" Files: {named(change['files'])}." if change["files"] else "")
     )
 
@@ -846,10 +881,15 @@ def settle(dest: Path, name: str, change: dict | None, code: int) -> int:
     if change and code == PASS:
         title, _, rest = (dest / "comment.md").read_text().partition("\n")
         was = title.removeprefix("**Release gate: ").removesuffix("**")
+        why = (
+            "The version is unchanged, but later requests are judged on these cases."
+            if verdict["outcome"] == "unchanged"
+            else "The gate judges the request on its own cases, so a request could pass by editing the cases that "
+            "would catch it."
+        )
         (dest / "comment.md").write_text(
-            f"**Release gate: ✋ set changed**\n\n{described(name, change)} The gate compares the versions on the "
-            "request's cases, so a request could pass by editing the cases that would catch it. Review the edits, "
-            f"then merge over the check.\n\nVerdict on the request's cases: {was}.\n{rest}"
+            f"**Release gate: ✋ set changed**\n\n{described(name, change)} {why} Review the edits, then merge over "
+            f"the check.\n\nVerdict on the request's cases: {was}.\n{rest}"
         )
         verdict |= {"outcome": "set changed", "exit_code": SET_CHANGED}
         code = SET_CHANGED
@@ -1075,9 +1115,10 @@ def main(argv: list[str] | None = None) -> int:
                 golden, set_hash = checked_set(p, candidate, dest)
                 if problem:
                     raise problem
-                change = set_change(
+                change, note = set_change(
                     rules and rules.pipelines.get(name), p, base, candidate
                 )
+                notes += [note] if note else []
                 code = one(
                     p,
                     golden,

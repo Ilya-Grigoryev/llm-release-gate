@@ -83,17 +83,24 @@ def validate(directory: Path) -> tuple[str | None, list[str]]:
     return (None if errors else canonical_hash(parts)), errors
 
 
-def case_hashes(directory: Path) -> dict[str, str]:
-    """Each case's id and a hash of its content and inputs, without checking the case: for naming what a request
-    changes. A file that does not parse is left out."""
+def case_hashes(directory: Path) -> dict[str, dict]:
+    """Each case's id with the hash of its content and those of its inputs (None: unreadable), without checking the
+    case: for naming what a request changes. A file that does not parse is left out."""
+
+    def readable(path: Path) -> str | None:
+        try:
+            return file_hash(path)
+        except OSError:  # an input out of git, fetched in one checkout only
+            return None
+
     found = {}
     for path in case_files(directory):
         try:
             raw = yaml.safe_load(path.read_text())
             inputs = {
-                n: file_hash(path.parent / f) for n, f in dict(raw["input"]).items()
+                n: readable(path.parent / f) for n, f in dict(raw["input"]).items()
             }
-            found[str(raw["id"])] = canonical_hash({"case": raw, "inputs": inputs})
+            found[str(raw["id"])] = {"case": canonical_hash(raw), "inputs": inputs}
         except (OSError, ValueError, LookupError, TypeError, yaml.YAMLError):
             continue
     return found
